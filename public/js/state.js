@@ -7,6 +7,7 @@ export const state = {
   botOnline: false,
   iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
   relay: false,            // настроен ли TURN на сервере
+  forceRelay: false,       // сервер требует ходить только через TURN (iceTransportPolicy: 'relay')
   publicUrl: null,         // публичная ссылка (npm run share)
   currentServerId: null,
   currentChannelId: null,
@@ -47,6 +48,15 @@ export function notify(...topics) {
       try { f(); } catch (e) { console.warn('[render]', e); }
     }
   });
+}
+
+/** Сетевая часть GET /api/config (ICE/TURN, публичная ссылка). Вызывается при старте и перед voice:join. */
+export function applyNetConfig(cfg) {
+  if (!cfg) return;
+  if (Array.isArray(cfg.iceServers)) state.iceServers = cfg.iceServers;
+  state.relay = !!cfg.relay;
+  state.forceRelay = !!cfg.forceRelay;
+  state.publicUrl = cfg.publicUrl || null;
 }
 
 /* ---------- селекторы ---------- */

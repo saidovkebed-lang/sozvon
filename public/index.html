@@ -4,9 +4,19 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="color-scheme" content="dark">
-  <meta name="theme-color" content="#1e1f24">
+  <meta name="theme-color" content="#12151b">
+  <meta name="description" content="Созвон — голосовые каналы, чаты, стримы экрана и музыка для друзей">
+  <meta name="application-name" content="Созвон">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Созвон">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="format-detection" content="telephone=no">
   <title>Созвон</title>
+  <link rel="manifest" href="/manifest.webmanifest">
   <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="/assets/icons/icon-192.png" type="image/png" sizes="192x192">
+  <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png" sizes="180x180">
   <link rel="stylesheet" href="/css/tokens.css">
   <link rel="stylesheet" href="/css/app.css">
 </head>
@@ -94,6 +104,9 @@
         </button>
         <button class="icon-btn" id="btn-deafen" type="button" aria-label="Выключить звук" aria-pressed="false" title="Звук">
           <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-headphones"/></svg>
+        </button>
+        <button class="icon-btn" id="btn-install" type="button" aria-label="Установить приложение" title="Установить приложение" hidden>
+          <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-download"/></svg>
         </button>
         <button class="icon-btn" id="btn-logout" type="button" aria-label="Выйти из аккаунта" title="Выйти">
           <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-logout"/></svg>

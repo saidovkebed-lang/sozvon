@@ -1,5 +1,5 @@
 // Управление голосовым подключением: join/leave, mute/deafen, экран, камера.
-import { state, notify, getChannel } from '../state.js';
+import { state, notify, getChannel, applyNetConfig } from '../state.js';
 import { emit, emitAck, socketId } from '../socket.js';
 import { rtc } from './rtc.js';
 import { getMic, getScreen, getCamera, stopStream } from './media.js';
@@ -45,9 +45,7 @@ export async function joinVoice(channelId) {
     }
     try {
       const cfg = await api.config();
-      if (Array.isArray(cfg?.iceServers)) state.iceServers = cfg.iceServers;
-      state.relay = !!cfg?.relay;
-      state.publicUrl = cfg?.publicUrl || null;
+      applyNetConfig(cfg);
     } catch { /* остаёмся на прежнем списке ICE */ }
     state.myVoice = { channelId, serverId: ch.serverId };
     state.streaming = false;

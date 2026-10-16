@@ -1,0 +1,128 @@
+// Service worker «Созвон»: кэширует только оболочку приложения (HTML/CSS/JS/иконки),
+// чтобы PWA ставилась и быстро открывалась. Всё живое (API, сокеты, медиа) — только из сети.
+//  - HTML (навигация): network-first, офлайн — последняя сохранённая оболочка;
+//  - статика (/css, /js, /assets, манифест): stale-while-revalidate;
+//  - /api/, /socket.io/, /media/ и любые не-GET запросы SW не трогает вообще.
+// При изменении списка/логики — поднять VERSION: старые кэши удалятся при activate.
+
+const VERSION = 'v1';
+const CACHE = `sozvon-shell-${VERSION}`;
+
+const SHELL = [
+  '/',
+  '/css/tokens.css',
+  '/css/app.css',
+  '/js/main.js',
+  '/js/api.js',
+  '/js/music.js',
+  '/js/nav.js',
+  '/js/socket.js',
+  '/js/state.js',
+  '/js/util.js',
+  '/js/pwa.js',
+  '/js/ui/auth.js',
+  '/js/ui/chat.js',
+  '/js/ui/members.js',
+  '/js/ui/modals.js',
+  '/js/ui/music-player.js',
+  '/js/ui/servers.js',
+  '/js/ui/sidebar.js',
+  '/js/ui/toasts.js',
+  '/js/ui/voice-stage.js',
+  '/js/voice/media.js',
+  '/js/voice/rtc.js',
+  '/js/voice/voice.js',
+  '/assets/icons.svg',
+  '/assets/logo.svg',
+  '/assets/favicon.svg',
+  '/assets/icons/icon-192.png',
+  '/assets/icons/icon-512.png',
+  '/assets/icons/maskable-192.png',
+  '/assets/icons/maskable-512.png',
+  '/assets/icons/apple-touch-icon.png',
+  '/manifest.webmanifest',
+];
+
+const NEVER = /^\/(api|socket\.io|media)(\/|$)/;
+const STATIC = /^\/(css|js|assets)\/|^\/manifest\.webmanifest$/;
+
+self.addEventListener('install', (event) => {
+  event.waitUntil((async () => {
+    const cache = await caches.open(CACHE);
+    // по одному: отсутствие одного файла не должно ломать установку SW
+    await Promise.all(SHELL.map((url) =>
+      fetch(url, { cache: 'no-cache' })
+        .then((res) => (res.ok ? cache.put(url, res) : null))
+        .catch(() => null)));
+    await self.skipWaiting();
+  })());
+});
+
+self.addEventListener('activate', (event) => {
+  event.waitUntil((async () => {
+    const keys = await caches.keys();
+    await Promise.all(keys
+      .filter((k) => k.startsWith('sozvon-shell-') && k !== CACHE)
+      .map((k) => caches.delete(k)));
+    await self.clients.claim();
+  })());
+});
+
+self.addEventListener('fetch', (event) => {
+  const req = event.request;
+  if (req.method !== 'GET') return;
+  const url = new URL(req.url);
+  if (url.origin !== self.location.origin) return;
+  if (NEVER.test(url.pathname)) return;
+  if (req.headers.has('range')) return;
+
+  if (req.mode === 'navigate') {
+    // только сама оболочка; прочие HTML-страницы (styleguide и т.п.) — как есть
+    if (url.pathname !== '/' && url.pathname !== '/index.html') return;
+    event.respondWith(networkFirst(req));
+    return;
+  }
+  if (STATIC.test(url.pathname)) event.respondWith(staleWhileRevalidate(event, url.pathname));
+});
+
+async function networkFirst(req) {
+  const cache = await caches.open(CACHE);
+  try {
+    const res = await fetch(req); // RequestInit с navigate-запросом нельзя
+    if (res.ok && res.type === 'basic') await cache.put('/', res.clone());
+    return res;
+  } catch (e) {
+    const cached = await cache.match('/');
+    if (cached) return cached;
+    throw e;
+  }
+}
+
+let updateNotified = false;
+
+async function staleWhileRevalidate(event, key) {
+  const cache = await caches.open(CACHE);
+  const cached = await cache.match(key);
+  const network = fetch(event.request).then(async (res) => {
+    if (res.ok && res.type === 'basic') {
+      const oldTag = cached?.headers.get('etag');
+      const newTag = res.headers.get('etag');
+      await cache.put(key, res.clone());
+      // оболочка обновилась на сервере, а страница загружена из старого кэша — подскажем перезагрузить
+      if (cached && oldTag && newTag && oldTag !== newTag) notifyUpdate();
+    }
+    return res;
+  });
+  if (cached) {
+    event.waitUntil(network.catch(() => {}));
+    return cached;
+  }
+  return network;
+}
+
+async function notifyUpdate() {
+  if (updateNotified) return;
+  updateNotified = true;
+  const clients = await self.clients.matchAll({ type: 'window' });
+  for (const c of clients) c.postMessage({ type: 'sozvon:shell-updated' });
+}

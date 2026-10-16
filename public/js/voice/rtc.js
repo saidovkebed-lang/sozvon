@@ -26,7 +26,11 @@ class Peer {
     this.iceRestarts = 0;
     this.warned = false;
 
-    const pc = new RTCPeerConnection({ iceServers: mgr.iceServers });
+    const pc = new RTCPeerConnection({
+      iceServers: mgr.iceServers,
+      // FORCE_RELAY на сервере: только TURN (прячет IP, обходит строгие NAT/блокировки P2P)
+      iceTransportPolicy: state.forceRelay ? 'relay' : 'all',
+    });
     this.pc = pc;
 
     pc.onnegotiationneeded = async () => {

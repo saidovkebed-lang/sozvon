@@ -1,6 +1,6 @@
 // Бутстрап приложения «Созвон»
 import { $ } from './util.js';
-import { state, notify, upsertServer, setUserOnline, getServer } from './state.js';
+import { state, notify, upsertServer, setUserOnline, getServer, applyNetConfig } from './state.js';
 import { api, getToken, setToken } from './api.js';
 import * as sock from './socket.js';
 import { initAuth, showAuth, hideAuth } from './ui/auth.js';
@@ -17,6 +17,7 @@ import { openServerModal } from './ui/servers.js';
 import { initVoiceSocket, resetVoice, joinVoice, leaveVoice } from './voice/voice.js';
 import { rtc } from './voice/rtc.js';
 import { music } from './music.js';
+import { initPwa, maybeShowInstallHint } from './pwa.js';
 
 window.__sozvon = { state, rtc, music, get socket() { return sock.getSocket(); } };
 
@@ -134,6 +135,7 @@ async function onConnect() {
     firstBootstrap = false;
     const last = restoreLast();
     const invite = new URLSearchParams(location.search).get('invite');
+    if (!invite) maybeShowInstallHint();
     selectServer(getServer(last) ? last : state.servers[0]?.id || null);
     if (invite) {
       history.replaceState(null, '', location.pathname);
@@ -151,6 +153,12 @@ async function onConnect() {
 }
 
 function start(token) {
+  if (typeof window.io !== 'function') {
+    // оболочка открыта из кэша PWA без сети: клиента Socket.IO нет — ждём сеть и перезагружаемся
+    showAuth('Нет связи с сервером…');
+    window.addEventListener('online', () => location.reload(), { once: true });
+    return;
+  }
   initUi();
   sock.disconnect();
   sock.connect(token);
@@ -165,13 +173,12 @@ function logout() {
 
 export function applyConfig(cfg) {
   if (!cfg) return;
-  if (Array.isArray(cfg.iceServers)) state.iceServers = cfg.iceServers;
-  state.relay = !!cfg.relay;
-  state.publicUrl = cfg.publicUrl || null;
+  applyNetConfig(cfg);
   state.botOnline = !!cfg.botOnline;
 }
 
 async function boot() {
+  initPwa();
   initAuth(start);
   try {
     const cfg = await api.config();

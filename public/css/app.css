@@ -552,6 +552,8 @@ code { font-family: var(--font-mono); }
 .user-panel .icon-btn { width: 30px; height: 30px; }
 .user-panel .icon-btn .icon { width: 18px; height: 18px; }
 .user-panel .icon-btn.is-on { background: var(--danger-soft); }
+.user-panel #btn-install { color: var(--accent-text); }
+.user-panel #btn-install:hover { background: var(--accent-soft); color: #fff; }
 
 /* ---- 4.3 Основная область ---- */
 .main {
