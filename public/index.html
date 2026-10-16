@@ -1,0 +1,346 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#1e1f24">
+  <title>Созвон</title>
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/css/tokens.css">
+  <link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+  <!-- ===== Экран входа ===== -->
+  <section id="auth-screen" class="auth" hidden>
+    <div class="auth__card">
+      <img class="auth__logo" src="/assets/logo.svg" alt="Созвон" width="64" height="64">
+      <h1 class="auth__title" id="auth-title">С возвращением!</h1>
+      <p class="auth__subtitle" id="auth-subtitle">Рады видеть тебя снова в Созвоне</p>
+      <form id="auth-form" class="form" novalidate>
+        <div class="field">
+          <label class="field__label" for="auth-username">Имя пользователя</label>
+          <input class="input" id="auth-username" name="username" type="text" autocomplete="username"
+                 minlength="2" maxlength="24" required autofocus>
+        </div>
+        <div class="field">
+          <label class="field__label" for="auth-password">Пароль</label>
+          <input class="input" id="auth-password" name="password" type="password" autocomplete="current-password" required>
+        </div>
+        <p class="form__error" id="auth-error" role="alert"></p>
+        <button class="btn btn--primary btn--block" id="auth-submit" type="submit">Войти</button>
+        <p class="auth__switch"><span id="auth-switch-text">Нет аккаунта?</span> <a href="#" id="auth-toggle">Зарегистрироваться</a></p>
+      </form>
+    </div>
+  </section>
+
+  <!-- ===== Основной интерфейс ===== -->
+  <div id="app" class="app" hidden>
+    <nav class="servers" id="servers" aria-label="Серверы">
+      <div class="servers__item servers__item--home">
+        <button class="server-icon" id="btn-home" type="button" aria-label="Главная" title="Главная">
+          <img src="/assets/logo.svg" alt="" width="28" height="28">
+        </button>
+      </div>
+      <div class="servers__sep"></div>
+      <div class="servers__list" id="servers-list"></div>
+      <button class="server-icon server-icon--add" id="btn-add-server" type="button" aria-label="Создать или присоединиться к серверу" title="Добавить сервер">
+        <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-plus"/></svg>
+      </button>
+    </nav>
+
+    <aside class="sidebar" id="sidebar" aria-label="Каналы">
+      <header class="sidebar__header">
+        <div class="sidebar__title" id="server-name">Созвон</div>
+        <button class="icon-btn" id="btn-server-menu" type="button" aria-label="Настройки сервера" title="Настройки сервера" hidden>
+          <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-settings"/></svg>
+        </button>
+      </header>
+      <div class="sidebar__invite" id="invite-box" hidden>
+        <span class="sidebar__invite-label">Инвайт</span>
+        <code id="invite-code"></code>
+        <button class="icon-btn" id="btn-copy-invite" type="button" aria-label="Скопировать инвайт-код" title="Скопировать">
+          <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-copy"/></svg>
+        </button>
+      </div>
+      <div class="sidebar__scroll" id="channels"></div>
+
+      <div class="voice-panel" id="voice-panel" hidden>
+        <div class="voice-panel__info">
+          <div class="voice-panel__status"><span class="dot dot--ok"></span> <span id="voice-status-text">Голос подключён</span></div>
+          <div class="voice-panel__channel" id="voice-panel-channel"></div>
+        </div>
+        <div class="voice-panel__actions">
+          <button class="icon-btn" id="btn-screen" type="button" aria-label="Демонстрация экрана" title="Демонстрация экрана">
+            <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-screen"/></svg>
+          </button>
+          <button class="icon-btn" id="btn-camera" type="button" aria-label="Камера" title="Камера">
+            <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-camera"/></svg>
+          </button>
+          <button class="icon-btn icon-btn--danger" id="btn-disconnect" type="button" aria-label="Отключиться от голоса" title="Отключиться">
+            <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-phone-off"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <footer class="user-panel">
+        <div class="avatar" id="me-avatar"></div>
+        <div class="user-panel__info">
+          <div class="user-panel__name" id="me-name"></div>
+          <div class="user-panel__tag" id="me-tag">в сети</div>
+        </div>
+        <button class="icon-btn" id="btn-mute" type="button" aria-label="Выключить микрофон" aria-pressed="false" title="Микрофон">
+          <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-mic"/></svg>
+        </button>
+        <button class="icon-btn" id="btn-deafen" type="button" aria-label="Выключить звук" aria-pressed="false" title="Звук">
+          <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-headphones"/></svg>
+        </button>
+        <button class="icon-btn" id="btn-logout" type="button" aria-label="Выйти из аккаунта" title="Выйти">
+          <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-logout"/></svg>
+        </button>
+      </footer>
+    </aside>
+
+    <main class="main" id="main">
+      <header class="main__header">
+        <button class="icon-btn main__menu" id="btn-menu" type="button" aria-label="Открыть меню" aria-expanded="false">
+          <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-menu"/></svg>
+        </button>
+        <svg class="icon" id="channel-icon" aria-hidden="true"><use href="/assets/icons.svg#i-hash"/></svg>
+        <h2 class="main__title" id="channel-title">Созвон</h2>
+        <div class="main__topic" id="channel-topic"></div>
+        <div class="main__actions">
+          <button class="icon-btn" id="btn-open-music" type="button" aria-label="Музыкальная библиотека" title="Музыкальная библиотека">
+            <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-music"/></svg>
+          </button>
+        </div>
+      </header>
+
+      <!-- главная (нет выбранного сервера) -->
+      <section class="home" id="home-view">
+        <div class="home__card">
+          <img class="home__logo" src="/assets/logo.svg" alt="" width="96" height="96">
+          <h2 class="home__title">Добро пожаловать в Созвон</h2>
+          <p class="home__text">Создай свой сервер для друзей или войди по инвайт-коду.</p>
+          <div class="home__actions">
+            <button class="btn btn--primary" type="button" data-open-server="create">Создать сервер</button>
+            <button class="btn btn--ghost" type="button" data-open-server="join">Войти по коду</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- текстовый вид -->
+      <section class="chat" id="chat-view" hidden>
+        <div class="chat__messages" id="messages" role="log" aria-live="polite" aria-label="Сообщения"></div>
+        <div class="chat__typing" id="typing" aria-live="polite"></div>
+        <form class="composer" id="composer" autocomplete="off">
+          <button class="icon-btn" id="btn-attach" type="button" aria-label="Прикрепить файл" title="Прикрепить файл">
+            <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-attach"/></svg>
+          </button>
+          <input type="file" id="file-input" multiple hidden>
+          <div class="composer__attachments" id="pending-attachments"></div>
+          <textarea class="composer__input" id="composer-input" rows="1" maxlength="2000"
+                    placeholder="Написать сообщение" aria-label="Сообщение"></textarea>
+          <button class="icon-btn" id="btn-send" type="submit" aria-label="Отправить" title="Отправить">
+            <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-send"/></svg>
+          </button>
+        </form>
+      </section>
+
+      <!-- голосовой вид -->
+      <section class="stage" id="voice-view" hidden>
+        <div class="stage__grid" id="stage-grid"></div>
+        <div class="stage__join" id="voice-join" hidden>
+          <p class="stage__join-text" id="voice-join-text">Никого нет в канале</p>
+          <button class="btn btn--primary" id="btn-voice-join" type="button">Подключиться</button>
+        </div>
+        <div class="stage__controls" id="stage-controls" hidden>
+          <button class="ctrl" id="ctrl-mute" type="button" aria-label="Выключить микрофон" aria-pressed="false" title="Микрофон">
+            <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-mic"/></svg>
+          </button>
+          <button class="ctrl" id="ctrl-deafen" type="button" aria-label="Выключить звук" aria-pressed="false" title="Звук">
+            <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-headphones"/></svg>
+          </button>
+          <button class="ctrl" id="ctrl-camera" type="button" aria-label="Включить камеру" aria-pressed="false" title="Камера">
+            <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-camera"/></svg>
+          </button>
+          <button class="ctrl" id="ctrl-screen" type="button" aria-label="Демонстрация экрана" aria-pressed="false" title="Демонстрация экрана">
+            <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-screen"/></svg>
+          </button>
+          <button class="ctrl ctrl--danger" id="ctrl-leave" type="button" aria-label="Отключиться" title="Отключиться">
+            <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-phone-off"/></svg>
+          </button>
+        </div>
+      </section>
+    </main>
+
+    <aside class="members" id="members" aria-label="Участники"></aside>
+
+    <div class="music-player" id="music-player" hidden>
+      <div class="music-player__art">
+        <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-music"/></svg>
+      </div>
+      <div class="music-player__info">
+        <div class="music-player__title" id="music-title">Ничего не играет</div>
+        <div class="music-player__artist" id="music-artist">DJ Бот</div>
+      </div>
+      <div class="music-player__progress">
+        <div class="progress" role="progressbar" aria-label="Прогресс трека" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="music-progress">
+          <div class="progress__bar" id="music-progress-bar"></div>
+        </div>
+        <div class="music-player__times"><span id="music-time-cur">0:00</span><span id="music-time-total">0:00</span></div>
+      </div>
+      <div class="music-player__controls">
+        <button class="icon-btn" type="button" data-music="pause" id="btn-music-toggle" aria-label="Пауза" title="Пауза">
+          <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-pause"/></svg>
+        </button>
+        <button class="icon-btn" type="button" data-music="skip" aria-label="Следующий трек" title="Следующий">
+          <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-skip"/></svg>
+        </button>
+        <button class="icon-btn" type="button" data-music="stop" aria-label="Остановить" title="Стоп">
+          <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-stop"/></svg>
+        </button>
+        <input type="range" class="slider" id="music-volume" min="0" max="100" value="50" aria-label="Громкость музыки">
+      </div>
+      <button class="btn btn--primary music-player__unlock" id="btn-music-unlock" type="button" hidden><svg class="icon icon--sm" aria-hidden="true"><use href="/assets/icons.svg#i-play"/></svg> Включить звук</button>
+      <button class="btn btn--ghost" id="btn-music-library" type="button">Библиотека</button>
+    </div>
+  </div>
+
+  <!-- ===== Модалки ===== -->
+  <dialog class="modal" id="modal-server" aria-labelledby="modal-server-title">
+    <div class="modal__header">
+      <h3 id="modal-server-title">Добавить сервер</h3>
+      <button class="icon-btn" type="button" data-close aria-label="Закрыть">
+        <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-close"/></svg>
+      </button>
+    </div>
+    <div class="tabs" role="tablist">
+      <button class="tab is-active" type="button" role="tab" data-tab="create" aria-selected="true">Создать</button>
+      <button class="tab" type="button" role="tab" data-tab="join" aria-selected="false">Войти по коду</button>
+    </div>
+    <form id="form-server-create" class="form" data-tab-panel="create" method="dialog">
+      <div class="modal__body">
+        <div class="field">
+          <label class="field__label" for="server-name-input">Название сервера</label>
+          <input class="input" id="server-name-input" name="name" maxlength="40" required placeholder="Сервер друзей">
+        </div>
+        <p class="form__error" data-error></p>
+      </div>
+      <div class="modal__footer">
+        <button class="btn btn--ghost" type="button" data-close>Отмена</button>
+        <button class="btn btn--primary" type="submit">Создать</button>
+      </div>
+    </form>
+    <form id="form-server-join" class="form" data-tab-panel="join" method="dialog" hidden>
+      <div class="modal__body">
+        <div class="field">
+          <label class="field__label" for="invite-input">Инвайт-код</label>
+          <input class="input" id="invite-input" name="inviteCode" maxlength="64" required placeholder="abcd1234" autocapitalize="off" spellcheck="false">
+        </div>
+        <p class="form__error" data-error></p>
+      </div>
+      <div class="modal__footer">
+        <button class="btn btn--ghost" type="button" data-close>Отмена</button>
+        <button class="btn btn--primary" type="submit">Войти</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="modal" id="modal-channel" aria-labelledby="modal-channel-title">
+    <form id="form-channel" class="form" method="dialog">
+      <div class="modal__header">
+        <h3 id="modal-channel-title">Создать канал</h3>
+        <button class="icon-btn" type="button" data-close aria-label="Закрыть">
+          <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-close"/></svg>
+        </button>
+      </div>
+      <div class="modal__body">
+        <fieldset class="field radio-group">
+          <legend class="field__label">Тип канала</legend>
+          <label class="radio"><input type="radio" name="type" value="text" checked> <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-hash"/></svg> Текстовый</label>
+          <label class="radio"><input type="radio" name="type" value="voice"> <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-volume"/></svg> Голосовой</label>
+        </fieldset>
+        <div class="field">
+          <label class="field__label" for="channel-name-input">Название канала</label>
+          <input class="input" id="channel-name-input" name="name" maxlength="40" required placeholder="новый-канал">
+        </div>
+        <p class="form__error" data-error></p>
+      </div>
+      <div class="modal__footer">
+        <button class="btn btn--ghost" type="button" data-close>Отмена</button>
+        <button class="btn btn--primary" type="submit">Создать</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="modal" id="modal-settings" aria-labelledby="modal-settings-title">
+    <form id="form-settings" class="form" method="dialog">
+      <div class="modal__header">
+        <h3 id="modal-settings-title">Настройки сервера</h3>
+        <button class="icon-btn" type="button" data-close aria-label="Закрыть">
+          <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-close"/></svg>
+        </button>
+      </div>
+      <div class="modal__body">
+        <div class="field" data-owner-only>
+          <label class="field__label" for="server-rename-input">Название сервера</label>
+          <input class="input" id="server-rename-input" name="name" maxlength="40" required>
+        </div>
+        <p class="form__error" data-error></p>
+      </div>
+      <div class="modal__footer">
+        <button class="btn btn--danger" type="button" id="btn-server-delete" data-owner-only>Удалить сервер</button>
+        <button class="btn btn--danger" type="button" id="btn-server-leave" data-member-only>Покинуть сервер</button>
+        <button class="btn btn--ghost" type="button" data-close>Отмена</button>
+        <button class="btn btn--primary" type="submit" data-owner-only>Сохранить</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="modal modal--wide" id="modal-music" aria-labelledby="modal-music-title">
+    <div class="modal__header">
+      <h3 id="modal-music-title">Музыкальная библиотека</h3>
+      <button class="icon-btn" type="button" data-close aria-label="Закрыть">
+        <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-close"/></svg>
+      </button>
+    </div>
+    <div class="modal__body">
+      <p class="modal__hint" id="music-hint">Нажми <svg class="icon icon--sm" aria-hidden="true"><use href="/assets/icons.svg#i-play"/></svg>, чтобы DJ Бот поставил трек в очередь. Нужно быть в голосовом канале.</p>
+      <div class="track-list" id="track-list"></div>
+      <div class="music-add">
+        <label class="btn btn--ghost music-add__upload" for="music-file-input">
+          <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-upload"/></svg> Загрузить файл
+        </label>
+        <input type="file" id="music-file-input" accept="audio/*" hidden>
+        <form class="music-add__import" id="form-music-import">
+          <input class="input" id="music-url-input" name="url" type="url" placeholder="https://… прямая ссылка на аудио" aria-label="Ссылка на аудио">
+          <button class="btn btn--primary" type="submit">Импорт</button>
+        </form>
+      </div>
+      <p class="form__error" id="music-error" data-error></p>
+    </div>
+  </dialog>
+
+  <dialog class="modal" id="modal-confirm" aria-labelledby="modal-confirm-title">
+    <div class="modal__header">
+      <h3 id="modal-confirm-title">Вы уверены?</h3>
+      <button class="icon-btn" type="button" data-close aria-label="Закрыть">
+        <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-close"/></svg>
+      </button>
+    </div>
+    <div class="modal__body"><p id="modal-confirm-text"></p></div>
+    <div class="modal__footer">
+      <button class="btn btn--ghost" type="button" data-close>Отмена</button>
+      <button class="btn btn--primary" type="button" id="confirm-ok">Подтвердить</button>
+    </div>
+  </dialog>
+
+  <div class="toasts" id="toasts" aria-live="assertive"></div>
+  <div id="remote-audio" hidden></div>
+  <audio id="music-audio" preload="auto" hidden></audio>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script type="module" src="/js/main.js"></script>
+</body>
+</html>

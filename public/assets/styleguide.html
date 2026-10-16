@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Созвон — стайлгайд</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../css/tokens.css">
+  <link rel="stylesheet" href="../css/app.css">
+  <!-- Стенд дизайнера. Виды: ?view=auth | chat | voice | focus | home | modal-server | modal-music | modal-channel | modal-confirm | nav ; &paused=1 -->
+</head>
+<body>
+  <section id="auth-screen" class="auth" hidden>
+    <div class="auth__card">
+      <img class="auth__logo" src="logo.svg" alt="Созвон" width="64" height="64">
+      <h1 class="auth__title">С возвращением!</h1>
+      <p class="auth__subtitle">Рады видеть тебя снова в Созвоне</p>
+      <form id="auth-form" class="form" novalidate>
+        <div class="field">
+          <label class="field__label" for="u">Имя пользователя</label>
+          <input class="input" id="u" value="kebed">
+        </div>
+        <div class="field">
+          <label class="field__label" for="p">Пароль</label>
+          <input class="input" id="p" type="password" value="secret123" aria-invalid="true">
+        </div>
+        <p class="form__error" id="auth-error">Неверное имя пользователя или пароль</p>
+        <button class="btn btn--primary btn--block" type="button">Войти</button>
+        <p class="auth__switch">Нет аккаунта? <a href="#" id="auth-toggle">Зарегистрироваться</a></p>
+      </form>
+    </div>
+  </section>
+
+  <div id="app" class="app" hidden>
+    <nav class="servers" id="servers">
+      <div class="servers__item servers__item--home">
+        <button class="server-icon" type="button" title="Главная"><img src="logo.svg" alt="" width="28" height="28"></button>
+      </div>
+      <div class="servers__sep"></div>
+      <div class="servers__list" id="servers-list">
+        <div class="servers__item"><button class="server-icon is-active" type="button">ДР</button></div>
+        <div class="servers__item"><button class="server-icon" type="button">КС</button></div>
+        <div class="servers__item"><button class="server-icon" type="button">Ч</button></div>
+      </div>
+      <button class="server-icon server-icon--add" id="btn-add-server" type="button"><svg class="icon"><use href="icons.svg#i-plus"/></svg></button>
+    </nav>
+
+    <aside class="sidebar" id="sidebar">
+      <header class="sidebar__header">
+        <div class="sidebar__title" id="server-name">Друзья по вечерам</div>
+        <button class="icon-btn" id="btn-server-menu" type="button"><svg class="icon"><use href="icons.svg#i-settings"/></svg></button>
+      </header>
+      <div class="sidebar__invite" id="invite-box">
+        <span class="sidebar__invite-label">Инвайт</span>
+        <code id="invite-code">k3v9x2ab</code>
+        <button class="icon-btn" id="btn-copy-invite" type="button"><svg class="icon"><use href="icons.svg#i-copy"/></svg></button>
+      </div>
+      <div class="sidebar__scroll" id="channels">
+        <div class="channel-group">
+          <div class="channel-group__header"><span>Текстовые каналы</span>
+            <button class="icon-btn" data-add-channel="text" type="button"><svg class="icon"><use href="icons.svg#i-plus"/></svg></button></div>
+          <a class="channel is-active" data-type="text" data-channel-id="1"><svg class="icon"><use href="icons.svg#i-hash"/></svg><span class="channel__name">общий</span><button class="icon-btn channel__delete" type="button"><svg class="icon"><use href="icons.svg#i-trash"/></svg></button></a>
+          <a class="channel" data-type="text"><svg class="icon"><use href="icons.svg#i-hash"/></svg><span class="channel__name">мемы</span><button class="icon-btn channel__delete" type="button"><svg class="icon"><use href="icons.svg#i-trash"/></svg></button></a>
+          <a class="channel" data-type="text"><svg class="icon"><use href="icons.svg#i-hash"/></svg><span class="channel__name">игры-и-очень-длинное-название</span></a>
+        </div>
+        <div class="channel-group">
+          <div class="channel-group__header"><span>Голосовые каналы</span>
+            <button class="icon-btn" data-add-channel="voice" type="button"><svg class="icon"><use href="icons.svg#i-plus"/></svg></button></div>
+          <a class="channel" data-type="voice" id="voice-ch"><svg class="icon"><use href="icons.svg#i-volume"/></svg><span class="channel__name">Голосовой</span><span class="channel__count">4</span></a>
+          <div class="voice-users">
+            <div class="voice-user is-speaking"><div class="avatar avatar--sm" style="--c:#e8743b">К</div><span class="voice-user__name">kebed</span><span class="voice-user__badges"><span class="badge badge--live">LIVE</span></span></div>
+            <div class="voice-user"><div class="avatar avatar--sm" style="--c:#2f9e8f">М</div><span class="voice-user__name">marina</span><span class="voice-user__badges"><svg class="icon icon--sm"><use href="icons.svg#i-mic-off"/></svg></span></div>
+            <div class="voice-user"><div class="avatar avatar--sm" style="--c:#c2457a">Л</div><span class="voice-user__name">lyokha_super_long_name</span><span class="voice-user__badges"><svg class="icon icon--sm"><use href="icons.svg#i-camera"/></svg><svg class="icon icon--sm"><use href="icons.svg#i-headphones-off"/></svg></span></div>
+            <div class="voice-user"><div class="avatar avatar--sm" style="--c:#6a45ff">D</div><span class="voice-user__name">DJ Бот</span><span class="voice-user__badges"><span class="badge badge--bot">БОТ</span></span></div>
+          </div>
+          <a class="channel" data-type="voice"><svg class="icon"><use href="icons.svg#i-volume"/></svg><span class="channel__name">Тихая комната</span></a>
+        </div>
+      </div>
+      <div class="voice-panel" id="voice-panel">
+        <div class="voice-panel__info">
+          <div class="voice-panel__status"><span class="dot dot--ok"></span> <span>Голос подключён</span></div>
+          <div class="voice-panel__channel">Голосовой / Друзья по вечерам</div>
+        </div>
+        <div class="voice-panel__actions">
+          <button class="icon-btn is-on" id="btn-screen" type="button"><svg class="icon"><use href="icons.svg#i-screen"/></svg></button>
+          <button class="icon-btn" id="btn-camera" type="button"><svg class="icon"><use href="icons.svg#i-camera"/></svg></button>
+          <button class="icon-btn icon-btn--danger" id="btn-disconnect" type="button"><svg class="icon"><use href="icons.svg#i-phone-off"/></svg></button>
+        </div>
+      </div>
+      <footer class="user-panel">
+        <div class="avatar" style="--c:#e8743b">К</div>
+        <div class="user-panel__info"><div class="user-panel__name">kebed</div><div class="user-panel__tag">в сети</div></div>
+        <button class="icon-btn" id="btn-mute" type="button"><svg class="icon"><use href="icons.svg#i-mic"/></svg></button>
+        <button class="icon-btn is-on" id="btn-deafen" type="button"><svg class="icon"><use href="icons.svg#i-headphones-off"/></svg></button>
+        <button class="icon-btn" id="btn-logout" type="button"><svg class="icon"><use href="icons.svg#i-logout"/></svg></button>
+      </footer>
+    </aside>
+
+    <main class="main" id="main">
+      <header class="main__header">
+        <button class="icon-btn main__menu" id="btn-menu" type="button"><svg class="icon"><use href="icons.svg#i-users"/></svg></button>
+        <svg class="icon" id="channel-icon"><use href="icons.svg#i-hash"/></svg>
+        <h2 class="main__title" id="channel-title">общий</h2>
+        <div class="main__topic">Болтаем обо всём, договариваемся о созвонах</div>
+        <div class="main__actions">
+          <button class="icon-btn" id="btn-open-music" type="button"><svg class="icon"><use href="icons.svg#i-music"/></svg></button>
+        </div>
+      </header>
+
+      <section class="home" id="home-view" hidden>
+        <div class="home__card">
+          <img class="home__logo" src="logo.svg" alt="" width="96" height="96">
+          <h2 class="home__title">Добро пожаловать в Созвон</h2>
+          <p class="home__text">Создай свой сервер для друзей или войди по инвайт-коду.</p>
+          <div class="home__actions">
+            <button class="btn btn--primary" type="button">Создать сервер</button>
+            <button class="btn btn--ghost" type="button">Войти по коду</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="chat" id="chat-view">
+        <div class="chat__messages" id="messages">
+          <div class="chat__loader">Загрузка…</div>
+          <div class="message"><div class="avatar" style="--c:#2f9e8f">М</div>
+            <div class="message__body"><div class="message__meta"><span class="message__author" style="color:#5fd1c0">marina</span><time class="message__time">Сегодня в 19:02</time></div>
+            <div class="message__content">Всем привет! Кто сегодня в 21:00 на созвон? 🎮</div></div>
+            <button class="icon-btn message__delete" type="button"><svg class="icon"><use href="icons.svg#i-trash"/></svg></button></div>
+          <div class="message message--grouped"><div class="avatar" style="--c:#2f9e8f">М</div>
+            <div class="message__body"><div class="message__meta"><span class="message__author">marina</span><time class="message__time">19:02</time></div>
+            <div class="message__content">Скидываю скрин с прошлого раза:</div>
+            <div class="message__attachments"><img class="message__image" alt="" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='480' height='270'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%23243b55'/%3E%3Cstop offset='1' stop-color='%23141e30'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='480' height='270' fill='url(%23g)'/%3E%3Ccircle cx='360' cy='80' r='40' fill='%23f5b14c'/%3E%3Cpath d='M0 270 L140 130 L250 230 L330 160 L480 270Z' fill='%230b0d11' opacity='.7'/%3E%3C/svg%3E"></div></div>
+            <button class="icon-btn message__delete" type="button"><svg class="icon"><use href="icons.svg#i-trash"/></svg></button></div>
+          <div class="message"><div class="avatar" style="--c:#e8743b">К</div>
+            <div class="message__body"><div class="message__meta"><span class="message__author" style="color:#f0a070">kebed</span><time class="message__time">Сегодня в 19:05</time></div>
+            <div class="message__content">Я буду! Вот правила, чтобы <strong>все</strong> были в курсе: <code>!play lofi</code> включает музыку. Ссылка на доку: <a href="#">https://example.org/sozvon/guide</a></div>
+            <div class="message__attachments"><a class="file-card" href="#"><svg class="icon"><use href="icons.svg#i-attach"/></svg><span class="file-card__info"><span class="file-card__name">правила-сервера-финал-v2.pdf</span><span class="file-card__size">248 КБ</span></span></a></div></div>
+            <button class="icon-btn message__delete" type="button"><svg class="icon"><use href="icons.svg#i-trash"/></svg></button></div>
+          <div class="message message--grouped"><div class="avatar" style="--c:#e8743b">К</div>
+            <div class="message__body"><div class="message__meta"><span class="message__author">kebed</span><time class="message__time">19:05</time></div>
+            <div class="message__content">!play lofi</div></div></div>
+          <div class="message"><div class="avatar" style="--c:#6a45ff">D</div>
+            <div class="message__body"><div class="message__meta"><span class="message__author" style="color:#b4a4ff">DJ Бот</span><span class="badge badge--bot">БОТ</span><time class="message__time">Сегодня в 19:05</time></div>
+            <div class="message__content">🎶 Сейчас играет: <strong>Lofi Rain — Chillhop Café</strong> (3:42)</div></div></div>
+          <div class="message message--system"><div class="avatar" style="--c:#6a45ff">D</div>
+            <div class="message__body"><div class="message__meta"><span class="message__author" style="color:#b4a4ff">DJ Бот</span><span class="badge badge--bot">БОТ</span><time class="message__time">Сегодня в 19:06</time></div>
+            <div class="message__content">Музыкальный бот не запущен. Запустите: npm run bot</div></div></div>
+        </div>
+        <div class="chat__typing" id="typing">marina печатает…</div>
+        <form class="composer" id="composer">
+          <button class="icon-btn" id="btn-attach" type="button"><svg class="icon"><use href="icons.svg#i-attach"/></svg></button>
+          <input type="file" id="file-input" hidden>
+          <div class="composer__attachments" id="pending-attachments"><span class="chip"><span class="chip__name">screenshot-2026.png</span><button class="icon-btn" type="button"><svg class="icon"><use href="icons.svg#i-close"/></svg></button></span></div>
+          <textarea class="composer__input" id="composer-input" rows="1" placeholder="Написать в #общий"></textarea>
+          <button class="icon-btn" id="btn-send" type="submit"><svg class="icon"><use href="icons.svg#i-send"/></svg></button>
+        </form>
+      </section>
+
+      <section class="stage" id="voice-view" hidden>
+        <div class="stage__grid" id="stage-grid">
+          <div class="tile tile--video tile--screen" data-socket-id="a">
+            <video class="tile__video" poster="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1600' height='1000'%3E%3Crect width='1600' height='1000' fill='%231e1e2e'/%3E%3Crect width='1600' height='60' fill='%23313244'/%3E%3Crect x='40' y='120' width='700' height='40' rx='8' fill='%2389b4fa'/%3E%3Crect x='40' y='200' width='1100' height='24' rx='6' fill='%23585b70'/%3E%3Crect x='40' y='250' width='900' height='24' rx='6' fill='%23585b70'/%3E%3Crect x='40' y='300' width='1000' height='24' rx='6' fill='%23585b70'/%3E%3Crect x='40' y='400' width='600' height='400' rx='12' fill='%23a6e3a1' opacity='.5'/%3E%3C/svg%3E"></video>
+            <span class="badge badge--live">LIVE</span>
+            <div class="tile__label"><span>kebed — экран</span></div>
+            <button class="icon-btn tile__expand" type="button"><svg class="icon"><use href="icons.svg#i-expand"/></svg></button>
+          </div>
+          <div class="tile is-speaking" data-socket-id="b" data-self="true">
+            <div class="avatar avatar--xl" style="--c:#e8743b">К</div>
+            <div class="tile__label"><span>kebed</span></div>
+            <button class="icon-btn tile__expand" type="button"><svg class="icon"><use href="icons.svg#i-expand"/></svg></button>
+          </div>
+          <div class="tile tile--video" data-socket-id="c">
+            <video class="tile__video" poster="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='640' height='480'%3E%3Cdefs%3E%3CradialGradient id='g' cx='.5' cy='.4'%3E%3Cstop offset='0' stop-color='%23f2c6a0'/%3E%3Cstop offset='1' stop-color='%23523a3a'/%3E%3C/radialGradient%3E%3C/defs%3E%3Crect width='640' height='480' fill='%23362a33'/%3E%3Ccircle cx='320' cy='200' r='90' fill='url(%23g)'/%3E%3Cellipse cx='320' cy='480' rx='200' ry='150' fill='%23c2457a'/%3E%3C/svg%3E"></video>
+            <div class="tile__label"><span>lyokha_super_long_name</span><svg class="icon icon--sm"><use href="icons.svg#i-headphones-off"/></svg></div>
+            <button class="icon-btn tile__expand" type="button"><svg class="icon"><use href="icons.svg#i-expand"/></svg></button>
+          </div>
+          <div class="tile" data-socket-id="d">
+            <div class="avatar avatar--xl" style="--c:#2f9e8f">М</div>
+            <div class="tile__label"><span>marina</span><svg class="icon icon--sm"><use href="icons.svg#i-mic-off"/></svg></div>
+            <button class="icon-btn tile__expand" type="button"><svg class="icon"><use href="icons.svg#i-expand"/></svg></button>
+          </div>
+        </div>
+        <div class="stage__join" id="voice-join" hidden>
+          <p class="stage__join-text">В канале 2 человека</p>
+          <button class="btn btn--primary" type="button">Подключиться</button>
+        </div>
+        <div class="stage__controls">
+          <button class="ctrl is-on" id="ctrl-mute" type="button"><svg class="icon"><use href="icons.svg#i-mic-off"/></svg></button>
+          <button class="ctrl" id="ctrl-deafen" type="button"><svg class="icon"><use href="icons.svg#i-headphones"/></svg></button>
+          <button class="ctrl" id="ctrl-camera" type="button"><svg class="icon"><use href="icons.svg#i-camera"/></svg></button>
+          <button class="ctrl is-on" id="ctrl-screen" type="button"><svg class="icon"><use href="icons.svg#i-screen"/></svg></button>
+          <button class="ctrl ctrl--danger" id="ctrl-leave" type="button"><svg class="icon"><use href="icons.svg#i-phone-off"/></svg></button>
+        </div>
+      </section>
+    </main>
+
+    <aside class="members" id="members">
+      <h3 class="members__title">В сети — 4</h3>
+      <div class="member"><div class="avatar" style="--c:#e8743b">К<span class="avatar__status"></span></div><span class="member__name">kebed</span><svg class="icon"><use href="icons.svg#i-crown"/></svg></div>
+      <div class="member member--bot"><div class="avatar" style="--c:#6a45ff">D<span class="avatar__status"></span></div><span class="member__name">DJ Бот</span><svg class="icon"><use href="icons.svg#i-bot"/></svg></div>
+      <div class="member"><div class="avatar" style="--c:#c2457a">Л<span class="avatar__status"></span></div><span class="member__name">lyokha_super_long_name</span></div>
+      <div class="member"><div class="avatar" style="--c:#2f9e8f">М<span class="avatar__status"></span></div><span class="member__name">marina</span></div>
+      <h3 class="members__title">Не в сети — 2</h3>
+      <div class="member is-offline"><div class="avatar" style="--c:#3b82c4">А<span class="avatar__status"></span></div><span class="member__name">artem</span></div>
+      <div class="member is-offline"><div class="avatar" style="--c:#9b6b3a">С<span class="avatar__status"></span></div><span class="member__name">sveta</span></div>
+    </aside>
+
+    <div class="music-player" id="music-player">
+      <div class="music-player__art"><svg class="icon"><use href="icons.svg#i-music"/></svg></div>
+      <div class="music-player__info">
+        <div class="music-player__title">Lofi Rain — очень длинное название трека</div>
+        <div class="music-player__artist">Chillhop Café</div>
+      </div>
+      <div class="music-player__progress">
+        <div class="progress"><div class="progress__bar" style="width:38%"></div></div>
+        <div class="music-player__times"><span>1:24</span><span>3:42</span></div>
+      </div>
+      <div class="music-player__controls">
+        <button class="icon-btn" type="button" data-music="pause" id="btn-music-toggle"><svg class="icon"><use href="icons.svg#i-pause"/></svg></button>
+        <button class="icon-btn" type="button" data-music="skip"><svg class="icon"><use href="icons.svg#i-skip"/></svg></button>
+        <button class="icon-btn" type="button" data-music="stop"><svg class="icon"><use href="icons.svg#i-stop"/></svg></button>
+        <input type="range" class="slider" id="music-volume" min="0" max="100" value="60" style="--val:60%">
+      </div>
+      <button class="btn btn--primary music-player__unlock" id="btn-music-unlock" type="button" hidden>▶ Включить звук</button>
+      <button class="btn btn--ghost" id="btn-music-library" type="button">Библиотека</button>
+    </div>
+  </div>
+
+  <dialog class="modal" id="modal-server">
+    <div class="modal__header"><h3>Добавить сервер</h3><button class="icon-btn" type="button" data-close><svg class="icon"><use href="icons.svg#i-close"/></svg></button></div>
+    <div class="tabs"><button class="tab is-active" type="button">Создать</button><button class="tab" type="button">Войти по коду</button></div>
+    <form class="form" data-tab-panel="create" method="dialog">
+      <div class="modal__body">
+        <div class="field"><label class="field__label" for="sn">Название сервера</label><input class="input" id="sn" placeholder="Сервер друзей"></div>
+        <p class="form__error" data-error>Название не может быть пустым</p>
+      </div>
+      <div class="modal__footer"><button class="btn btn--ghost" type="button">Отмена</button><button class="btn btn--primary" type="button">Создать</button></div>
+    </form>
+  </dialog>
+
+  <dialog class="modal" id="modal-channel">
+    <form class="form" method="dialog">
+      <div class="modal__header"><h3>Создать канал</h3><button class="icon-btn" type="button" data-close><svg class="icon"><use href="icons.svg#i-close"/></svg></button></div>
+      <div class="modal__body">
+        <fieldset class="field radio-group"><legend class="field__label">Тип канала</legend>
+          <label class="radio"><input type="radio" name="type" value="text" checked> <svg class="icon"><use href="icons.svg#i-hash"/></svg> Текстовый</label>
+          <label class="radio"><input type="radio" name="type" value="voice"> <svg class="icon"><use href="icons.svg#i-volume"/></svg> Голосовой</label>
+        </fieldset>
+        <div class="field"><label class="field__label" for="cn">Название канала</label><input class="input" id="cn" placeholder="новый-канал"></div>
+        <p class="form__error" data-error></p>
+      </div>
+      <div class="modal__footer"><button class="btn btn--ghost" type="button">Отмена</button><button class="btn btn--primary" type="button">Создать</button></div>
+    </form>
+  </dialog>
+
+  <dialog class="modal modal--wide" id="modal-music">
+    <div class="modal__header"><h3>Музыкальная библиотека</h3><button class="icon-btn" type="button" data-close><svg class="icon"><use href="icons.svg#i-close"/></svg></button></div>
+    <div class="modal__body">
+      <p class="modal__hint">Нажми «▶», чтобы DJ Бот поставил трек в очередь. Нужно быть в голосовом канале.</p>
+      <div class="track-list" id="track-list">
+        <div class="track is-playing"><div class="track__info"><div class="track__title">Lofi Rain</div><div class="track__artist">Chillhop Café</div></div><span class="track__duration">3:42</span><button class="icon-btn" data-play type="button"><svg class="icon"><use href="icons.svg#i-play"/></svg></button></div>
+        <div class="track"><div class="track__info"><div class="track__title">Night Drive (Extended Mix with a very long title)</div><div class="track__artist">Synthwave Boy</div></div><span class="track__duration">6:10</span><button class="icon-btn" data-play type="button"><svg class="icon"><use href="icons.svg#i-play"/></svg></button></div>
+        <div class="track"><div class="track__info"><div class="track__title">Кино — Группа крови</div><div class="track__artist">загрузил kebed</div></div><span class="track__duration">4:46</span><button class="icon-btn" data-play type="button"><svg class="icon"><use href="icons.svg#i-play"/></svg></button></div>
+      </div>
+      <div class="music-add">
+        <label class="btn btn--ghost music-add__upload"><svg class="icon"><use href="icons.svg#i-upload"/></svg> Загрузить файл</label>
+        <form class="music-add__import"><input class="input" type="url" placeholder="https://… прямая ссылка на аудио"><button class="btn btn--primary" type="button">Импорт</button></form>
+      </div>
+      <p class="form__error" data-error></p>
+    </div>
+  </dialog>
+
+  <dialog class="modal" id="modal-confirm">
+    <div class="modal__header"><h3>Удалить канал?</h3><button class="icon-btn" type="button" data-close><svg class="icon"><use href="icons.svg#i-close"/></svg></button></div>
+    <div class="modal__body"><p>Канал <strong>#мемы</strong> и вся его история будут удалены без возможности восстановления.</p></div>
+    <div class="modal__footer"><button class="btn btn--ghost" type="button">Отмена</button><button class="btn btn--danger" type="button">Удалить</button></div>
+  </dialog>
+
+  <div class="toasts" id="toasts">
+    <div class="toast toast--ok">Инвайт-код скопирован</div>
+    <div class="toast toast--error">Не удалось подключиться к голосу: нет доступа к микрофону</div>
+    <div class="toast">Бот подключился к каналу «Голосовой»</div>
+  </div>
+
+  <script>
+    const q = new URLSearchParams(location.search);
+    const view = q.get('view') || 'chat';
+    const $ = (s) => document.querySelector(s);
+    if (view === 'auth') { $('#auth-screen').hidden = false; $('#toasts').hidden = true; }
+    else {
+      $('#app').hidden = false;
+      if (view !== 'chat') $('#toasts').hidden = true;
+      if (view === 'voice' || view === 'focus' || view === 'join') {
+        $('#chat-view').hidden = true; $('#voice-view').hidden = false;
+        $('#channel-title').textContent = 'Голосовой';
+        $('#channel-icon').innerHTML = '<use href="icons.svg#i-volume"/>';
+        document.querySelector('.channel.is-active').classList.remove('is-active');
+        $('#voice-ch').classList.add('is-active');
+        $('.main__topic').textContent = '4 участника';
+      }
+      if (view === 'focus') { const t = document.querySelector('.tile--screen'); t.classList.add('tile--focused'); $('#stage-grid').classList.add('has-focus'); }
+      if (view === 'join') { $('#stage-grid').hidden = true; document.querySelector('.stage__controls').hidden = true; $('#voice-join').hidden = false; $('#voice-panel').hidden = true; $('#music-player').hidden = true; }
+      if (view === 'home') { $('#chat-view').hidden = true; $('#home-view').hidden = false; $('#music-player').hidden = true; $('#invite-box').hidden = true; }
+      if (view === 'nav') { $('#app').classList.add('is-nav-open'); }
+      if (view.startsWith('modal-')) { $('#music-player').hidden = true; $('#' + view).showModal(); }
+      if (q.get('paused')) { $('#music-player').classList.add('is-paused'); $('#btn-music-unlock').hidden = false; }
+      if (q.get('noplayer')) $('#music-player').hidden = true;
+    }
+  </script>
+</body>
+</html>

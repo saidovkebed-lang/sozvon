@@ -1,0 +1,354 @@
+// WebRTC mesh: по RTCPeerConnection на каждого участника голосового канала.
+// Perfect negotiation: новичок — impolite (инициатор), существующие участники — polite.
+
+import { emit } from '../socket.js';
+import { state } from '../state.js';
+import { toast } from '../ui/toasts.js';
+
+const SPEAK_THRESHOLD = 0.018;   // RMS
+const SPEAK_ON_MS = 0;      // атака мгновенная, дебаунс — на отпускание
+const SPEAK_OFF_MS = 450;
+const SPEAK_INTERVAL = 60;
+
+class Peer {
+  constructor(id, polite, mgr) {
+    this.id = id;
+    this.polite = polite;
+    this.mgr = mgr;
+    this.makingOffer = false;
+    this.ignoreOffer = false;
+    this.isSettingRemoteAnswerPending = false;
+    this.trackInfo = new Map();     // streamId -> 'screen' | 'camera'
+    this.remote = { mic: null, screen: null, camera: null };
+    this.senders = { screen: [], camera: [] };
+    this.queue = Promise.resolve();
+    this.closed = false;
+    this.iceRestarts = 0;
+    this.warned = false;
+
+    const pc = new RTCPeerConnection({ iceServers: mgr.iceServers });
+    this.pc = pc;
+
+    pc.onnegotiationneeded = async () => {
+      try {
+        this.makingOffer = true;
+        await pc.setLocalDescription();
+        this.send({ description: pc.localDescription.toJSON() });
+      } catch (e) {
+        console.warn('[rtc] negotiation', e);
+      } finally {
+        this.makingOffer = false;
+      }
+    };
+    pc.onicecandidate = ({ candidate }) => {
+      if (candidate) this.send({ candidate: candidate.toJSON() });
+    };
+    pc.onconnectionstatechange = () => {
+      if (pc.connectionState === 'failed') {
+        if (this.iceRestarts++ < 2) {
+          try { pc.restartIce(); } catch { /* ignore */ }
+        } else if (!this.warned) {
+          this.warned = true;
+          const name = this.mgr.peerName(this.id);
+          toast(state.relay
+            ? `Не удаётся соединиться с ${name}. Попробуйте перезайти в голосовой канал.`
+            : `Не удаётся соединиться с ${name} напрямую — строгий NAT у кого-то из вас (часто мобильный интернет). Владельцу сервера: подключите TURN (README → «Если не слышно друга»).`,
+          'error', 10000);
+        }
+      } else if (pc.connectionState === 'connected') {
+        this.iceRestarts = 0;
+      }
+      mgr.changed();
+    };
+    pc.ontrack = (ev) => this.onTrack(ev);
+  }
+
+  send(data) {
+    if (!this.closed) emit('voice:signal', { to: this.id, data });
+  }
+
+  get connected() { return this.pc.connectionState === 'connected'; }
+
+  addLocalTracks() {
+    const { mic, screen, camera } = this.mgr.local;
+    if (mic && mic.getAudioTracks()[0]) {
+      this.micSender = this.pc.addTrack(mic.getAudioTracks()[0], mic);
+    } else if (!this.polite) {
+      this.pc.addTransceiver('audio', { direction: 'recvonly' });
+    }
+    if (screen) this.addStream('screen', screen);
+    if (camera) this.addStream('camera', camera);
+  }
+
+  addStream(kind, stream) {
+    this.removeStream(kind);
+    if (this.pendingLocal) return; // добавится вместе с остальными после первого offer
+    this.send({ trackInfo: { streamId: stream.id, kind } });
+    this.senders[kind] = stream.getTracks().map((t) => this.pc.addTrack(t, stream));
+  }
+
+  removeStream(kind) {
+    for (const s of this.senders[kind]) {
+      try { this.pc.removeTrack(s); } catch { /* ignore */ }
+    }
+    this.senders[kind] = [];
+  }
+
+  onTrack({ track, streams }) {
+    const stream = streams[0] || new MediaStream([track]);
+    let kind = this.trackInfo.get(stream.id);
+    if (!kind) kind = track.kind === 'audio' ? 'mic' : 'camera';
+    this.remote[kind] = stream;
+    const cleanup = () => {
+      if (this.remote[kind] === stream && !stream.getTracks().some((t) => t.readyState === 'live')) {
+        this.remote[kind] = null;
+      }
+      this.mgr.changed();
+    };
+    stream.onremovetrack = () => {
+      if (stream.getTracks().length === 0 && this.remote[kind] === stream) this.remote[kind] = null;
+      this.mgr.changed();
+    };
+    track.addEventListener('ended', cleanup);
+    track.addEventListener('mute', () => this.mgr.changed());
+    track.addEventListener('unmute', () => this.mgr.changed());
+    this.mgr.changed();
+  }
+
+  handleSignal(data) {
+    this.queue = this.queue.then(() => this.processSignal(data)).catch((e) => console.warn('[rtc] signal', e));
+  }
+
+  async processSignal({ description, candidate, trackInfo }) {
+    const pc = this.pc;
+    if (this.closed) return;
+    if (trackInfo) {
+      this.trackInfo.set(trackInfo.streamId, trackInfo.kind);
+      return;
+    }
+    if (description) {
+      const readyForOffer = !this.makingOffer && (pc.signalingState === 'stable' || this.isSettingRemoteAnswerPending);
+      const offerCollision = description.type === 'offer' && !readyForOffer;
+      this.ignoreOffer = !this.polite && offerCollision;
+      if (this.ignoreOffer) return;
+      this.isSettingRemoteAnswerPending = description.type === 'answer';
+      try {
+        await pc.setRemoteDescription(description);
+      } finally {
+        this.isSettingRemoteAnswerPending = false;
+      }
+      if (description.type === 'offer') {
+        await pc.setLocalDescription();
+        this.send({ description: pc.localDescription.toJSON() });
+        if (this.pendingLocal) {
+          // polite-сторона добавляет свои треки после первого ответа → чистая повторная negotiation
+          this.pendingLocal = false;
+          this.addLocalTracks();
+        }
+      }
+    } else if (candidate) {
+      try {
+        await pc.addIceCandidate(candidate);
+      } catch (e) {
+        if (!this.ignoreOffer) console.warn('[rtc] candidate', e);
+      }
+    }
+  }
+
+  close() {
+    this.closed = true;
+    try { this.pc.close(); } catch { /* ignore */ }
+  }
+}
+
+class RtcManager {
+  constructor() {
+    this.peers = new Map();
+    this.local = { mic: null, screen: null, camera: null };
+    this.iceServers = [];
+    this.listeners = new Set();
+    this.audioCtx = null;
+    this.speakTimer = null;
+    this.localSpeaking = false;
+  }
+
+  onChange(fn) { this.listeners.add(fn); }
+
+  changed() {
+    if (this._pending) return;
+    this._pending = true;
+    queueMicrotask(() => {
+      this._pending = false;
+      this.syncAudio();
+      for (const fn of this.listeners) {
+        try { fn(); } catch (e) { console.warn('[rtc] listener', e); }
+      }
+    });
+  }
+
+  /** Вызывать синхронно в обработчике клика (разблокирует AudioContext) */
+  prepareAudio() {
+    try {
+      if (!this.audioCtx) this.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (this.audioCtx.state === 'suspended') this.audioCtx.resume().catch(() => {});
+    } catch { /* нет WebAudio */ }
+  }
+
+  start({ iceServers, mic }) {
+    this.stop();
+    this.iceServers = iceServers || [];
+    this.local.mic = mic || null;
+    this.applyMute();
+    this.startSpeakingDetection();
+    this.changed();
+  }
+
+  stop() {
+    for (const p of this.peers.values()) p.close();
+    this.peers.clear();
+    this.stopSpeakingDetection();
+    for (const k of ['mic', 'screen', 'camera']) {
+      this.local[k]?.getTracks().forEach((t) => t.stop());
+      this.local[k] = null;
+    }
+    this.changed();
+  }
+
+  /** Новичок подключается к существующему участнику (impolite) */
+  connect(socketId) {
+    if (this.peers.has(socketId)) return this.peers.get(socketId);
+    const p = new Peer(socketId, false, this);
+    this.peers.set(socketId, p);
+    p.addLocalTracks();
+    this.changed();
+    return p;
+  }
+
+  handleSignal(from, data) {
+    if (!state.myVoice || !data) return;
+    let p = this.peers.get(from);
+    if (!p) {
+      // первый сигнал от неизвестного → polite
+      p = new Peer(from, true, this);
+      this.peers.set(from, p);
+      p.pendingLocal = true;
+      p.handleSignal(data);
+      this.changed();
+      return;
+    }
+    p.handleSignal(data);
+  }
+
+  peerName(socketId) {
+    const members = state.myVoice ? state.voice[state.myVoice.channelId] || [] : [];
+    return members.find((m) => m.socketId === socketId)?.username || 'участником';
+  }
+
+  removePeer(socketId) {
+    const p = this.peers.get(socketId);
+    if (!p) return;
+    p.close();
+    this.peers.delete(socketId);
+    this.changed();
+  }
+
+  setLocalStream(kind, stream) {
+    const old = this.local[kind];
+    if (old && old !== stream) old.getTracks().forEach((t) => t.stop());
+    this.local[kind] = stream || null;
+    for (const p of this.peers.values()) {
+      if (stream) p.addStream(kind, stream); else p.removeStream(kind);
+    }
+    this.changed();
+  }
+
+  applyMute() {
+    const enabled = !state.muted && !state.deafened;
+    this.local.mic?.getAudioTracks().forEach((t) => { t.enabled = enabled; });
+    if (!enabled) this.setLocalSpeaking(false);
+  }
+
+  /* ---------- удалённое аудио ---------- */
+  syncAudio() {
+    const box = document.getElementById('remote-audio');
+    if (!box) return;
+    const want = new Map();
+    for (const p of this.peers.values()) {
+      for (const kind of ['mic', 'screen']) {
+        const s = p.remote[kind];
+        if (s && s.getAudioTracks().length) want.set(`${p.id}|${kind}`, { s, id: p.id, kind });
+      }
+    }
+    for (const el of Array.from(box.children)) {
+      const key = `${el.dataset.socketId}|${el.dataset.kind}`;
+      const w = want.get(key);
+      if (!w || el.srcObject !== w.s) { el.srcObject = null; el.remove(); } else want.delete(key);
+    }
+    for (const [, w] of want) {
+      const el = document.createElement('audio');
+      el.className = 'remote-audio';
+      el.autoplay = true;
+      el.dataset.socketId = w.id;
+      el.dataset.kind = w.kind;
+      el.srcObject = w.s;
+      box.append(el);
+      el.play().catch(() => { /* разблокируется жестом join */ });
+    }
+    for (const el of box.children) el.muted = !!state.deafened;
+  }
+
+  /* ---------- определение речи ---------- */
+  startSpeakingDetection() {
+    this.stopSpeakingDetection();
+    const mic = this.local.mic;
+    if (!mic || !mic.getAudioTracks().length) return;
+    this.prepareAudio();
+    if (!this.audioCtx) return;
+    try {
+      const src = this.audioCtx.createMediaStreamSource(mic);
+      const analyser = this.audioCtx.createAnalyser();
+      analyser.fftSize = 512;
+      src.connect(analyser);
+      const buf = new Float32Array(analyser.fftSize);
+      let aboveSince = 0;
+      let belowSince = 0;
+      this.speakSrc = src;
+      this.speakTimer = setInterval(() => {
+        if (state.muted || state.deafened) { this.setLocalSpeaking(false); return; }
+        analyser.getFloatTimeDomainData(buf);
+        let sum = 0;
+        for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+        const rms = Math.sqrt(sum / buf.length);
+        const now = performance.now();
+        if (rms > SPEAK_THRESHOLD) {
+          belowSince = 0;
+          if (!aboveSince) aboveSince = now;
+          if (!this.localSpeaking && now - aboveSince >= SPEAK_ON_MS) this.setLocalSpeaking(true);
+        } else {
+          aboveSince = 0;
+          if (!belowSince) belowSince = now;
+          if (this.localSpeaking && now - belowSince >= SPEAK_OFF_MS) this.setLocalSpeaking(false);
+        }
+      }, SPEAK_INTERVAL);
+    } catch (e) {
+      console.warn('[rtc] speaking detection', e);
+    }
+  }
+
+  stopSpeakingDetection() {
+    clearInterval(this.speakTimer);
+    this.speakTimer = null;
+    try { this.speakSrc?.disconnect(); } catch { /* ignore */ }
+    this.speakSrc = null;
+    this.setLocalSpeaking(false);
+  }
+
+  setLocalSpeaking(v) {
+    if (this.localSpeaking === v) return;
+    this.localSpeaking = v;
+    if (state.myVoice) emit('voice:speaking', { speaking: v });
+    this.onLocalSpeaking?.(v);
+  }
+}
+
+export const rtc = new RtcManager();

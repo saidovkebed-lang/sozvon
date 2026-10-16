@@ -1,0 +1,28 @@
+{
+  "name": "sozvon",
+  "version": "1.0.0",
+  "description": "Локальный мессенджер для друзей: группы, чаты, голос, стримы экрана и музыкальный бот",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node server/index.js",
+    "share": "node server/index.js --share",
+    "bot": "node bot/index.js",
+    "test": "playwright test"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "express": "^4.21.2",
+    "multer": "^2.0.2",
+    "music-metadata": "^10.6.0",
+    "selfsigned": "^2.4.1",
+    "socket.io": "^4.8.1",
+    "socket.io-client": "^4.8.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.56.1"
+  }
+}

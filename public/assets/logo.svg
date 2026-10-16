@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Созвон">
+  <defs>
+    <linearGradient id="sz-g" x1="8" y1="4" x2="58" y2="62" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#8b6bff"/>
+      <stop offset="1" stop-color="#5b33e6"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="20" fill="url(#sz-g)"/>
+  <!-- speech bubble -->
+  <path d="M32 14c-10.5 0-19 7.2-19 16.2 0 4.9 2.5 9.3 6.5 12.3L18 50.5l9-4.3c1.6.4 3.3.6 5 .6 10.5 0 19-7.3 19-16.3S42.5 14 32 14z" fill="#fff"/>
+  <!-- voice wave -->
+  <g stroke="#5b33e6" stroke-width="3.4" stroke-linecap="round">
+    <path d="M23 27.5v5.5M28.3 23.5v13.5M33.6 26v8.5M38.9 22v16.5M44.2 27v6.5"/>
+  </g>
+</svg>

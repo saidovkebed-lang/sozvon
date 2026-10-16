@@ -1,0 +1,123 @@
+/* Созвон — дизайн-токены */
+:root {
+  color-scheme: dark;
+
+  /* ---- Фоны: графит с холодным оттенком (от глубокого к поднятому) ---- */
+  --bg-0: #0b0d11;      /* колонка серверов, подложка */
+  --bg-1: #12151b;      /* сайдбар, участники */
+  --bg-2: #171a21;      /* основная область */
+  --bg-3: #1e222b;      /* поля, карточки, тайлы */
+  --bg-4: #262b35;      /* hover */
+  --bg-5: #2f3542;      /* active / pressed */
+  --bg-elevated: #1b1f27; /* модалки, плеер, поповеры */
+  --bg-overlay: rgba(5, 6, 9, 0.66);
+
+  --border: rgba(255, 255, 255, 0.06);
+  --border-strong: rgba(255, 255, 255, 0.11);
+
+  /* ---- Текст ---- */
+  --text: #e7e9ef;
+  --text-muted: #a2a8b6;
+  --text-faint: #6e7585;
+  --text-on-accent: #ffffff;
+
+  /* ---- Фирменный акцент: электрик-фиолетовый ----
+     #6a45ff + белый текст = 5.4:1 (AA) */
+  --accent: #6a45ff;
+  --accent-hover: #5c37f2;
+  --accent-active: #4f2bdc;
+  --accent-text: #b4a4ff;            /* акцент как текст на тёмном фоне (8:1) */
+  --accent-soft: rgba(106, 69, 255, 0.16);
+  --accent-soft-strong: rgba(106, 69, 255, 0.28);
+  --accent-glow: rgba(106, 69, 255, 0.45);
+  --accent-gradient: linear-gradient(135deg, #8b6bff 0%, #5b33e6 100%);
+
+  /* ---- Статусы ---- */
+  --ok: #2fd27a;
+  --ok-strong: #1f9e5a;            /* фон кнопок «ок» с белым текстом */
+  --ok-soft: rgba(47, 210, 122, 0.14);
+  --speaking: #34e083;
+  --speaking-glow: rgba(52, 224, 131, 0.45);
+  --danger: #f2555f;               /* иконки/текст на тёмном */
+  --danger-strong: #d2303f;        /* фон кнопок с белым текстом (4.9:1) */
+  --danger-hover: #b92635;
+  --danger-soft: rgba(242, 85, 95, 0.14);
+  --warn: #f5b14c;
+  --offline: #5d6474;
+  --live: #e8384a;
+
+  /* ---- Типографика ---- */
+  --font: "Inter", "Inter var", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, "DejaVu Sans Mono", monospace;
+  --fs-xs: 11px;
+  --fs-sm: 12.5px;
+  --fs-md: 14px;
+  --fs-base: 15px;
+  --fs-lg: 17px;
+  --fs-xl: 20px;
+  --fs-2xl: 26px;
+  --lh-tight: 1.25;
+  --lh: 1.45;
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+  --fw-bold: 700;
+
+  /* ---- Отступы (шкала 4px) ---- */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  --sp-10: 40px;
+
+  /* ---- Радиусы ---- */
+  --r-xs: 4px;
+  --r-sm: 6px;
+  --r-md: 8px;
+  --r-lg: 12px;
+  --r-xl: 16px;
+  --r-2xl: 20px;
+  --r-pill: 999px;
+  --r-squircle: 16px; /* server-icon в hover/active */
+
+  /* ---- Тени ---- */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 6px 18px rgba(0, 0, 0, 0.35), 0 1px 3px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 18px 48px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.35);
+  --ring-focus: 0 0 0 2px var(--bg-2), 0 0 0 4px var(--accent-text);
+
+  /* ---- Размеры раскладки ---- */
+  --servers-w: 72px;
+  --sidebar-w: 240px;
+  --members-w: 240px;
+  --header-h: 52px;
+  --server-icon: 48px;
+
+  /* ---- z-index ---- */
+  --z-base: 1;
+  --z-sticky: 10;
+  --z-nav: 60;
+  --z-nav-backdrop: 55;
+  --z-player: 50;
+  --z-modal: 100;
+  --z-toast: 200;
+
+  /* ---- Анимации ---- */
+  --dur-fast: 120ms;
+  --dur: 180ms;
+  --dur-slow: 280ms;
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-fast: 0ms;
+    --dur: 0ms;
+    --dur-slow: 0ms;
+  }
+}
