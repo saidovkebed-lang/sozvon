@@ -39,6 +39,10 @@ export const DEFAULTS = Object.freeze({
   'notifications.desktop': false,        // системные уведомления браузера
   'notifications.mentionsOnly': false,   // системные — только при упоминании @ника
 
+  // --- Демонстрация экрана (v3) ---
+  'stream.quality': '720p30',        // '720p30' | '1080p60' | 'source'
+  'stream.audio': true,              // передавать звук экрана
+
   // --- Горячие клавиши (строка вида 'Ctrl+Shift+M'; '' = не назначено) ---
   'keybinds.toggleMute': 'Ctrl+Shift+M',
   'keybinds.toggleDeafen': 'Ctrl+Shift+D',
