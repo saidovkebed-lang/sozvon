@@ -4,6 +4,7 @@ import { state, subscribe, musicElapsed } from '../state.js';
 import { emitAck } from '../socket.js';
 import { api } from '../api.js';
 import { music } from '../music.js';
+import { prefs } from '../prefs.js';
 import { openModal } from './modals.js';
 import { toastError, toastOk } from './toasts.js';
 
@@ -17,12 +18,28 @@ async function command(cmd, args = '') {
   }
 }
 
+const trackName = (t) => [t?.artist, t?.title].filter(Boolean).join(' — ') || t?.title || 'Без названия';
+
 function renderPlayer() {
   const ms = music.currentState();
   const player = $('#music-player');
-  const show = !!(state.myVoice && ms && ms.track);
+  const ready = !!(ms?.track && ms.track.url && !ms.track.pending);
+  const loadingItem = !ready ? (ms?.queue || []).find((q) => q.loading) || (ms?.queue?.[0]?.pending ? ms.queue[0] : null) : null;
+  const show = !!(state.myVoice && ms && (ready || loadingItem));
   player.hidden = !show;
+  renderQueue();
   if (!show) return;
+  player.classList.toggle('is-loading', !ready);
+  if (!ready) {
+    $('#music-title').textContent = `Загрузка: ${loadingItem.title || 'трек'}`;
+    $('#music-title').title = loadingItem.title || '';
+    $('#music-artist').textContent = loadingItem.artist ? `${loadingItem.artist} · загружается…` : 'загружается…';
+    $('#music-progress-bar').style.width = '0%';
+    $('#music-time-cur').textContent = '0:00';
+    $('#music-time-total').textContent = loadingItem.duration ? fmtDuration(loadingItem.duration) : '—';
+    $('#btn-music-unlock').hidden = true;
+    return;
+  }
   const t = ms.track;
   $('#music-title').textContent = t.title || 'Без названия';
   $('#music-title').title = t.title || '';
@@ -38,9 +55,37 @@ function renderPlayer() {
   tickProgress();
 }
 
+/** Очередь в модалке библиотеки: готовые и «ожидающие» (pending, без url) элементы */
+function renderQueue() {
+  const box = $('#music-queue');
+  if (!box) return;
+  const ms = music.currentState();
+  const q = ms?.queue || [];
+  box.hidden = !q.length;
+  if (!q.length) { box.querySelector('.queue-list')?.replaceChildren(); return; }
+  $('#music-queue-count').textContent = String(q.length);
+  const list = box.querySelector('.queue-list');
+  const shown = q.slice(0, 50);
+  list.replaceChildren(...shown.map((t, i) => h('li', {
+    class: 'queue-item' + (t.pending ? ' is-pending' : '') + (t.loading ? ' is-loading' : ''),
+    dataset: { queueId: t.id || '' },
+  },
+  h('span', { class: 'queue-item__n' }, String(i + 1)),
+  h('div', { class: 'queue-item__info' },
+    h('div', { class: 'queue-item__title' }, t.title || 'Без названия'),
+    h('div', { class: 'queue-item__meta' }, [
+      t.artist || null,
+      t.loading ? 'загружается…' : (t.pending ? 'скачается перед воспроизведением' : null),
+      t.addedBy ? `добавил ${t.addedBy}` : null,
+    ].filter(Boolean).join(' · '))),
+  t.loading ? h('span', { class: 'spinner', role: 'img', 'aria-label': 'загружается' }) : null,
+  h('span', { class: 'queue-item__dur' }, t.duration ? fmtDuration(t.duration) : '—'))));
+  if (q.length > shown.length) list.append(h('li', { class: 'queue-item queue-item--more' }, `…и ещё ${q.length - shown.length}`));
+}
+
 function tickProgress() {
   const ms = music.currentState();
-  if (!ms?.track || $('#music-player').hidden) return;
+  if (!ms?.track?.url || $('#music-player').hidden || $('#music-player').classList.contains('is-loading')) return;
   const audio = $('#music-audio');
   const dur = ms.track.duration || (Number.isFinite(audio.duration) ? audio.duration : 0);
   const cur = Math.min(musicElapsed(ms), dur || Infinity);
@@ -99,8 +144,14 @@ export function openLibrary() {
 export function initMusicPlayer(on) {
   music.init();
   const vol = $('#music-volume');
-  vol.value = String(music.volume);
-  vol.style.setProperty('--val', `${vol.value}%`);
+  const paintVol = () => {
+    if (document.activeElement !== vol) vol.value = String(music.volume);
+    vol.style.setProperty('--val', `${vol.value}%`);
+    vol.setAttribute('aria-valuetext', `${vol.value}%`);
+    vol.title = `Громкость музыки: ${vol.value}%`;
+  };
+  paintVol();
+  prefs.subscribe('audio.musicVolume', paintVol);
   on('music:state', (ms) => music.setState(ms));
   subscribe(['music', 'voice', 'me'], renderPlayer);
   setInterval(tickProgress, 500);
@@ -108,7 +159,7 @@ export function initMusicPlayer(on) {
   $$('#music-player [data-music]').forEach((b) => b.addEventListener('click', () => command(b.dataset.music)));
   vol.addEventListener('input', (e) => {
     music.setVolume(e.target.value);
-    e.target.style.setProperty('--val', `${e.target.value}%`);
+    paintVol();
   });
   $('#btn-music-unlock').addEventListener('click', () => music.forcePlay());
   $('#btn-music-library').addEventListener('click', openLibrary);

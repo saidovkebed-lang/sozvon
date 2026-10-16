@@ -59,7 +59,7 @@ OPT_IP=""
 OPT_SOURCE=""
 OPT_RELAY=""          # ""=не менять (по умолчанию 1), 1 или 0
 OPT_FIREWALL=1
-OPT_YTDLP=0
+OPT_YTDLP=""         # ""=как в прошлый раз (по умолчанию 1), 1 или 0
 LOCAL_TEST=0
 case "${SOZVON_TEST:-0}" in 1|true|yes) LOCAL_TEST=1 ;; esac
 
@@ -76,7 +76,8 @@ usage() {
   --no-relay        не гнать весь голос через свой TURN (FORCE_RELAY=0)
   --relay           весь голос и видео через свой TURN (FORCE_RELAY=1, по умолчанию)
   --no-firewall     не настраивать ufw
-  --with-ytdlp      поставить yt-dlp и ffmpeg (импорт музыки по ссылкам YouTube и т.п.)
+  --no-ytdlp        не ставить yt-dlp и ffmpeg (музыка по ссылкам YouTube/Spotify/SoundCloud
+                    будет недоступна; по умолчанию ставятся, с ежедневным автообновлением)
   --branch ВЕТКА    ветка git (по умолчанию main)
   --source КАТАЛОГ  взять код из локального каталога вместо git clone
   --local-test      тестовый режим (Docker): без certbot/ufw/определения IP,
@@ -101,13 +102,18 @@ parse_args() {
       --relay) OPT_RELAY=1 ;;
       --no-relay) OPT_RELAY=0 ;;
       --no-firewall) OPT_FIREWALL=0 ;;
-      --with-ytdlp) OPT_YTDLP=1 ;;
+      --with-ytdlp|--ytdlp) OPT_YTDLP=1 ;;
+      --no-ytdlp) OPT_YTDLP=0 ;;
       --local-test) LOCAL_TEST=1 ;;
       -h|--help) usage; exit 0 ;;
       *) die "Неизвестный параметр: $1 (см. --help)" ;;
     esac
     shift
   done
+  if [ -z "$OPT_YTDLP" ]; then
+    OPT_YTDLP=$(env_get SOZVON_YTDLP)
+    [ "$OPT_YTDLP" = 0 ] || OPT_YTDLP=1
+  fi
   if [ "$LOCAL_TEST" = 1 ]; then
     # код из смонтированного /src, если явно не задан SOZVON_REPO (тогда — git clone)
     if [ -z "$OPT_SOURCE" ] && [ -z "${SOZVON_REPO:-}" ]; then OPT_SOURCE=/src; fi
@@ -239,6 +245,7 @@ install_packages() {
   info "Это займёт 1–3 минуты…"
   DEBIAN_FRONTEND=noninteractive apt-get update -qq -o DPkg::Lock::Timeout=600 </dev/null
   local pkgs=(ca-certificates curl git openssl xz-utils iproute2 procps nginx coturn certbot python3)
+  # ffmpeg: yt-dlp собирает из него аудио (HLS SoundCloud, opus → mp3 для всех браузеров)
   [ "$OPT_FIREWALL" = 1 ] && pkgs+=(ufw)
   [ "$OPT_YTDLP" = 1 ] && pkgs+=(ffmpeg)
   apt_install "${pkgs[@]}"
@@ -378,17 +385,16 @@ install_node() {
 }
 
 install_ytdlp() {
-  [ "$OPT_YTDLP" = 1 ] || return 0
-  step "yt-dlp (импорт музыки по ссылкам)"
-  local tmp
-  tmp=$(mktemp)
-  if download https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp "$tmp"; then
-    install -m 0755 "$tmp" /usr/local/bin/yt-dlp
-    ok "yt-dlp $(/usr/local/bin/yt-dlp --version 2>/dev/null || echo '?') установлен"
-  else
-    warn "Не удалось скачать yt-dlp с GitHub — импорт по ссылкам YouTube будет недоступен"
+  step "yt-dlp (музыка с YouTube, SoundCloud, треки Spotify)"
+  if [ "$OPT_YTDLP" != 1 ]; then
+    info "Пропущено (--no-ytdlp). Включить потом: sudo bash $APP_DIR/deploy/install.sh --ytdlp"
+    return 0
   fi
-  rm -f "$tmp"
+  # бинарь с GitHub (sha256 из SHA2-256SUMS), запасной вариант — pip в venv
+  if ! bash "$APP_DIR/deploy/ytdlp.sh" install; then
+    warn "Музыка по ссылкам пока недоступна. Повторить: sudo bash $APP_DIR/deploy/ytdlp.sh install"
+  fi
+  return 0
 }
 
 setup_user() {
@@ -445,6 +451,7 @@ npm_deps() {
     reg=$NPM_REGISTRY_MIRROR
     warn "registry.npmjs.org недоступен — использую зеркало $reg"
   fi
+  export SOZVON_DEPLOY=1   # deploy/npm-postinstall.mjs: шаги обновления делаем сами, не из npm
   local npm_args=("$sub" --omit=dev --no-audit --no-fund --no-update-notifier --loglevel=error)
   if ! (cd "$APP_DIR" && "$NPM_BIN" "${npm_args[@]}" --registry "$reg"); then
     [ "$reg" = "$NPM_REGISTRY_MIRROR" ] && die "npm $sub не удался"
@@ -490,6 +497,12 @@ write_env() {
   env_set SOZVON_DOMAIN "$DOMAIN"
   env_set SOZVON_DOMAIN_AUTO "$DOMAIN_AUTO"
   [ -n "$OPT_EMAIL" ] && env_set SOZVON_EMAIL "$OPT_EMAIL"
+  env_set SOZVON_YTDLP "$OPT_YTDLP"
+  if [ "$OPT_YTDLP" = 1 ] && [ -z "$(env_get YTDLP_PATH)" ]; then env_set YTDLP_PATH /usr/local/bin/yt-dlp; fi
+  # подсказки по музыкальным настройкам (закомментированы) — один раз
+  if ! grep -q '^# --- Музыка' "$ENV_FILE"; then
+    cat "$APP_DIR/deploy/templates/env-music.conf" >>"$ENV_FILE"
+  fi
   ok "FORCE_RELAY=$(env_get FORCE_RELAY) (1 = весь голос через свой TURN)"
 }
 
@@ -656,6 +669,22 @@ setup_nginx_and_cert() {
   fi
 }
 
+# Ежедневное обновление yt-dlp (systemd timer)
+setup_ytdlp_timer() {
+  local u
+  if [ "$OPT_YTDLP" = 1 ]; then
+    for u in sozvon-ytdlp-update.service sozvon-ytdlp-update.timer; do
+      render "$APP_DIR/deploy/templates/$u" "/etc/systemd/system/$u" 0644 root:root "APP_DIR=$APP_DIR"
+    done
+    systemctl daemon-reload
+    systemctl enable -q --now sozvon-ytdlp-update.timer
+    ok "Автообновление yt-dlp: sozvon-ytdlp-update.timer (раз в сутки)"
+  elif [ -f /etc/systemd/system/sozvon-ytdlp-update.timer ]; then
+    systemctl disable -q --now sozvon-ytdlp-update.timer 2>/dev/null || true
+    info "Автообновление yt-dlp выключено (--no-ytdlp)"
+  fi
+}
+
 setup_services() {
   step "Службы (systemd)"
   if have_systemd; then
@@ -664,6 +693,7 @@ setup_services() {
       render "$APP_DIR/deploy/templates/$u.service" "/etc/systemd/system/$u.service" 0644 root:root \
         "APP_DIR=$APP_DIR" "ENV_FILE=$ENV_FILE" "DATA_DIR=$DATA_DIR" "NODE_BIN=$NODE_BIN"
     done
+    setup_ytdlp_timer
     systemctl daemon-reload
     systemctl enable -q coturn sozvon sozvon-bot
   else
@@ -726,6 +756,14 @@ health_check() {
   done
   if [ "$bot" = 1 ]; then ok "Музыкальный бот подключён"; else warn "Бот пока не подключился (journalctl -u sozvon-bot)"; fi
 
+  if [ "$OPT_YTDLP" = 1 ]; then
+    if [ -x /usr/local/bin/yt-dlp ] && runuser -u "$APP_USER" -- env HOME="$DATA_DIR" XDG_CACHE_HOME="$DATA_DIR/.cache" /usr/local/bin/yt-dlp --version >/dev/null 2>&1; then
+      ok "yt-dlp $(/usr/local/bin/yt-dlp --version 2>/dev/null) (проверка YouTube/SoundCloud/Spotify: sudo bash $APP_DIR/deploy/music-check.sh)"
+    else
+      warn "yt-dlp не работает — музыка по ссылкам недоступна (sudo bash $APP_DIR/deploy/ytdlp.sh install)"
+    fi
+  fi
+
   if pgrep -x turnserver >/dev/null; then ok "coturn запущен"; else warn "coturn не запущен (journalctl -u coturn)"; failed=1; fi
 
   if [ "$CERT_OK" = 1 ]; then
@@ -760,6 +798,7 @@ banner() {
   printf '  обновить:     sudo bash %s/deploy/update.sh\n' "$APP_DIR"
   printf '  бэкап:        sudo bash %s/deploy/backup.sh\n' "$APP_DIR"
   printf '  журнал:       journalctl -u sozvon -f\n'
+  printf '  музыка:       sudo bash %s/deploy/music-check.sh  (доступны ли YouTube/SoundCloud/Spotify)\n' "$APP_DIR"
   printf '  настройки:    %s (после правки: systemctl restart sozvon)\n' "$ENV_FILE"
   if [ "$DOMAIN_AUTO" = 1 ]; then
     printf '  свой домен:   sudo bash %s/deploy/install.sh --domain ваш-домен.ru\n' "$APP_DIR"
@@ -781,9 +820,9 @@ main() {
   detect_ip
   choose_domain
   install_node
-  install_ytdlp
   setup_user
   fetch_code
+  install_ytdlp
   npm_deps
   write_env
   setup_coturn

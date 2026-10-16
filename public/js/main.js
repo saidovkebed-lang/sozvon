@@ -1,6 +1,6 @@
 // Бутстрап приложения «Созвон»
 import { $ } from './util.js';
-import { state, notify, upsertServer, setUserOnline, getServer, applyNetConfig } from './state.js';
+import { state, notify, upsertServer, setUserOnline, getServer, applyNetConfig, applyUserUpdate } from './state.js';
 import { api, getToken, setToken } from './api.js';
 import * as sock from './socket.js';
 import { initAuth, showAuth, hideAuth } from './ui/auth.js';
@@ -18,6 +18,15 @@ import { initVoiceSocket, resetVoice, joinVoice, leaveVoice } from './voice/voic
 import { rtc } from './voice/rtc.js';
 import { music } from './music.js';
 import { initPwa, maybeShowInstallHint } from './pwa.js';
+import { initAppearance } from './ui/appearance.js';
+import { initSounds } from './ui/sounds.js';
+import { initNotifications } from './ui/notifications.js';
+import { initKeybinds } from './ui/keybinds.js';
+import { initUserSettings, closeUserSettings } from './ui/user-settings.js';
+import { initContextMenu, closeMenu } from './ui/context-menu.js';
+
+// тема/масштаб уже выставлены /js/theme-boot.js до отрисовки; дальше — по подписке на prefs
+initAppearance();
 
 window.__sozvon = { state, rtc, music, get socket() { return sock.getSocket(); } };
 
@@ -37,6 +46,11 @@ function initUi() {
   initStage();
   initMusicPlayer(sock.on);
   initVoiceSocket(sock.on);
+  initSounds();
+  initNotifications(sock.on);
+  initKeybinds();
+  initUserSettings({ logout });
+  initContextMenu();
   initSocketEvents();
 
   $('#btn-logout').addEventListener('click', logout);
@@ -100,6 +114,7 @@ function initSocketEvents() {
     revalidateSelection();
     notify('servers');
   });
+  sock.on('user:updated', ({ user } = {}) => { applyUserUpdate(user); });
   sock.on('presence', ({ userId, online }) => {
     setUserOnline(userId, online);
     notify('presence');
@@ -165,6 +180,8 @@ function start(token) {
 }
 
 function logout() {
+  closeMenu(false);
+  closeUserSettings();
   if (state.myVoice) leaveVoice({ silent: true });
   setToken(null);
   sock.disconnect();

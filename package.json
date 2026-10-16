@@ -8,7 +8,8 @@
     "start": "node server/index.js",
     "share": "node server/index.js --share",
     "bot": "node bot/index.js",
-    "test": "playwright test"
+    "test": "playwright test",
+    "postinstall": "node deploy/npm-postinstall.mjs"
   },
   "engines": {
     "node": ">=20"

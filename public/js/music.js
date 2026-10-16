@@ -1,9 +1,11 @@
 // Синхронизированное воспроизведение музыки бота по MusicState.
 import { state, notify, musicElapsed } from './state.js';
-import { lsGet, lsSet } from './util.js';
+import { lsSet } from './util.js';
+import { prefs } from './prefs.js';
 
 const DRIFT_MAX = 1.5;
-const VOL_KEY = 'sozvon.musicVolume';
+const PREF_KEY = 'audio.musicVolume';     // 0..100 — единственный источник истины
+const LEGACY_KEY = 'sozvon.musicVolume';  // зеркало для совместимости (старые тесты/откат версии)
 
 class MusicSync {
   constructor() {
@@ -15,9 +17,8 @@ class MusicSync {
 
   init() {
     this.audio = document.getElementById('music-audio');
-    const v = Number(lsGet(VOL_KEY, '50'));
-    this.volume = Number.isFinite(v) ? Math.min(100, Math.max(0, v)) : 50;
-    this.audio.volume = this.volume / 100;
+    this.applyVolume(prefs.get(PREF_KEY));
+    prefs.subscribe(PREF_KEY, (_k, v) => { this.applyVolume(v); notify('music'); });
     this.audio.addEventListener('error', () => {
       if (this.audio.getAttribute('src')) console.warn('[music] не удалось загрузить трек', this.audio.src);
     });
@@ -25,10 +26,17 @@ class MusicSync {
     this.timer = setInterval(() => this.sync(false), 2000);
   }
 
-  setVolume(v) {
-    this.volume = Math.min(100, Math.max(0, Number(v) || 0));
-    lsSet(VOL_KEY, this.volume);
+  applyVolume(v) {
+    const n = Number(v);
+    this.volume = Number.isFinite(n) ? Math.min(100, Math.max(0, Math.round(n))) : 70;
     if (this.audio) this.audio.volume = this.volume / 100;
+  }
+
+  /** Слайдер #music-volume / контекстное меню бота → prefs */
+  setVolume(v) {
+    this.applyVolume(v);
+    prefs.set(PREF_KEY, this.volume);
+    lsSet(LEGACY_KEY, this.volume);
   }
 
   /** Вызвать в обработчике пользовательского жеста */
@@ -38,7 +46,7 @@ class MusicSync {
       this.blocked = false;
       notify('music');
     }
-    if (this.currentState()?.track && this.audio.paused) this.sync(true);
+    if (this.currentState()?.track?.url && this.audio.paused) this.sync(true);
   }
 
   /** Принять MusicState от сервера */
@@ -61,7 +69,8 @@ class MusicSync {
     const a = this.audio;
     if (!a) return;
     const ms = this.currentState();
-    if (!ms || !ms.track) {
+    // «ожидающий» элемент очереди (pending, без url) — не аудио, играть нечего
+    if (!ms || !ms.track || !ms.track.url || ms.track.pending) {
       if (this.currentUrl) {
         a.pause();
         a.removeAttribute('src');
@@ -107,7 +116,7 @@ class MusicSync {
     this.blocked = false;
     const a = this.audio;
     const ms = this.currentState();
-    if (!a || !ms?.track) return;
+    if (!a || !ms?.track?.url) return;
     try {
       if (a.readyState >= 1) a.currentTime = musicElapsed(ms);
       await a.play();

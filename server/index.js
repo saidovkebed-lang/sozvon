@@ -57,6 +57,8 @@ app.use('/api', createApiRouter({
   turnConfigured,
   forceRelay,
   isBotOnline: realtime.isBotOnline,
+  onUserUpdated: realtime.emitUserUpdated,
+  onSessionsRevoked: realtime.disconnectSessions,
 }));
 
 const INLINE_TYPES = /^(image|audio|video)\//;

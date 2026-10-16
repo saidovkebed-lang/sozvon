@@ -1,0 +1,12 @@
+# Созвон — ежедневное обновление yt-dlp. Создан deploy/install.sh.
+[Unit]
+Description=Sozvon: daily yt-dlp update
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=2h
+Persistent=true
+OnBootSec=15min
+
+[Install]
+WantedBy=timers.target

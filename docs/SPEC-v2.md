@@ -125,3 +125,16 @@ REST (авторизация как раньше):
   как получить ключи Spotify API (необязательно), что делать если YouTube не качает
   (music-check.sh, cookies, SoundCloud), ограничения и что это для личного некоммерческого
   использования.
+
+### §4 — зафиксировано по итогам реализации (agent music)
+- Событие `user:updated {user}` — всем, кто делит сервер с пользователем (смена цвета).
+- `PATCH /api/me {color}` → `{user}`; `POST /api/me/password {oldPassword,newPassword}` → `{ok:true}`;
+  неверный старый пароль — **400**; прочие сессии пользователя инвалидируются (сокеты отключаются).
+- `GET /api/music` → `{tracks, internet}` (`internet` — доступен ли импорт по ссылкам/поиск).
+- Служебные REST для бота (`Authorization: Bot …`): `POST /api/music/resolve` (ссылка/запрос →
+  список элементов очереди) и `POST /api/music/fetch` (скачать элемент → `Track`).
+- Элемент очереди в ожидании: `{id, title, artist, duration, addedBy, pending:true, source, loading?}`
+  (без `url`; `loading:true` — идёт загрузка).
+- yt-dlp: `YTDLP_PATH`, `YTDLP_COOKIES`, `YTDLP_PROXY`, `--js-runtimes node:<execPath>` (yt-dlp ≥ 2025.11.12);
+  `MUSIC_SEARCH_SOURCES` (по умолчанию `youtube,soundcloud`), `MUSIC_PLAYLIST_LIMIT` (100);
+  Spotify: `SPOTIFY_CLIENT_ID/SECRET`, `SPOTIFY_EMBED_BASE`, `SPOTIFY_API_BASE`, `SPOTIFY_ACCOUNTS_BASE`.

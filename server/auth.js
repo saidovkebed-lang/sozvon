@@ -98,11 +98,40 @@ export function requireAuth(req, res, next) {
   const [scheme, value] = header.split(' ');
   if (/^bearer$/i.test(scheme)) {
     const user = userByToken(value);
-    if (user) { req.user = user; return next(); }
+    if (user) { req.user = user; req.token = value; return next(); }
   } else if (/^bot$/i.test(scheme) && checkBotToken(value)) {
     req.user = getBotUser();
     req.isBot = true;
     if (req.user) return next();
   }
   res.status(401).json({ error: 'Требуется авторизация. Войдите заново.' });
+}
+
+// ---------- профиль ----------
+export function updateColor(user, body) {
+  const color = typeof body?.color === 'string' ? body.color.trim().toLowerCase() : '';
+  if (!/^#[0-9a-f]{6}$/.test(color)) throw new HttpError(400, 'Цвет нужно указать в формате #rrggbb');
+  if (user.isBot) throw new HttpError(403, 'Боту цвет менять нельзя');
+  user.color = color;
+  save();
+  return publicUser(user);
+}
+
+/** Смена пароля: все сессии, кроме текущей (keepToken), удаляются. Возвращает удалённые токены. */
+export async function changePassword(user, keepToken, body) {
+  const oldPassword = typeof body?.oldPassword === 'string' ? body.oldPassword : '';
+  if (!oldPassword) throw new HttpError(400, 'Введите текущий пароль');
+  if (typeof body?.newPassword !== 'string' || !body.newPassword) throw new HttpError(400, 'Введите новый пароль');
+  const newPassword = validatePassword(body.newPassword);
+  if (!user.passwordHash || !(await bcrypt.compare(oldPassword, user.passwordHash))) {
+    throw new HttpError(400, 'Неверный текущий пароль');
+  }
+  if (oldPassword === newPassword) throw new HttpError(400, 'Новый пароль совпадает с текущим');
+  user.passwordHash = await bcrypt.hash(newPassword, 10);
+  const revoked = [];
+  for (const [token, s] of Object.entries(db.data.sessions)) {
+    if (s.userId === user.id && token !== keepToken) { delete db.data.sessions[token]; revoked.push(token); }
+  }
+  save();
+  return revoked;
 }

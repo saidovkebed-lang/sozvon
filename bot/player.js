@@ -1,5 +1,7 @@
 // Плеер одного сервера: очередь, текущий трек, пауза, таймер конца трека, авто-выход.
 export const IDLE_LEAVE_MS = Number(process.env.BOT_IDLE_MS) || 2 * 60 * 1000;
+// Сколько треков подряд может не скачаться, прежде чем бот перестанет перебирать очередь
+export const MAX_FAILS_IN_ROW = Math.max(1, Number(process.env.MUSIC_MAX_FAILS) || 3);
 const END_MARGIN_MS = 400; // небольшой запас, чтобы у слушателей трек успел доиграть
 
 export function fmtTime(sec) {
@@ -16,10 +18,23 @@ export function trackLabel(t) {
   return t.artist ? `«${t.title}» — ${t.artist}` : `«${t.title}»`;
 }
 
+/** Элемент очереди для MusicState: ожидающие (pending) — без url, служебные поля (ref, _p) не уходят */
+export function publicItem(t) {
+  if (!t) return null;
+  if (t.pending) {
+    const o = { id: t.id, title: t.title, artist: t.artist || '', duration: t.duration || 0, addedBy: t.addedBy || null, pending: true, source: t.source || 'search' };
+    if (t.loading) o.loading = true;
+    return o;
+  }
+  return { id: t.id, title: t.title, artist: t.artist || '', duration: t.duration || 0, url: t.url, addedBy: t.addedBy || null };
+}
+
 export class Player {
   /**
    * @param {string} serverId
-   * @param {{ emitState(state):void, joinVoice(id):void, leaveVoice(id):void, onIdleLeave(player):void }} hooks
+   * @param {{ emitState(state):void, joinVoice(id):void, leaveVoice(id):void, onIdleLeave(player):void,
+   *           fetch?(item):Promise<object>, onTrackError?(player, item, err, info):void }} hooks
+   *   fetch — скачать ожидающий элемент (REST /api/music/fetch) → готовый Track.
    */
   constructor(serverId, hooks) {
     this.serverId = serverId;
@@ -33,10 +48,13 @@ export class Player {
     this.startedAt = 0;      // ms, когда position был актуален
     this.endTimer = null;
     this.idleTimer = null;
+    this.loading = null;     // ожидающий элемент, который качается, чтобы заиграть прямо сейчас
+    this.gen = 0;            // поколение: skip/stop во время загрузки делают её результат неактуальным
+    this.fails = 0;          // неудачных загрузок подряд
   }
 
   get active() { return !!this.voiceChannelId; }
-  get busy() { return !!this.current || this.queue.length > 0; }
+  get busy() { return !!this.current || this.queue.length > 0 || !!this.loading; }
 
   elapsed() {
     if (!this.current) return 0;
@@ -47,8 +65,9 @@ export class Player {
   state() {
     return {
       channelId: this.voiceChannelId,
-      track: this.current,
-      queue: this.queue,
+      track: publicItem(this.current),
+      // загружаемый элемент показываем первым в очереди с loading:true
+      queue: [...(this.loading ? [this.loading] : []), ...this.queue].map(publicItem),
       paused: this.paused,
       position: Math.max(0, Math.round(this.elapsed() * 1000) / 1000),
       updatedAt: Date.now(),
@@ -97,27 +116,92 @@ export class Player {
     this.startedAt = Date.now();
     this.scheduleEnd();
     this.broadcast();
+    this.prefetch();
   }
 
-  /** @returns {number} 0 — заиграл сразу, иначе позиция в очереди (1..n) */
+  // ---------- ожидающие элементы ----------
+  fetchFor(item) {
+    if (!item._p) {
+      item._p = this.hooks.fetch ? Promise.resolve().then(() => this.hooks.fetch(item)) : Promise.reject(new Error('загрузка недоступна'));
+      item._p.catch(() => {}); // ошибку обработает тот, кто ждёт
+    }
+    return item._p;
+  }
+
+  /** Предзагрузка: следующий ожидающий элемент качается, пока играет текущий */
+  prefetch() {
+    const item = this.queue[0];
+    if (!item?.pending || !this.current) return;
+    this.fetchFor(item).then((track) => {
+      const i = this.queue.indexOf(item);
+      if (i === -1) return; // уже убрали/начали играть
+      this.queue[i] = { ...track, addedBy: item.addedBy || track.addedBy };
+      this.broadcast();
+    }, () => { /* ошибку покажем, когда дойдёт очередь */ });
+  }
+
+  /** @returns {number} 0 — заиграл (или начал загружаться) сразу, иначе позиция в очереди (1..n) */
   enqueue(track) {
-    if (!this.current) { this.start(track); return 0; }
     this.queue.push(track);
+    if (!this.current && !this.loading) { this.next(); return 0; }
     this.broadcast();
+    if (this.queue.length === 1) this.prefetch();
     return this.queue.length;
   }
 
+  /** Добавить сразу много (плейлист). @returns {boolean} заиграл ли первый сразу */
+  enqueueMany(items) {
+    this.queue.push(...items);
+    if (!this.current && !this.loading) { this.next(); return true; }
+    this.broadcast();
+    this.prefetch();
+    return false;
+  }
+
+  /** Следующий трек (skip/конец трека). Ожидающий элемент сначала скачивается. @returns элемент или null */
   next() {
     this.clearEnd();
+    const gen = ++this.gen;
+    if (this.loading) { this.loading.loading = false; this.loading = null; }
     const nxt = this.queue.shift();
-    if (nxt) { this.start(nxt); return nxt; }
+    if (nxt && !nxt.pending) { this.start(nxt); return nxt; }
     this.current = null;
     this.paused = false;
     this.position = 0;
     this.startedAt = Date.now();
+    if (!nxt) {
+      this.broadcast();
+      this.scheduleIdle();
+      return null;
+    }
+    this.clearIdle();
+    nxt.loading = true;
+    this.loading = nxt;
     this.broadcast();
-    this.scheduleIdle();
-    return null;
+    this.fetchFor(nxt).then((track) => {
+      if (gen !== this.gen) return; // пропустили/остановили, пока качалось (файл остался в кэше)
+      nxt.loading = false;
+      this.loading = null;
+      this.fails = 0;
+      this.start({ ...track, addedBy: nxt.addedBy || track.addedBy });
+    }, (err) => {
+      if (gen !== this.gen) return;
+      nxt.loading = false;
+      this.loading = null;
+      this.fails++;
+      let dropped = 0;
+      const gaveUp = this.fails >= MAX_FAILS_IN_ROW;
+      if (gaveUp) {
+        // источник, похоже, недоступен целиком — не перебираем оставшиеся сотни треков
+        const before = this.queue.length;
+        this.queue = this.queue.filter((t) => !t.pending);
+        dropped = before - this.queue.length;
+        this.fails = 0;
+      }
+      this.hooks.onTrackError?.(this, nxt, err, { gaveUp, dropped, hasNext: this.queue.length > 0 });
+      this.next();
+    });
+    return nxt;
   }
 
   pause() {
@@ -159,6 +243,9 @@ export class Player {
   stop({ notifyServer = true } = {}) {
     this.clearEnd();
     this.clearIdle();
+    this.gen++;
+    this.loading = null;
+    this.fails = 0;
     this.current = null;
     this.queue = [];
     this.paused = false;

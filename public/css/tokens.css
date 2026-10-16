@@ -12,6 +12,18 @@
   --bg-elevated: #1b1f27; /* модалки, плеер, поповеры */
   --bg-overlay: rgba(5, 6, 9, 0.66);
 
+  --user-panel-bg: #0f1217;
+  --hover-tint: rgba(255, 255, 255, 0.025);  /* подсветка строки сообщения */
+  --footer-tint: rgba(0, 0, 0, 0.18);        /* подвал модалки */
+  --glass: rgba(27, 31, 39, 0.86);           /* карточка входа */
+  --glass-2: rgba(23, 26, 33, 0.88);         /* drag&drop */
+  --scroll-thumb-hover: #3d4453;
+  --track: rgba(255, 255, 255, 0.14);        /* дорожка слайдеров/прогресса */
+  --thumb: #ffffff;
+  --inverse: #ffffff;                         /* «инверсные» кнопки (ctrl.is-on, ▶) */
+  --inverse-hover: #e6e8ee;
+  --on-inverse: #11131a;
+
   --border: rgba(255, 255, 255, 0.06);
   --border-strong: rgba(255, 255, 255, 0.11);
 
@@ -20,6 +32,8 @@
   --text-muted: #a2a8b6;
   --text-faint: #6e7585;
   --text-on-accent: #ffffff;
+  --text-message: #dcdfe6;
+  --input-hover-border: rgba(255, 255, 255, 0.18);
 
   /* ---- Фирменный акцент: электрик-фиолетовый ----
      #6a45ff + белый текст = 5.4:1 (AA) */
@@ -49,13 +63,14 @@
   /* ---- Типографика ---- */
   --font: "Inter", "Inter var", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, "DejaVu Sans Mono", monospace;
-  --fs-xs: 11px;
-  --fs-sm: 12.5px;
-  --fs-md: 14px;
-  --fs-base: 15px;
-  --fs-lg: 17px;
-  --fs-xl: 20px;
-  --fs-2xl: 26px;
+  --font-scale: 1;                 /* prefs appearance.fontScale / 100 (ставит theme-boot.js) */
+  --fs-xs: calc(11px * var(--font-scale));
+  --fs-sm: calc(12.5px * var(--font-scale));
+  --fs-md: calc(14px * var(--font-scale));
+  --fs-base: calc(15px * var(--font-scale));
+  --fs-lg: calc(17px * var(--font-scale));
+  --fs-xl: calc(20px * var(--font-scale));
+  --fs-2xl: calc(26px * var(--font-scale));
   --lh-tight: 1.25;
   --lh: 1.45;
   --fw-regular: 400;
@@ -115,9 +130,100 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  :root {
+  :root:not([data-reduce-motion="off"]) {
     --dur-fast: 0ms;
     --dur: 0ms;
     --dur-slow: 0ms;
   }
+}
+
+:root[data-reduce-motion="on"] {
+  --dur-fast: 0ms;
+  --dur: 0ms;
+  --dur-slow: 0ms;
+}
+
+/* ============================================================
+   Темы: data-theme на <html> (prefs appearance.theme), ставится до первой отрисовки
+   ============================================================ */
+
+/* ---- Светлая: холодный «бумажный» серый, все пары текст/фон ≥ 4.5:1 (AA) ----
+   text #1c1f26 на #fff 16.5:1 · muted #4d5463 6.8–7.6:1 · faint #5f6674 ≥4.6:1 на bg-0..2
+   accent-text #4a26d6 7.4:1 · danger #c42b3a 5.0:1 на bg-1 · ok #13733f 5.3:1 · warn #8f5600 5.4:1 */
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --bg-0: #e3e5ea;
+  --bg-1: #f2f3f5;
+  --bg-2: #ffffff;
+  --bg-3: #ebedf0;
+  --bg-4: #e1e4e9;
+  --bg-5: #d4d8df;
+  --bg-elevated: #ffffff;
+  --bg-overlay: rgba(20, 23, 31, 0.42);
+
+  --user-panel-bg: #e9ebef;
+  --hover-tint: rgba(16, 24, 40, 0.035);
+  --footer-tint: #f2f3f5;
+  --glass: rgba(255, 255, 255, 0.88);
+  --glass-2: rgba(255, 255, 255, 0.9);
+  --scroll-thumb-hover: #b9bfca;
+  --track: rgba(16, 24, 40, 0.16);
+  --thumb: #ffffff;
+  --inverse: #1c1f26;
+  --inverse-hover: #343944;
+  --on-inverse: #ffffff;
+
+  --border: rgba(16, 24, 40, 0.08);
+  --border-strong: rgba(16, 24, 40, 0.15);
+
+  --text: #1c1f26;
+  --text-muted: #4d5463;
+  --text-faint: #5f6674;
+  --text-message: #262a33;
+  --input-hover-border: rgba(16, 24, 40, 0.28);
+
+  --accent: #5b36f0;               /* белый текст 6.5:1 */
+  --accent-hover: #4f2bdc;
+  --accent-active: #4422c4;
+  --accent-text: #4a26d6;
+  --accent-soft: rgba(91, 54, 240, 0.10);
+  --accent-soft-strong: rgba(91, 54, 240, 0.2);
+  --accent-glow: rgba(91, 54, 240, 0.35);
+
+  --ok: #13733f;
+  --ok-strong: #157a43;
+  --ok-soft: rgba(21, 122, 67, 0.12);
+  --speaking: #1fae62;
+  --speaking-glow: rgba(31, 174, 98, 0.4);
+  --danger: #c42b3a;
+  --danger-strong: #c42b3a;
+  --danger-hover: #a8212f;
+  --danger-soft: rgba(196, 43, 58, 0.1);
+  --warn: #8f5600;
+  --offline: #8a91a0;
+  --live: #d92c3e;
+
+  --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.1);
+  --shadow-md: 0 6px 18px rgba(16, 24, 40, 0.12), 0 1px 3px rgba(16, 24, 40, 0.08);
+  --shadow-lg: 0 18px 48px rgba(16, 24, 40, 0.18), 0 2px 8px rgba(16, 24, 40, 0.08);
+}
+
+/* ---- AMOLED: чистый чёрный для OLED-экранов ---- */
+:root[data-theme="amoled"] {
+  --bg-0: #000000;
+  --bg-1: #000000;
+  --bg-2: #000000;
+  --bg-3: #0d0e12;
+  --bg-4: #17191f;
+  --bg-5: #22252d;
+  --bg-elevated: #0a0b0e;
+  --bg-overlay: rgba(0, 0, 0, 0.78);
+  --user-panel-bg: #000000;
+  --footer-tint: #050608;
+  --glass: rgba(8, 9, 12, 0.9);
+  --glass-2: rgba(0, 0, 0, 0.88);
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.14);
+  --text-faint: #7b8292;
 }

@@ -5,7 +5,7 @@ import http from 'node:http';
 import https from 'node:https';
 import { fileURLToPath } from 'node:url';
 import { io } from 'socket.io-client';
-import { Player, fmtTime, trackLabel, IDLE_LEAVE_MS } from './player.js';
+import { Player, fmtTime, trackLabel, IDLE_LEAVE_MS, MAX_FAILS_IN_ROW } from './player.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DATA_DIR = path.resolve(process.env.DATA_DIR || path.join(ROOT, 'data'));
@@ -40,7 +40,7 @@ function api(method, pathname, body, { timeoutMs = 15_000 } = {}) {
         let json = null;
         try { json = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { /* не JSON */ }
         if (res.statusCode >= 200 && res.statusCode < 300 && json) resolve(json);
-        else reject(new Error(json?.error || `Сервер ответил ${res.statusCode}`));
+        else reject(Object.assign(new Error(json?.error || `Сервер ответил ${res.statusCode}`), { status: res.statusCode }));
       });
     });
     req.setTimeout(timeoutMs, () => req.destroy(new Error('сервер не ответил вовремя')));
@@ -57,7 +57,7 @@ function fileNameOf(track) {
   try { return decodeURIComponent(track.url.split('/').pop() || ''); } catch { return ''; }
 }
 
-export function searchTracks(tracks, query) {
+export function searchTracks(tracks, query, minScore = 1) {
   const q = norm(query);
   if (!q) return null;
   const tokens = q.split(' ');
@@ -77,7 +77,7 @@ export function searchTracks(tracks, query) {
     }
     if (score > bestScore) { bestScore = score; best = t; }
   }
-  return best;
+  return bestScore >= minScore ? best : null;
 }
 
 function plural(n, one, few, many) {
@@ -87,7 +87,16 @@ function plural(n, one, few, many) {
   return many;
 }
 
-const isUrl = (s) => /^https?:\/\/\S+$/i.test(s.trim());
+const isUrl = (s) => /^https?:\/\/\S+$/i.test(s.trim()) || /^spotify:(playlist|album|track|user):\S+$/i.test(s.trim());
+const SOURCE_RU = { youtube: 'YouTube', soundcloud: 'SoundCloud', spotify: 'Spotify', search: 'поиск' };
+const DOWNLOAD_TIMEOUT_MS = 12 * 60_000; // сервер сам ограничивает yt-dlp (YTDLP_TIMEOUT_SEC), это — запас
+const STRONG_MATCH = 40; // все слова запроса нашлись в библиотеке — иначе ищем в интернете
+
+function fetchPending(item) {
+  const { _p, loading, ...clean } = item; // eslint-disable-line no-unused-vars
+  return api('POST', '/api/music/fetch', { item: clean, addedBy: item.addedBy }, { timeoutMs: DOWNLOAD_TIMEOUT_MS })
+    .then((r) => r.track);
+}
 
 // ---------- сокет ----------
 let currentToken = readToken();
@@ -110,6 +119,19 @@ function getPlayer(serverId) {
       joinVoice: (channelId) => socket.emit('bot:voice-join', { channelId }),
       leaveVoice: (channelId) => socket.emit('bot:voice-leave', { channelId }),
       onIdleLeave: (pl) => say(pl.textChannelId, `💤 ${Math.max(1, Math.round(IDLE_LEAVE_MS / 60000))} мин. тишины — я пошёл отдыхать. Позовёте снова: !play <трек> 🎵`),
+      fetch: fetchPending,
+      onTrackError: (pl, item, err, { gaveUp, dropped, hasNext }) => {
+        console.warn(`[bot] Не скачался «${item.title}»: ${err.message}`);
+        let text = `⚠️ Не получилось включить ${trackLabel(item)}: ${err.message}.`;
+        if (gaveUp) {
+          text += `\n⛔ Подряд не удалось включить ${MAX_FAILS_IN_ROW} ${plural(MAX_FAILS_IN_ROW, 'трек', 'трека', 'треков')} — похоже, источник недоступен с этого сервера.` +
+            (dropped ? ` Убрал из очереди ещё ${dropped} не загруженных.` : '') +
+            ' Попробуйте ссылку на SoundCloud; администратору — deploy/music-check.sh и docs/MUSIC.md.';
+        } else {
+          text += hasNext ? ' Включаю следующий.' : ' Очередь закончилась.';
+        }
+        say(pl.textChannelId, text);
+      },
     });
     players.set(serverId, p);
   }
@@ -123,6 +145,8 @@ function say(channelId, content) {
 const HELP = [
   '🎵 Команды DJ Бота:',
   '!play <название | исполнитель | ссылка> — включить или добавить в очередь',
+  '   ссылки: YouTube (видео, плейлист, Shorts), Spotify (плейлист, альбом, трек), SoundCloud (трек, сет)',
+  '   не нашёл в библиотеке — ищу на YouTube/SoundCloud',
   '!play — продолжить после паузы',
   '!pause / !resume — пауза / продолжить',
   '!skip — следующий трек',
@@ -133,10 +157,11 @@ const HELP = [
   '!stop — остановить, очистить очередь и выйти',
   '!leave — выйти из голосового канала',
   '!help — эта подсказка',
-  'Треки берутся из библиотеки (кнопка «Библиотека» в плеере) — туда можно загрузить свои файлы.',
+  'Свои файлы можно загрузить через кнопку «Библиотека» в плеере. Подробнее: docs/MUSIC.md',
 ].join('\n');
 
 function nowPlayingText(p) {
+  if (!p.current && p.loading) return `⏳ Загружаю: ${trackLabel(p.loading)} — сейчас заиграет`;
   if (!p.current) return '🔇 Сейчас ничего не играет. Включи что-нибудь: !play <трек>';
   const pos = fmtTime(p.elapsed());
   const dur = p.current.duration ? fmtTime(p.current.duration) : '?:??';
@@ -145,11 +170,11 @@ function nowPlayingText(p) {
 }
 
 function queueText(p) {
-  if (!p.current && !p.queue.length) return '📭 Очередь пуста. Добавь трек: !play <название>';
+  if (!p.current && !p.loading && !p.queue.length) return '📭 Очередь пуста. Добавь трек: !play <название>';
   const lines = [nowPlayingText(p)];
   if (p.queue.length) {
     lines.push('', `📜 В очереди (${p.queue.length}):`);
-    p.queue.slice(0, 15).forEach((t, i) => lines.push(`${i + 1}. ${trackLabel(t)} (${fmtTime(t.duration)})`));
+    p.queue.slice(0, 15).forEach((t, i) => lines.push(`${i + 1}. ${trackLabel(t)} (${fmtTime(t.duration)})${t.pending ? ' ⌛' : ''}`));
     if (p.queue.length > 15) lines.push(`…и ещё ${p.queue.length - 15}`);
   } else lines.push('Дальше в очереди пусто.');
   return lines.join('\n');
@@ -182,37 +207,82 @@ async function handleCommand(cmd) {
         if (p.current) return reply(nowPlayingText(p));
         return reply('🎵 Что включить? Напиши: !play <название, исполнитель или ссылка>');
       }
-      let track;
+      const start = (track) => {
+        const item = { ...track, addedBy: username };
+        p.join(voiceChannelId);
+        const pos = p.enqueue(item);
+        return reply(pos === 0
+          ? `🎵 Включаю: ${trackLabel(item)} (${fmtTime(item.duration)}) — для ${username}`
+          : `🎵 Добавил в очередь: ${trackLabel(item)} — позиция ${pos}`);
+      };
+      const resolve = () => api('POST', '/api/music/resolve', { input: args, addedBy: username }, { timeoutMs: DOWNLOAD_TIMEOUT_MS });
+
       if (isUrl(args)) {
-        reply('⏳ Загружаю трек по ссылке, это может занять немного времени…');
-        try {
-          ({ track } = await api('POST', '/api/music/import', { url: args, addedBy: username }, { timeoutMs: 11 * 60_000 }));
-        } catch (err) {
-          return reply(`😕 Не получилось загрузить трек: ${err.message}`);
+        reply('⏳ Разбираю ссылку и загружаю, это может занять немного времени…');
+        let res;
+        try { res = await resolve(); } catch (err) {
+          return reply(`😕 Не получилось загрузить по ссылке: ${err.message}`);
         }
-      } else {
-        let tracks;
-        try { ({ tracks } = await api('GET', '/api/music')); } catch (err) {
-          return reply(`😕 Не могу открыть библиотеку: ${err.message}`);
+        if (res.track) {
+          if (res.note === 'list') reply('ℹ️ Это видео из плейлиста — включаю только его. Весь плейлист: ссылка вида youtube.com/playlist?list=…');
+          return start(res.track);
         }
-        if (!tracks.length) return reply('📭 Библиотека пуста. Загрузите треки через кнопку «Библиотека» в плеере или положите файлы в папку data/music.');
-        track = searchTracks(tracks, args);
-        if (!track) return reply(`🔍 Ничего не нашёл по запросу «${args.slice(0, 100)}». Загляни в библиотеку или попробуй другое название.`);
+        const items = (res.items || []).map((it) => ({ ...it, addedBy: username }));
+        if (!items.length) return reply('📭 В плейлисте нет треков.');
+        const pl = res.playlist || {};
+        p.join(voiceChannelId);
+        const startedNow = p.enqueueMany(items);
+        if (pl.type === 'track' && items.length === 1) {
+          return reply(`🎵 ${startedNow ? 'Включаю' : 'Добавил в очередь'}: ${trackLabel(items[0])} (Spotify) — ищу звук на YouTube/SoundCloud…`);
+        }
+        let text = `📜 Добавил в очередь ${items.length} ${plural(items.length, 'трек', 'трека', 'треков')} из «${pl.title || 'плейлист'}» (${SOURCE_RU[pl.source] || 'ссылка'})`;
+        if (pl.truncated) {
+          text += pl.total > items.length
+            ? ` — всего в плейлисте ${pl.total}, взял первые ${items.length} (лимит MUSIC_PLAYLIST_LIMIT)`
+            : ' — без ключей Spotify API видны только первые 100 треков плейлиста (см. docs/MUSIC.md)';
+        }
+        text += startedNow ? '. Первый трек загружается и сейчас заиграет 🎵' : '.';
+        if (pl.source === 'spotify') text += '\nℹ️ Звук Spotify недоступен — каждый трек ищу на YouTube/SoundCloud перед воспроизведением.';
+        return reply(text);
       }
-      const item = { ...track, addedBy: username };
-      p.join(voiceChannelId);
-      const pos = p.enqueue(item);
-      return reply(pos === 0
-        ? `🎵 Включаю: ${trackLabel(item)} (${fmtTime(item.duration)}) — для ${username}`
-        : `🎵 Добавил в очередь: ${trackLabel(item)} — позиция ${pos}`);
+
+      let tracks = [];
+      let internet = false;
+      try { ({ tracks, internet } = await api('GET', '/api/music')); } catch (err) {
+        return reply(`😕 Не могу открыть библиотеку: ${err.message}`);
+      }
+      const strong = searchTracks(tracks, args, STRONG_MATCH);
+      if (strong) return start(strong);
+      const weak = searchTracks(tracks, args);
+      if (!internet) {
+        // yt-dlp на сервере нет — только библиотека (как раньше)
+        if (weak) return start(weak);
+        return reply(`🔍 Ничего не нашёл по запросу «${args.slice(0, 100)}». Загляни в библиотеку или попробуй другое название.` +
+          (tracks.length ? '' : ' (Библиотека пуста: загрузите треки кнопкой «Библиотека» в плеере.)'));
+      }
+      reply('🔍 В библиотеке такого нет — ищу на YouTube/SoundCloud…');
+      try {
+        const res = await resolve();
+        if (res.track) return start(res.track);
+        return reply('🤔 По запросу нашёлся плейлист — пришлите на него ссылку.');
+      } catch (err) {
+        if (weak) return start(weak);
+        if (err.status === 404) return reply(`🔍 Ничего не нашёл по запросу «${args.slice(0, 100)}» ни в библиотеке, ни в интернете.`);
+        if (err.status === 503) {
+          return reply(`🔍 Ничего не нашёл по запросу «${args.slice(0, 100)}» в библиотеке. Поиск в интернете недоступен: ${err.message}`);
+        }
+        return reply(`😕 Ничего не нашёл в библиотеке, а поиск в интернете не удался: ${err.message}`);
+      }
     }
     case 'skip': {
-      if (!p.current) return reply('🔇 Сейчас ничего не играет — нечего пропускать.');
-      const skipped = p.current;
+      if (!p.current && !p.loading) return reply('🔇 Сейчас ничего не играет — нечего пропускать.');
+      const skipped = p.current || p.loading;
       const nxt = p.next();
-      return reply(`⏭ Пропускаю ${trackLabel(skipped)}.` + (nxt ? ` Дальше: ${trackLabel(nxt)} 🎵` : ' Очередь закончилась.'));
+      return reply(`⏭ Пропускаю ${trackLabel(skipped)}.` +
+        (nxt ? ` Дальше: ${trackLabel(nxt)}${nxt.pending ? ' (загружаю…)' : ''} 🎵` : ' Очередь закончилась.'));
     }
     case 'pause':
+      if (!p.current && p.loading) return reply('⏳ Трек ещё загружается — поставить на паузу можно, когда заиграет.');
       if (!p.current) return reply('🔇 Сейчас ничего не играет.');
       if (!p.pause()) return reply('⏸ Уже на паузе. Продолжить: !resume');
       return reply(`⏸ Пауза: ${trackLabel(p.current)}. Продолжить: !resume`);

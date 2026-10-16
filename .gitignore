@@ -9,3 +9,5 @@ playwright-report/
 output/
 tests/screens-dev/
 tests/.results/
+tests/screens-v2/
+tests/screens-qa/v2/

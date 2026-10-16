@@ -2,7 +2,8 @@
 import { state, notify, getChannel, applyNetConfig } from '../state.js';
 import { emit, emitAck, socketId } from '../socket.js';
 import { rtc } from './rtc.js';
-import { getMic, getScreen, getCamera, stopStream } from './media.js';
+import { getScreen, getCamera, stopStream } from './media.js';
+import { engine as audio } from '../audio/engine.js';
 import { toast, toastError } from '../ui/toasts.js';
 import { music } from '../music.js';
 import { api } from '../api.js';
@@ -32,7 +33,8 @@ export async function joinVoice(channelId) {
     if (state.myVoice) await leaveVoice({ silent: true });
     let mic = null;
     try {
-      mic = await getMic();
+      // getUserMedia → [RNNoise] → громкость → гейт → отправляемый трек (настройки из prefs)
+      mic = await audio.acquireVoiceMic();
     } catch (e) {
       toast(`${e.message}. Ты подключишься только как слушатель.`, 'error', 6000);
     }
@@ -40,7 +42,7 @@ export async function joinVoice(channelId) {
     try {
       res = await emitAck('voice:join', { channelId });
     } catch (e) {
-      stopStream(mic);
+      audio.releaseVoiceMic();
       throw e;
     }
     try {

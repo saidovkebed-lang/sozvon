@@ -4,9 +4,17 @@ export class MediaError extends Error {
   constructor(message, { cancelled = false } = {}) { super(message); this.cancelled = cancelled; }
 }
 
+export function ensureMediaApi(method) {
+  return ensureApi(method);
+}
+
 function ensureApi(method) {
   if (!window.isSecureContext) throw new MediaError('Голос и видео работают только по HTTPS (или на localhost)');
   if (!navigator.mediaDevices?.[method]) throw new MediaError('Браузер не поддерживает захват медиа');
+}
+
+export function explainMediaError(err, what) {
+  return explain(err, what);
 }
 
 function explain(err, what) {

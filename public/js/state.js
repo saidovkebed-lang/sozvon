@@ -89,3 +89,26 @@ export function musicElapsed(ms) {
   const el = ms.position + (ms.paused ? 0 : (Date.now() + skew - ms.updatedAt) / 1000);
   return Math.max(0, el);
 }
+
+/** user:updated {user} — обновить пользователя везде: я, участники серверов, голос, авторы сообщений. */
+export function applyUserUpdate(user) {
+  if (!user || !user.id) return false;
+  const pick = (o) => {
+    if (!o || o.id !== user.id) return;
+    if (user.color) o.color = user.color;
+    if (user.username) o.username = user.username;
+  };
+  if (state.user?.id === user.id) state.user = { ...state.user, ...user };
+  for (const s of state.servers) for (const m of s.members || []) pick(m);
+  for (const list of Object.values(state.voice)) {
+    for (const m of list || []) {
+      if (m.userId === user.id) {
+        if (user.color) m.color = user.color;
+        if (user.username) m.username = user.username;
+      }
+    }
+  }
+  for (const list of Object.values(state.messages)) for (const msg of list || []) pick(msg.author);
+  notify('me', 'servers', 'voice', 'presence', 'messages');
+  return true;
+}

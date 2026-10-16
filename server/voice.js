@@ -193,7 +193,19 @@ export function createVoice(io, { getBotSocket }) {
     }
   }
 
+  // Пользователь сменил цвет — обновить карточки в голосовых каналах
+  function updateUser(user) {
+    for (const [channelId, room] of rooms) {
+      let changed = false;
+      for (const m of room.values()) {
+        if (!m.isBot && m.userId === user.id && m.color !== user.color) { m.color = user.color; changed = true; }
+      }
+      if (changed) broadcastMembers(channelId);
+    }
+  }
+
   return {
+    updateUser,
     members, humans, broadcastMembers, musicFor, snapshotFor, userVoiceChannel, botChannelOnServer,
     join, leave: (socket) => removeSocket(socket.id), removeSocket, updateState, speaking, signal,
     botJoin, botLeave, setMusicState, botGone, clearChannel, kickUserFromServer,
