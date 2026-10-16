@@ -1,0 +1,45 @@
+# Созвон — музыкальный DJ-бот. Создан deploy/install.sh.
+[Unit]
+Description=Sozvon music bot
+Documentation=https://github.com/saidovkebed-lang/sozvon
+After=network-online.target sozvon.service
+Wants=network-online.target
+Requires=sozvon.service
+PartOf=sozvon.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=sozvon
+Group=sozvon
+WorkingDirectory=@APP_DIR@
+EnvironmentFile=@ENV_FILE@
+Environment=HOME=@DATA_DIR@
+Environment=NODE_ENV=production
+ExecStart=@NODE_BIN@ bot/index.js
+Restart=always
+RestartSec=5
+TimeoutStopSec=10
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=@DATA_DIR@
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+# AF_NETLINK нужен os.networkInterfaces() (Node)
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target

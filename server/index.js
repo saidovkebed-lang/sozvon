@@ -102,7 +102,9 @@ server.listen(PORT, HOST, () => {
     console.log('\n  ⚠ HTTPS выключен (HTTPS=0): микрофон и демонстрация экрана работают только на localhost.');
   }
   console.log(`\n  Данные: ${DATA_DIR}`);
-  console.log(`  Музыкальный бот: в другом окне выполните «npm run bot»${hasYtDlp() ? '' : ' (yt-dlp не найден — импорт с YouTube недоступен)'}\n`);
+  const managed = Boolean(process.env.PUBLIC_URL); // установка на VPS (deploy/install.sh): бот и ссылка уже настроены
+  if (managed) console.log(`  Публичный адрес: ${process.env.PUBLIC_URL}\n`);
+  else console.log(`  Музыкальный бот: в другом окне выполните «npm run bot»${hasYtDlp() ? '' : ' (yt-dlp не найден — импорт с YouTube недоступен)'}\n`);
   if (SHARE) {
     startTunnel({
       dataDir: DATA_DIR,
@@ -120,8 +122,8 @@ server.listen(PORT, HOST, () => {
       console.error(`\n[share] Не удалось открыть публичную ссылку: ${err.message}`);
       console.error('[share] Сервер продолжает работать в локальной сети.\n');
     });
-  } else {
-    console.log('  Друзья не в вашей сети? Запустите «npm run share» — получите публичную ссылку без VPN.\n');
+  } else if (!managed) {
+    console.log('  Друзья не в вашей сети? Разместите «Созвон» на VPS в РФ: docs/DEPLOY.md (одна команда).\n');
   }
   syncLibrary({ force: true })
     .then((tracks) => console.log(`[music] Треков в библиотеке: ${tracks.length}`))
