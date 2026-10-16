@@ -1674,7 +1674,9 @@ button.stage__join, .stage__join.btn { flex: none; margin: auto; }
     top: 0; bottom: 0;
     z-index: var(--z-nav);
     transform: translateX(calc(-100% - var(--servers-w)));
-    transition: transform var(--dur-slow) var(--ease-out);
+    /* закрытое меню не должно быть доступно с клавиатуры/скринридеру: visibility выключаем после анимации */
+    visibility: hidden;
+    transition: transform var(--dur-slow) var(--ease-out), visibility 0s linear var(--dur-slow);
   }
   .servers { left: 0; width: var(--servers-w); }
   .sidebar {
@@ -1684,7 +1686,7 @@ button.stage__join, .stage__join.btn { flex: none; margin: auto; }
     box-shadow: var(--shadow-lg);
   }
   .app.is-nav-open .servers,
-  .app.is-nav-open .sidebar { transform: none; }
+  .app.is-nav-open .sidebar { transform: none; visibility: visible; transition: transform var(--dur-slow) var(--ease-out), visibility 0s; }
   .app::after {
     content: "";
     position: fixed; inset: 0;
