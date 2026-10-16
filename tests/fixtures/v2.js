@@ -15,7 +15,11 @@ export async function openSettings(page) {
   if (await modal.isVisible()) return modal;
   // на мобиле user-panel внутри выезжающего меню
   const btn = page.locator('#btn-user-settings');
-  if (!(await btn.isVisible()) && await page.locator('#btn-menu').isVisible()) await page.locator('#btn-menu').click();
+  if (await page.locator('#btn-menu').isVisible() && !(await page.locator('#app.is-nav-open').count())) {
+    await page.locator('#btn-menu').click();
+    await expect(page.locator('#app.is-nav-open')).toHaveCount(1);
+    await page.waitForTimeout(350); // выезд меню
+  }
   await btn.click();
   await expect(modal).toBeVisible();
   return modal;
