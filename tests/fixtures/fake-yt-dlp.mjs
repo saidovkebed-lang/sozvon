@@ -92,9 +92,21 @@ function videoInfo(id) {
   };
 }
 // результаты поиска запоминаем, чтобы последующая загрузка по id знала название/длительность
-const SEARCH_DB = LOG ? LOG + '.search.json' : null;
-function searchCache() { try { return JSON.parse(fs.readFileSync(SEARCH_DB, 'utf8')); } catch { return {}; } }
-function saveSearch(id, v) { if (!SEARCH_DB) return; const db = searchCache(); db[id] = v; fs.writeFileSync(SEARCH_DB, JSON.stringify(db)); }
+// (по файлу на id: параллельные вызовы yt-dlp не должны затирать друг друга)
+const SEARCH_DB = LOG ? LOG + '.search' : null;
+function searchCache() {
+  const out = {};
+  if (!SEARCH_DB) return out;
+  try { for (const f of fs.readdirSync(SEARCH_DB)) out[f.replace(/\.json$/, '')] = JSON.parse(fs.readFileSync(path.join(SEARCH_DB, f), 'utf8')); } catch { /* пусто */ }
+  return out;
+}
+function saveSearch(id, v) {
+  if (!SEARCH_DB) return;
+  fs.mkdirSync(SEARCH_DB, { recursive: true });
+  const tmp = path.join(SEARCH_DB, `.${id}.${process.pid}.tmp`);
+  fs.writeFileSync(tmp, JSON.stringify(v));
+  fs.renameSync(tmp, path.join(SEARCH_DB, id + '.json'));
+}
 
 function search(kind, n, q) {
   const base = { id: q, title: q, _type: 'playlist', webpage_url: `${kind}${n}:${q}`, original_url: `${kind}${n}:${q}`,

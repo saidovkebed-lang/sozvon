@@ -111,14 +111,23 @@ test.describe('v2 музыка: Spotify', () => {
   test('реальная embed-страница: плейлист 50 треков, альбом, трек по spotify: URI', async () => {
     test.setTimeout(120_000);
     const r = await room();
+    const n50 = ytCalls().length;
     await r.send(`!play ${SP_TOP50}`);
     expect(await r.waitBot(/Добавил в очередь \d+ трек/)).toMatch(/Добавил в очередь 50 трек/);
     const s = await r.waitState((x) => (x.queue || []).length + (x.track ? 1 : 0) >= 50 && x.track, 60000);
     expect(s.queue.length).toBe(49);
     expectPending(s.queue.slice(2).filter((q) => q.pending), 'top50');
     expect(s.queue.filter((q) => q.pending).length, 'большинство элементов ждут (ленивая очередь)').toBeGreaterThan(40);
+    await sleep(1500);
+    const searches50 = ytCalls().slice(n50).filter((c) => c.argv.some((x) => /^(yt|sc)search/.test(x)));
+    expect(searches50.length, 'ленивая очередь: ищется текущий + предзагрузка следующего, не весь плейлист').toBeLessThanOrEqual(4);
     await r.send('!stop');
     await r.waitState((x) => x.track === null);
+    // после !stop новые поиски/скачивания для выброшенной очереди не запускаются
+    await sleep(800);
+    const afterStop = ytCalls().length;
+    await sleep(2500);
+    expect(ytCalls().slice(afterStop), 'после !stop yt-dlp больше не вызывается').toEqual([]);
 
     await r.send(`!play ${SP_ALBUM}`);
     expect(await r.waitBot(/Добавил в очередь 18 трек/)).toBeTruthy();
@@ -267,6 +276,20 @@ test.describe('v2 музыка: UI с ожидающими элементами'
     await expect(page.locator('#music-player .music-player__title')).toContainText(/expectations/i, { timeout: 60000 });
     await expect.poll(() => page.evaluate(() => { const a = document.querySelector('audio#music-audio'); return a && !a.paused && a.currentTime > 0; }),
       { timeout: 20000 }).toBe(true);
+    // громкость бота из контекстного меню → prefs audio.musicVolume и громкость плеера
+    const botRow = page.locator('.voice-users .voice-user').filter({ has: page.locator('.badge--bot') });
+    await expect(botRow).toHaveCount(1);
+    await botRow.click({ button: 'right' });
+    const mv = page.locator('.context-menu').locator('visible=true').locator('input[type=range][data-action="music-volume"]');
+    await expect(mv).toBeVisible();
+    await expect(page.locator('.context-menu').locator('visible=true').locator('[data-action="user-volume"]')).toHaveCount(0);
+    await mv.fill('30');
+    await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('sozvon.prefs') || '{}')['audio.musicVolume'])).toBe(30);
+    await expect(page.locator('#music-volume')).toHaveValue('30');
+    const before = await page.evaluate(() => document.querySelector('#music-audio').volume);
+    await mv.fill('90');
+    await expect.poll(() => page.evaluate(() => document.querySelector('#music-audio').volume), { message: 'громкость плеера растёт' }).toBeGreaterThan(before);
+    await page.keyboard.press('Escape');
     await page.locator('#composer-input').fill('!stop');
     await page.locator('#composer-input').press('Enter');
     await expect(page.locator('#music-player')).toBeHidden({ timeout: 15000 });

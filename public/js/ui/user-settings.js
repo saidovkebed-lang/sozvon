@@ -939,7 +939,7 @@ function onClosed() {
   offDevices = null;
   const pw = $('#form-password');
   if (pw) { pw.reset(); $('#settings-password-error').textContent = ''; }
-  if (returnFocus && document.contains(returnFocus)) returnFocus.focus?.();
+  if (returnFocus && document.contains(returnFocus)) returnFocus.focus?.({ preventScroll: true, focusVisible: false });
   returnFocus = null;
 }
 

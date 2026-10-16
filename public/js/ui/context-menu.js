@@ -174,7 +174,6 @@ export function volumeBadge(userId, isBot) {
   const text = muted ? 'Заглушён у вас' : `Громкость у вас: ${vol}%`;
   const b = h('span', { class: 'vol-badge' + (muted ? ' vol-badge--muted' : ''), title: text, role: 'img', 'aria-label': text },
     icon(muted ? 'i-volume-x' : (vol < 100 ? 'i-volume-low' : 'i-volume'), 'icon--sm'));
-  if (!muted) b.append(h('span', { class: 'vol-badge__pct' }, `${vol}`));
   return b;
 }
 

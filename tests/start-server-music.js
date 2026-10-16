@@ -7,7 +7,7 @@ import { startFakeSpotify } from './fixtures/fake-spotify.js';
 
 fs.rmSync(MUSIC_DATA_DIR, { recursive: true, force: true });
 fs.mkdirSync(path.join(MUSIC_DATA_DIR, 'music'), { recursive: true });
-for (const f of [YTDLP_LOG, YTDLP_LOG + '.search.json', MUSIC_DATA_DIR + '-spotify.log']) fs.rmSync(f, { force: true });
+for (const f of [YTDLP_LOG, YTDLP_LOG + '.search', MUSIC_DATA_DIR + '-spotify.log']) fs.rmSync(f, { force: true, recursive: true });
 fs.chmodSync(FAKE_YTDLP, 0o755);
 await startFakeSpotify(SPOTIFY_FAKE_PORT, MUSIC_DATA_DIR + '-spotify.log');
 Object.assign(process.env, {

@@ -102,6 +102,27 @@ test.describe('v2: громкость собеседника', () => {
     await expect(selfMenu.locator('[data-action="user-volume"], [data-action="mute-user"]')).toHaveCount(0);
     await pa.keyboard.press('Escape');
 
+    // индикатор на .voice-user: есть при ≠100 %, «заглушён» — отдельный вид
+    const rowB = pa.locator(`.voice-users .voice-user[data-user-id="${B}"]`);
+    await expect(rowB.locator('.vol-badge')).toHaveCount(1);
+    await expect(rowB.locator('.vol-badge--muted')).toHaveCount(0);
+    // кнопка «⋯» (мобильный путь) открывает то же меню
+    await rowB.hover();
+    await rowB.locator('[data-user-menu]').click();
+    const viaMore = pa.locator('.context-menu').locator('visible=true');
+    await expect(viaMore.locator('input[type=range][data-action="user-volume"]')).toHaveValue('200');
+    await viaMore.locator('input[type=range][data-action="user-volume"]').fill('100');
+    await expect(rowB.locator('.vol-badge'), 'при 100% индикатора нет').toHaveCount(0);
+    await viaMore.locator('input[type=range][data-action="user-volume"]').fill('200');
+    await expect(rowB.locator('.vol-badge')).toHaveCount(1);
+    await pa.keyboard.press('Escape');
+
+    // deafen → 0, снять → снова 2
+    await pa.locator('#btn-deafen').click();
+    await expect.poll(() => gain(pa, B), { message: 'deafen → 0' }).toBe(0);
+    await pa.locator('#btn-deafen').click();
+    await expect.poll(() => gain(pa, B)).toBeCloseTo(2, 2);
+
     // Общая громкость вывода: итог = userVolume × outputVolume
     await openSection(pa, 'voice');
     await setPrefUI(pa, 'audio.outputVolume', 50);
@@ -203,5 +224,25 @@ test.describe('v2: push-to-talk', () => {
     }
     await pa.keyboard.up('v');
     await expect(pa.locator('#composer-input')).toHaveValue(/v/);
+  });
+});
+
+test.describe('v2: браузер без AudioWorklet', () => {
+  test('RNNoise недоступен → вариант disabled с пояснением, голос работает на фолбэке без ошибок', async ({ makePage }) => {
+    test.setTimeout(90_000);
+    const page = await makePage();
+    await page.addInitScript(() => { try { delete window.AudioWorkletNode; } catch { /* */ } window.AudioWorkletNode = undefined; });
+    await loginViaToken(page, 'nowl');
+    expect(await page.evaluate(() => window.__sozvon.audio.engine?.rnnoiseSupported?.() ?? null)).toBe(false);
+    const panel = await openSection(page, 'voice');
+    const rn = panel.locator('input[type="radio"][data-pref="audio.noiseSuppression"][value="rnnoise"]');
+    await expect(rn).toBeDisabled();
+    await expect(panel.locator('input[type="radio"][data-pref="audio.noiseSuppression"][value="standard"]')).toBeEnabled();
+    expect((await panel.innerText()).toLowerCase(), 'пояснение, почему недоступно').toMatch(/недоступ|не поддерж/);
+    await closeSettings(page);
+    await createServerUI(page, 'Без ворклета');
+    await joinVoiceUI(page);
+    await expect.poll(() => page.evaluate(() => window.__sozvon.audio.getNoiseMode()), { message: 'фолбэк-режим' }).not.toBe('rnnoise');
+    await expect(page.locator('#stage-grid .tile.is-speaking').first(), 'микрофон работает (фейковый бип)').toBeVisible({ timeout: 15000 });
   });
 });

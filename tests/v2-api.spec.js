@@ -120,3 +120,44 @@ test.describe('v2 REST: POST /api/me/password', () => {
     expect(relog.json.user.username).toBe(username);
   });
 });
+
+test.describe('v2 deploy: статическая проверка скриптов', () => {
+  test('deploy/*.sh: bash -n и shellcheck -S error; update.sh доустанавливает yt-dlp; есть music-check.sh и docs/MUSIC.md', async () => {
+    const { execFileSync, spawnSync } = await import('node:child_process');
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const { ROOT } = await import('./fixtures/env.js');
+    const dir = path.join(ROOT, 'deploy');
+    const scripts = fs.readdirSync(dir).filter((f) => f.endsWith('.sh')).map((f) => path.join(dir, f));
+    expect(scripts.map((f) => path.basename(f))).toEqual(expect.arrayContaining(['install.sh', 'update.sh', 'music-check.sh']));
+    for (const f of scripts) execFileSync('bash', ['-n', f]);
+    if (spawnSync('shellcheck', ['--version']).status === 0) {
+      const r = spawnSync('shellcheck', ['-S', 'error', ...scripts], { encoding: 'utf8' });
+      expect(r.status, r.stdout).toBe(0);
+    }
+    const update = fs.readFileSync(path.join(dir, 'update.sh'), 'utf8');
+    expect(update, 'update.sh доустанавливает yt-dlp').toMatch(/yt-?dlp/i);
+    expect(fs.existsSync(path.join(ROOT, 'docs', 'MUSIC.md'))).toBe(true);
+  });
+});
+
+test.describe('v2 PWA: service worker', () => {
+  test('все файлы из SHELL в sw.js отдаются 200 (иначе cache.addAll падает и обновление не ставится); vendor RNNoise отдаётся', async () => {
+    const sw = await http('GET', '/sw.js', { raw: true });
+    expect(sw.status).toBe(200);
+    const src = await sw.text();
+    const block = src.match(/const SHELL = \[([\s\S]*?)\];/);
+    expect(block, 'список SHELL в sw.js').toBeTruthy();
+    const urls = [...block[1].matchAll(/'([^']+)'/g)].map((m) => m[1]);
+    expect(urls.length).toBeGreaterThan(10);
+    const bad = [];
+    for (const u of urls) { const r = await http('GET', u, { raw: true }); if (r.status !== 200) bad.push(`${u} → ${r.status}`); }
+    expect(bad, 'файлы SHELL без 404').toEqual([]);
+    for (const u of ['/js/audio/engine.js', '/vendor/web-noise-suppressor/rnnoise-worklet.js']) {
+      expect((await http('GET', u, { raw: true })).status, u).toBe(200);
+    }
+    const wasm = await http('GET', '/vendor/web-noise-suppressor/rnnoise_simd.wasm', { raw: true });
+    expect(wasm.status).toBe(200);
+    expect(wasm.headers.get('content-type') || '', 'wasm с MIME application/wasm (для instantiateStreaming)').toMatch(/application\/wasm/);
+  });
+});

@@ -178,9 +178,12 @@ sudo bash /opt/sozvon/deploy/backup.sh --restore /путь/к/sozvon-ДАТА.ta
 | Состояние служб | `systemctl status sozvon sozvon-bot coturn nginx` |
 | Настройки | файл `/etc/sozvon.env` (после правки: `sudo systemctl restart sozvon`) |
 
-Музыку можно загружать прямо через интерфейс (кнопка «Библиотека» в плеере). Если нужен импорт
-по ссылкам YouTube и других сайтов, запустите установку с `--with-ytdlp`. Учтите, что с российского
-сервера YouTube может не открываться.
+Музыку можно загружать прямо через интерфейс (кнопка «Библиотека» в плеере) или ставить ссылкой:
+`!play <ссылка YouTube / Spotify / SoundCloud>` — подробно в [MUSIC.md](MUSIC.md). Для ссылок
+установщик по умолчанию ставит yt-dlp и ffmpeg и включает их ежедневное автообновление
+(отключить — `--no-ytdlp`). Проверить, какие музыкальные источники доступны с вашего сервера:
+`sudo bash /opt/sozvon/deploy/music-check.sh`. С российского сервера YouTube часто требует
+cookies — см. MUSIC.md; SoundCloud обычно работает сразу.
 
 ### Голос через свой TURN (FORCE_RELAY)
 
@@ -272,7 +275,7 @@ sudo bash /opt/sozvon/deploy/uninstall.sh --purge  # удалить всё, вк
 | `--ip IPv4` | публичный IP, если автоопределение ошиблось |
 | `--relay` / `--no-relay` | `FORCE_RELAY=1/0` |
 | `--no-firewall` | не трогать ufw |
-| `--with-ytdlp` | поставить yt-dlp и ffmpeg |
+| `--no-ytdlp` | не ставить yt-dlp (по умолчанию ставится вместе с ffmpeg и таймером автообновления) |
 | `--branch ВЕТКА` | ветка git (по умолчанию `main`) |
 | `--source КАТАЛОГ` | взять код из локального каталога вместо git |
 | `--local-test` | тестовый режим для Docker: без certbot/ufw/определения IP, самоподписанный сертификат, код из `/src` |

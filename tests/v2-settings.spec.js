@@ -1,6 +1,6 @@
 // v2 §3: модалка «Настройки пользователя», внешний вид, горячие клавиши, профиль через UI
 import {
-  test, expect, loginViaToken, createServerUI, joinVoiceUI, openTextChannel, loginUI,
+  test, expect, loginViaToken, createServerUI, joinVoiceUI, openTextChannel, loginUI, joinServerUI, sendMessageUI,
 } from './fixtures/ui.js';
 import { http } from './fixtures/api.js';
 import {
@@ -191,5 +191,36 @@ test.describe('v2: учётная запись через UI', () => {
     // свежий контекст: вход через форму с новым паролем
     const p2 = await makePage({ name: 'relogin' });
     await loginUI(p2, reg.username, 'brandnew77');
+  });
+});
+
+test.describe('v2: цвет аватара у других участников', () => {
+  test('A меняет цвет → у B в участниках, в голосе и у сообщений A новый цвет без перезагрузки', async ({ makePage }) => {
+    test.setTimeout(90_000);
+    const pa = await makePage({ name: 'A' });
+    const pb = await makePage({ name: 'B' });
+    const ua = await loginViaToken(pa, 'cla');
+    await loginViaToken(pb, 'clb');
+    await createServerUI(pa, 'Цвета UI');
+    const code = (await pa.locator('#invite-code').innerText()).trim();
+    await joinServerUI(pb, code, 'Цвета UI');
+    await openTextChannel(pa); await openTextChannel(pb);
+    await sendMessageUI(pa, 'мой цвет сейчас поменяется');
+    await joinVoiceUI(pa);
+    const acc = await openSection(pa, 'account');
+    const sw = acc.locator('button[data-color]').nth(5);
+    const color = (await sw.getAttribute('data-color')).toLowerCase();
+    await sw.click();
+    await closeSettings(pa);
+    const norm = (c) => c.trim().toLowerCase();
+    const colorOf = (loc) => loc.evaluate((el) => getComputedStyle(el).getPropertyValue('--c'));
+    const member = pb.locator('#members .member').filter({ hasText: ua.username }).locator('.avatar').first();
+    await expect.poll(async () => norm(await colorOf(member)), { message: 'аватар A в списке участников у B' }).toBe(color);
+    const vu = pb.locator('.voice-users .voice-user').filter({ hasText: ua.username }).locator('.avatar').first();
+    await expect.poll(async () => norm(await colorOf(vu)), { message: 'аватар A в голосе у B' }).toBe(color);
+    const msgAv = pb.locator('#messages .message').filter({ hasText: 'мой цвет сейчас поменяется' }).locator('.avatar').first();
+    if (await msgAv.count()) await expect.poll(async () => norm(await colorOf(msgAv)), { message: 'аватар у сообщения A' }).toBe(color);
+    // и у самого A в user-panel
+    await expect.poll(async () => norm(await colorOf(pa.locator('.user-panel .avatar').first()))).toBe(color);
   });
 });
