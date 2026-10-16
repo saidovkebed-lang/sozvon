@@ -8,3 +8,4 @@ test-results/
 playwright-report/
 output/
 tests/screens-dev/
+tests/.results/
