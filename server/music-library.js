@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { parseFile } from 'music-metadata';
@@ -18,7 +18,9 @@ const MIME_BY_EXT = {
   'audio/ogg': '.ogg', 'audio/opus': '.opus', 'audio/wav': '.wav', 'audio/x-wav': '.wav', 'audio/wave': '.wav',
   'audio/flac': '.flac', 'audio/x-flac': '.flac', 'audio/webm': '.webm',
 };
-const YTDLP_HOSTS = /(^|\.)(youtube\.com|youtu\.be|music\.youtube\.com|soundcloud\.com|vk\.com|vkvideo\.ru|bandcamp\.com|twitch\.tv|rutube\.ru|vimeo\.com|dailymotion\.com|mixcloud\.com)$/i;
+export const YTDLP_HOSTS = /(^|\.)(youtube\.com|youtu\.be|music\.youtube\.com|soundcloud\.com|vk\.com|vkvideo\.ru|bandcamp\.com|twitch\.tv|rutube\.ru|vimeo\.com|dailymotion\.com|mixcloud\.com)$/i;
+// Путь к yt-dlp: env YTDLP_PATH (для тестов — фейковый скрипт), иначе «yt-dlp» из PATH
+export const ytdlpPath = () => process.env.YTDLP_PATH || 'yt-dlp';
 
 let musicDir = null;
 export function initMusicLibrary(dataDir) {
@@ -36,12 +38,17 @@ function commandExists(cmd) {
   } catch { return false; }
 }
 let ytdlpCache = null;
+let ytdlpCheckedAt = 0;
 export function hasYtDlp() {
-  if (ytdlpCache === null || ytdlpCache === false) ytdlpCache = commandExists('yt-dlp');
+  // «нет» перепроверяем раз в минуту: yt-dlp могли доустановить без перезапуска
+  if (!ytdlpCache && Date.now() - ytdlpCheckedAt > 60_000) {
+    ytdlpCache = commandExists(ytdlpPath());
+    ytdlpCheckedAt = Date.now();
+  }
   return ytdlpCache;
 }
 let ffmpegCache = null;
-const hasFfmpeg = () => (ffmpegCache ??= commandExists('ffmpeg'));
+export const hasFfmpeg = () => (ffmpegCache ??= commandExists(process.env.FFMPEG_PATH || 'ffmpeg'));
 
 export function sanitizeFileName(name) {
   let base = String(name || '').normalize('NFC');
@@ -56,7 +63,7 @@ export function sanitizeFileName(name) {
   return base;
 }
 
-function uniqueName(dir, name) {
+export function uniqueName(dir, name) {
   const ext = path.extname(name);
   const stem = name.slice(0, name.length - ext.length);
   let candidate = name;
@@ -140,14 +147,40 @@ export function listTracks() {
     .map(publicTrack);
 }
 
-async function registerFile(file, addedBy) {
+/**
+ * Зарегистрировать файл из каталога музыки.
+ * @param {{title?:string, artist?:string, duration?:number, sources?:string[]}} [extra]
+ *   метаданные источника (yt-dlp/Spotify) поверх тегов и ключи кэша источника («youtube:<id>» и т.п.)
+ */
+export async function registerFile(file, addedBy, extra = {}) {
   const st = await fsp.stat(path.join(musicDir, file));
   const meta = await readMeta(file);
+  if (extra.title) meta.title = String(extra.title).slice(0, 200);
+  if (extra.artist !== undefined && extra.artist !== null && (extra.title || !meta.artist)) meta.artist = String(extra.artist).slice(0, 200);
+  if (!meta.duration && Number.isFinite(extra.duration) && extra.duration > 0) meta.duration = Math.round(extra.duration * 10) / 10;
   db.data.tracks = db.data.tracks.filter((t) => t.file !== file);
   const track = { id: trackId(file), file, ...meta, addedBy, size: st.size, mtimeMs: st.mtimeMs, createdAt: Date.now() };
+  const sources = [...new Set((extra.sources || []).filter(Boolean))];
+  if (sources.length) track.sources = sources;
   db.data.tracks.push(track);
   save();
   return publicTrack(track);
+}
+
+/** Кэш: трек библиотеки, скачанный ранее из источника с одним из ключей (файл должен существовать). */
+export function findBySource(keys, addAliases = []) {
+  const want = keys.filter(Boolean);
+  if (!want.length) return null;
+  const t = db.data.tracks.find((x) => x.sources?.some((k) => want.includes(k)));
+  if (!t) return null;
+  if (!fs.existsSync(path.join(musicDir, t.file))) {
+    db.data.tracks = db.data.tracks.filter((x) => x !== t);
+    save();
+    return null;
+  }
+  const extra = [...want, ...addAliases].filter((k) => k && !t.sources.includes(k));
+  if (extra.length) { t.sources.push(...extra); save(); }
+  return publicTrack(t);
 }
 
 // ---------- загрузка файла (после multer) ----------
@@ -229,56 +262,5 @@ async function downloadDirect(u, addedBy) {
   }
 }
 
-function downloadYtDlp(u, addedBy) {
-  return new Promise((resolve, reject) => {
-    const token = crypto.randomBytes(4).toString('hex');
-    const args = ['--no-playlist', '--no-progress', '--restrict-filenames', '--max-filesize', '50M',
-      '-o', path.join(musicDir, `%(title).80s-${token}.%(ext)s`), '--print', 'after_move:filepath'];
-    if (hasFfmpeg()) args.push('-x', '--audio-format', 'mp3', '--audio-quality', '5');
-    else args.push('-f', 'bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio');
-    args.push('--', u.toString());
-    const child = spawn('yt-dlp', args, { stdio: ['ignore', 'pipe', 'pipe'] });
-    let out = '', errOut = '';
-    child.stdout.on('data', (d) => { out += d; });
-    child.stderr.on('data', (d) => { errOut += d; });
-    const killer = setTimeout(() => child.kill('SIGKILL'), 10 * 60_000);
-    child.on('error', (err) => { clearTimeout(killer); reject(new HttpError(500, 'Не удалось запустить yt-dlp: ' + err.message)); });
-    child.on('close', async (code) => {
-      clearTimeout(killer);
-      const filePath = out.trim().split('\n').filter(Boolean).pop();
-      if (code !== 0 || !filePath || !fs.existsSync(filePath)) {
-        const reason = (errOut.split('\n').find((l) => l.includes('ERROR')) || errOut.trim().split('\n').pop() || '').slice(0, 300);
-        return reject(new HttpError(400, 'yt-dlp не смог скачать трек' + (reason ? ': ' + reason : '')));
-      }
-      try {
-        let file = path.basename(filePath);
-        if (!AUDIO_EXT.has(path.extname(file).toLowerCase())) {
-          await fsp.rm(filePath, { force: true });
-          return reject(new HttpError(400, 'yt-dlp скачал файл неподдерживаемого формата'));
-        }
-        const st = await fsp.stat(filePath);
-        if (st.size > MUSIC_MAX_BYTES) {
-          await fsp.rm(filePath, { force: true });
-          return reject(new HttpError(400, 'Файл слишком большой (максимум 50 МБ)'));
-        }
-        const clean = uniqueName(musicDir, sanitizeFileName(file.replace(`-${token}`, '').replace(/_/g, ' ')));
-        await fsp.rename(filePath, path.join(musicDir, clean));
-        file = clean;
-        resolve(await registerFile(file, addedBy));
-      } catch (err) { reject(err); }
-    });
-  });
-}
-
-export async function importFromUrl(rawUrl, addedBy) {
-  const u = parseUrl(rawUrl);
-  const needsYtDlp = YTDLP_HOSTS.test(u.hostname);
-  if (needsYtDlp) {
-    if (!hasYtDlp()) throw new HttpError(400, 'Для ссылок YouTube и других сайтов нужен yt-dlp — он не установлен на сервере. Установите yt-dlp (см. README) или используйте прямую ссылку на аудиофайл.');
-    return downloadYtDlp(u, addedBy);
-  }
-  const track = await downloadDirect(u, addedBy);
-  if (track) return track;
-  if (hasYtDlp()) return downloadYtDlp(u, addedBy);
-  throw new HttpError(400, 'По ссылке не аудиофайл. Нужна прямая ссылка на mp3/ogg/m4a… (для YouTube и других сайтов установите yt-dlp)');
-}
+// Импорт по ссылке (REST /api/music/import) — в server/music-sources.js (yt-dlp, кэш по источнику)
+export { parseUrl, downloadDirect };

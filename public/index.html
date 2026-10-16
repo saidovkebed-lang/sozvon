@@ -13,6 +13,8 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
   <meta name="format-detection" content="telephone=no">
   <title>Созвон</title>
+  <!-- тема/масштаб из настроек — до первой отрисовки, без мигания -->
+  <script src="/js/theme-boot.js"></script>
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
   <link rel="icon" href="/assets/icons/icon-192.png" type="image/png" sizes="192x192">
@@ -104,6 +106,9 @@
         </button>
         <button class="icon-btn" id="btn-deafen" type="button" aria-label="Выключить звук" aria-pressed="false" title="Звук">
           <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-headphones"/></svg>
+        </button>
+        <button class="icon-btn" id="btn-user-settings" type="button" aria-label="Настройки пользователя" aria-haspopup="dialog" title="Настройки пользователя">
+          <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-settings"/></svg>
         </button>
         <button class="icon-btn" id="btn-install" type="button" aria-label="Установить приложение" title="Установить приложение" hidden>
           <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-download"/></svg>
@@ -320,6 +325,10 @@
     </div>
     <div class="modal__body">
       <p class="modal__hint" id="music-hint">Нажми <svg class="icon icon--sm" aria-hidden="true"><use href="/assets/icons.svg#i-play"/></svg>, чтобы DJ Бот поставил трек в очередь. Нужно быть в голосовом канале.</p>
+      <div class="music-queue" id="music-queue" hidden>
+        <h4 class="music-queue__title">Очередь <span class="music-queue__count" id="music-queue-count">0</span></h4>
+        <ol class="queue-list"></ol>
+      </div>
       <div class="track-list" id="track-list"></div>
       <div class="music-add">
         <label class="btn btn--ghost music-add__upload" for="music-file-input">
@@ -346,6 +355,33 @@
     <div class="modal__footer">
       <button class="btn btn--ghost" type="button" data-close>Отмена</button>
       <button class="btn btn--primary" type="button" id="confirm-ok">Подтвердить</button>
+    </div>
+  </dialog>
+
+  <!-- ===== Настройки пользователя (полноэкранная, разделы строит js/ui/user-settings.js) ===== -->
+  <dialog class="modal settings" id="modal-user-settings" aria-labelledby="settings-heading">
+    <div class="settings__layout">
+      <nav class="settings__nav" aria-label="Разделы настроек">
+        <div class="settings__nav-inner">
+          <h2 class="settings__heading" id="settings-heading">Настройки</h2>
+          <div class="settings__nav-list" role="tablist" aria-orientation="vertical" aria-labelledby="settings-heading"></div>
+        </div>
+      </nav>
+      <div class="settings__content">
+        <header class="settings__bar">
+          <button class="icon-btn settings__back" type="button" aria-label="Назад к разделам">
+            <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-arrow-left"/></svg>
+          </button>
+          <span class="settings__bar-title" id="settings-bar-title">Настройки</span>
+        </header>
+        <div class="settings__scroll"></div>
+      </div>
+    </div>
+    <div class="settings__close-wrap">
+      <button class="settings__close" type="button" data-close aria-label="Закрыть настройки" title="Закрыть (Esc)">
+        <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-close"/></svg>
+      </button>
+      <span class="settings__esc" aria-hidden="true">ESC</span>
     </div>
   </dialog>
 

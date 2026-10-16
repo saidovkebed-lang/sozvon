@@ -3,6 +3,7 @@ import { $, h, icon, avatar } from '../util.js';
 import { state, subscribe, getChannel } from '../state.js';
 import { socketId } from '../socket.js';
 import { rtc } from '../voice/rtc.js';
+import { moreButton } from './context-menu.js';
 import { joinVoice, leaveVoice, toggleMute, toggleDeafen, toggleScreen, toggleCamera } from '../voice/voice.js';
 
 const tiles = new Map();   // key -> { el, stream, sig }
@@ -42,6 +43,7 @@ function fillTile(entry, d) {
   const { el } = entry;
   const { member: m, kind, stream, self, peer } = d;
   el.dataset.socketId = m.socketId;
+  if (m.userId) el.dataset.userId = m.userId;
   el.dataset.kind = kind;
   if (self) el.dataset.self = 'true'; else delete el.dataset.self;
   if (peer) el.dataset.connected = String(peer.connected);
@@ -79,7 +81,7 @@ function fillTile(entry, d) {
   }
 
   // подписи и бейджи
-  el.querySelectorAll('.tile__label, .badge, .tile__expand').forEach((x) => x.remove());
+  el.querySelectorAll('.tile__label, .badge, .tile__expand, .tile__more').forEach((x) => x.remove());
   const label = h('div', { class: 'tile__label' }, h('span', null, kind === 'screen' ? `${m.username} — экран` : m.username));
   if (kind === 'main') {
     if (m.deafened) label.append(icon('i-headphones-off', 'icon--sm'));
@@ -93,6 +95,11 @@ function fillTile(entry, d) {
     'aria-label': 'Во весь экран', title: 'Во весь экран',
     onclick: (e) => { e.stopPropagation(); toggleFullscreen(el); },
   }, icon('i-expand', 'icon--sm')));
+  if (!self) {
+    const more = moreButton(m.username);
+    more.classList.add('tile__more');
+    el.append(more);
+  }
 }
 
 function render() {

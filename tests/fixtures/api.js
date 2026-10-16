@@ -14,13 +14,15 @@ export function uniqueName(prefix = 'qa') {
   return `${prefix}${Date.now().toString(36).slice(-5)}${counter}${Math.random().toString(36).slice(2, 5)}`.slice(0, 24);
 }
 
-export async function http(method, url, { token, body, headers = {}, raw } = {}) {
+export async function http(method, url, opts = {}) { return httpAt(BASE_URL, method, url, opts); }
+
+export async function httpAt(base, method, url, { token, body, headers = {}, raw } = {}) {
   const h = { ...headers };
   if (token) h.Authorization = token.startsWith('Bot ') ? token : `Bearer ${token}`;
   let payload;
   if (body instanceof FormData) payload = body;
   else if (body !== undefined) { h['Content-Type'] = 'application/json'; payload = JSON.stringify(body); }
-  const res = await fetch(BASE_URL + url, { method, headers: h, body: payload });
+  const res = await fetch(base + url, { method, headers: h, body: payload });
   if (raw) return res;
   let json = null;
   const text = await res.text();
@@ -36,7 +38,7 @@ export async function registerApi(username = uniqueName(), password = 'secret123
 
 export function connect(token, opts = {}) {
   const auth = opts.bot ? { botToken: token } : { token };
-  const socket = io(BASE_URL, { auth, transports: ['websocket'], rejectUnauthorized: false, reconnection: false, forceNew: true });
+  const socket = io(opts.base || BASE_URL, { auth, transports: ['websocket'], rejectUnauthorized: false, reconnection: false, forceNew: true });
   return socket;
 }
 
@@ -102,11 +104,11 @@ export async function waitFor(fn, { timeout = 10000, interval = 200, message = '
 }
 
 // ---------- Бот как дочерний процесс ----------
-export async function startBot() {
+export async function startBot({ base = BASE_URL, dataDir = DATA_DIR, env = {} } = {}) {
   const logs = [];
   const child = spawn(process.execPath, [path.join(ROOT, 'bot', 'index.js')], {
     cwd: ROOT,
-    env: { ...process.env, BOT_SERVER_URL: BASE_URL, DATA_DIR, NODE_TLS_REJECT_UNAUTHORIZED: '0' },
+    env: { ...process.env, ...env, BOT_SERVER_URL: base, DATA_DIR: dataDir, NODE_TLS_REJECT_UNAUTHORIZED: '0' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   child.stdout.on('data', (d) => logs.push(String(d)));
@@ -116,7 +118,7 @@ export async function startBot() {
   try {
     await waitFor(async () => {
       if (exited) throw new Error('bot exited ' + JSON.stringify(exited) + '\n' + logs.join(''));
-      const r = await http('GET', '/api/config');
+      const r = await httpAt(base, 'GET', '/api/config');
       return r.json && r.json.botOnline === true;
     }, { timeout: 15000, message: 'botOnline=true in /api/config' });
   } catch (e) {
@@ -131,12 +133,29 @@ export async function startBot() {
       child.kill('SIGTERM');
       const t = setTimeout(() => child.kill('SIGKILL'), 3000);
       await p; clearTimeout(t);
-      await waitFor(async () => (await http('GET', '/api/config')).json.botOnline === false,
+      await waitFor(async () => (await httpAt(base, 'GET', '/api/config')).json.botOnline === false,
         { timeout: 8000, message: 'botOnline=false after stop' }).catch(() => {});
     },
   };
 }
 
-export function botToken() {
-  return fs.readFileSync(path.join(DATA_DIR, 'bot-token.txt'), 'utf8').trim();
+export function botToken(dataDir = DATA_DIR) {
+  return fs.readFileSync(path.join(dataDir, 'bot-token.txt'), 'utf8').trim();
+}
+
+/** Хелперы, привязанные к другому серверу (например, музыкальному стенду на отдельном порту). */
+export function apiAt(base, dataDir) {
+  const h = (method, url, opts) => httpAt(base, method, url, opts);
+  async function register(username = uniqueName(), password = 'secret123') {
+    const r = await h('POST', '/api/register', { body: { username, password } });
+    if (r.status !== 200) throw new Error(`register ${username} failed: ${r.status} ${JSON.stringify(r.json)}`);
+    return { ...r.json, username, password };
+  }
+  async function user(prefix = 'qa') {
+    const reg = await register(uniqueName(prefix));
+    const socket = await connected(connect(reg.token, { base }));
+    const boot = await ack(socket, 'bootstrap');
+    return { ...reg, socket, boot };
+  }
+  return { http: h, registerApi: register, makeUser: user, connect: (t, o = {}) => connect(t, { ...o, base }), startBot: (o = {}) => startBot({ base, dataDir, ...o }) };
 }

@@ -3,7 +3,7 @@
 #   sudo bash /opt/sozvon/deploy/uninstall.sh           удалить программу, ДАННЫЕ ОСТАВИТЬ (/var/lib/sozvon)
 #   sudo bash /opt/sozvon/deploy/uninstall.sh --purge   удалить всё, включая данные, пользователя и сертификат
 #   --yes  не спрашивать подтверждение
-# Пакеты nginx/coturn/certbot и Node.js в /opt/node не удаляются (могут быть нужны другим программам);
+# Пакеты nginx/coturn/certbot/ffmpeg, Node.js в /opt/node и yt-dlp (без --purge) не удаляются (могут быть нужны другим программам);
 # правила ufw тоже остаются — список: ufw status numbered.
 set -Eeuo pipefail
 
@@ -49,9 +49,11 @@ fi
 
 if [ -d /run/systemd/system ]; then
   systemctl disable --now sozvon-bot sozvon 2>/dev/null || true
+  systemctl disable --now sozvon-ytdlp-update.timer 2>/dev/null || true
   systemctl disable --now coturn 2>/dev/null || true
 fi
-rm -f /etc/systemd/system/sozvon.service /etc/systemd/system/sozvon-bot.service
+rm -f /etc/systemd/system/sozvon.service /etc/systemd/system/sozvon-bot.service \
+  /etc/systemd/system/sozvon-ytdlp-update.service /etc/systemd/system/sozvon-ytdlp-update.timer
 [ -d /run/systemd/system ] && systemctl daemon-reload
 ok "Службы остановлены и удалены"
 
@@ -72,6 +74,8 @@ ok "Удалены $APP_DIR и $ENV_FILE"
 
 if [ "$PURGE" = 1 ]; then
   rm -rf "$DATA_DIR"
+  # yt-dlp, поставленный установщиком (бинарь или venv)
+  if [ -d /var/lib/sozvon-ytdlp ]; then rm -rf /usr/local/bin/yt-dlp /opt/yt-dlp-venv /var/lib/sozvon-ytdlp; fi
   id sozvon >/dev/null 2>&1 && userdel sozvon 2>/dev/null || true
   if [ -n "$domain" ] && command -v certbot >/dev/null; then
     certbot delete --non-interactive --cert-name "$domain" >/dev/null 2>&1 || true

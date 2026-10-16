@@ -6,6 +6,8 @@ import { selectChannel, sortedChannels } from '../nav.js';
 import { openModal, closeModal, setModalError, confirmDialog } from './modals.js';
 import { toast, toastOk, toastError } from './toasts.js';
 import { joinVoice, leaveVoice, toggleMute, toggleDeafen, toggleScreen, toggleCamera } from '../voice/voice.js';
+import { prefs } from '../prefs.js';
+import { moreButton, volumeBadge } from './context-menu.js';
 
 export function voiceUserEl(m) {
   const badges = h('div', { class: 'voice-user__badges' });
@@ -14,10 +16,15 @@ export function voiceUserEl(m) {
   else if (m.muted) badges.append(icon('i-mic-off', 'icon--sm'));
   if (m.camera) badges.append(icon('i-camera', 'icon--sm'));
   if (m.streaming) badges.append(h('span', { class: 'badge badge--live' }, 'LIVE'));
-  return h('div', {
-    class: 'voice-user' + (state.speaking.has(m.socketId) ? ' is-speaking' : '') + (m.isBot ? ' voice-user--bot' : ''),
+  const vb = volumeBadge(m.userId, m.isBot);
+  if (vb) badges.prepend(vb);
+  const self = !!state.user && m.userId === state.user.id;
+  const el = h('div', {
+    class: 'voice-user' + (state.speaking.has(m.socketId) ? ' is-speaking' : '') + (m.isBot ? ' voice-user--bot' : '') + (self ? ' voice-user--self' : ''),
     dataset: { socketId: m.socketId, userId: m.userId },
   }, avatar({ username: m.username, color: m.color }, 'sm'), h('span', { class: 'voice-user__name' }, m.username), badges);
+  if (!self) el.append(moreButton(m.username));
+  return el;
 }
 
 function channelEl(ch, owner) {
@@ -189,6 +196,9 @@ export function initSidebar() {
   subscribe(['servers', 'nav'], renderHeader);
   subscribe(['me', 'voice', 'servers'], renderUserPanel);
   subscribe('speaking', updateSpeaking);
+  // индикатор громкости/заглушения у .voice-user
+  prefs.subscribe('audio.userVolumes', () => notify('voice'));
+  prefs.subscribe('audio.userMuted', () => notify('voice'));
 
   $('#channels').addEventListener('click', async (e) => {
     const add = e.target.closest('[data-add-channel]');

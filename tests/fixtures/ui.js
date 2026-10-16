@@ -139,9 +139,13 @@ export async function joinVoiceUI(page, name = 'Голосовой') {
   const join = page.locator('#voice-join');
   // Клик по каналу либо сразу подключает, либо показывает «Подключиться»
   await page.waitForTimeout(300);
-  if (await join.isVisible()) {
+  for (let i = 0; i < 3 && !(await page.locator('#voice-panel').isVisible()); i++) {
+    if (!(await join.isVisible())) { await page.waitForTimeout(300); continue; }
     const btn = join.locator('button');
-    if (await btn.count()) await btn.first().click(); else await join.click();
+    // кнопка может исчезнуть, если подключение уже идёт — не ждём её бесконечно
+    if (await btn.count()) await btn.first().click({ timeout: 3000 }).catch(() => {});
+    else await join.click({ timeout: 3000 }).catch(() => {});
+    await page.waitForTimeout(300);
   }
   await expect(page.locator('#voice-panel')).toBeVisible();
   await expect(page.locator('#voice-view')).toBeVisible();

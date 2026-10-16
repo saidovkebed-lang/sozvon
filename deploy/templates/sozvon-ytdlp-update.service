@@ -1,0 +1,14 @@
+# Созвон — обновление yt-dlp (музыка с YouTube/SoundCloud меняется часто). Создан deploy/install.sh.
+# Запускается таймером sozvon-ytdlp-update.timer раз в сутки; вручную: systemctl start sozvon-ytdlp-update
+[Unit]
+Description=Sozvon: update yt-dlp
+Documentation=https://github.com/saidovkebed-lang/sozvon/blob/main/docs/MUSIC.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash @APP_DIR@/deploy/ytdlp.sh update
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=15min

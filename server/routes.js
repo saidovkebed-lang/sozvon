@@ -4,9 +4,10 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import express from 'express';
 import multer from 'multer';
-import { register, login, requireAuth, HttpError } from './auth.js';
+import { register, login, requireAuth, HttpError, updateColor, changePassword } from './auth.js';
 import { publicUser } from './model.js';
-import { syncLibrary, addUploadedFile, importFromUrl, MUSIC_MAX_BYTES, fixMulterName, sanitizeFileName, getMusicDir } from './music-library.js';
+import { syncLibrary, hasYtDlp, addUploadedFile, MUSIC_MAX_BYTES, fixMulterName, sanitizeFileName, getMusicDir } from './music-library.js';
+import { importFromUrl, resolveInput, fetchPending } from './music-sources.js';
 
 export const ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024;
 
@@ -14,7 +15,10 @@ function wrap(fn) {
   return (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 }
 
-export function createApiRouter({ uploadsDir, getIceServers, getPublicUrl, turnConfigured, forceRelay, isBotOnline }) {
+export function createApiRouter({
+  uploadsDir, getIceServers, getPublicUrl, turnConfigured, forceRelay, isBotOnline,
+  onUserUpdated = () => {}, onSessionsRevoked = () => {},
+}) {
   const router = express.Router();
   router.use(express.json({ limit: '100kb' }));
 
@@ -44,6 +48,8 @@ export function createApiRouter({ uploadsDir, getIceServers, getPublicUrl, turnC
     },
   });
 
+  const addedByOf = (req) => (req.isBot && typeof req.body?.addedBy === 'string' ? req.body.addedBy.slice(0, 24) : req.user.username);
+
   router.post('/register', wrap(async (req, res) => {
     res.json(await register(req.body));
   }));
@@ -55,6 +61,20 @@ export function createApiRouter({ uploadsDir, getIceServers, getPublicUrl, turnC
   router.get('/me', requireAuth, (req, res) => {
     res.json({ user: publicUser(req.user) });
   });
+
+  router.patch('/me', requireAuth, (req, res) => {
+    if (req.isBot) throw new HttpError(403, 'Недоступно для бота');
+    const user = updateColor(req.user, req.body);
+    onUserUpdated(req.user);
+    res.json({ user });
+  });
+
+  router.post('/me/password', requireAuth, wrap(async (req, res) => {
+    if (req.isBot) throw new HttpError(403, 'Недоступно для бота');
+    const revoked = await changePassword(req.user, req.token, req.body);
+    onSessionsRevoked(req.user.id, revoked);
+    res.json({ ok: true });
+  }));
 
   router.get('/config', wrap(async (_req, res) => {
     res.set('Cache-Control', 'no-store');
@@ -75,7 +95,8 @@ export function createApiRouter({ uploadsDir, getIceServers, getPublicUrl, turnC
   });
 
   router.get('/music', requireAuth, wrap(async (_req, res) => {
-    res.json({ tracks: await syncLibrary() });
+    // internet: можно ли искать/качать треки из интернета (установлен yt-dlp)
+    res.json({ tracks: await syncLibrary(), internet: hasYtDlp() });
   }));
 
   router.post('/music/upload', requireAuth, musicUpload.single('file'), wrap(async (req, res) => {
@@ -84,8 +105,19 @@ export function createApiRouter({ uploadsDir, getIceServers, getPublicUrl, turnC
   }));
 
   router.post('/music/import', requireAuth, wrap(async (req, res) => {
-    const addedBy = req.isBot && typeof req.body?.addedBy === 'string' ? req.body.addedBy.slice(0, 24) : req.user.username;
-    const track = await importFromUrl(req.body?.url, addedBy);
+    const track = await importFromUrl(req.body?.url, addedByOf(req));
+    res.json({ track });
+  }));
+
+  // Музыка из интернета (вызывает бот; людям тоже можно — те же проверки)
+  router.post('/music/resolve', requireAuth, wrap(async (req, res) => {
+    const input = typeof req.body?.input === 'string' ? req.body.input.trim().slice(0, 1000) : '';
+    if (!input) throw new HttpError(400, 'Укажите ссылку или название трека');
+    res.json(await resolveInput(input, { addedBy: addedByOf(req) }));
+  }));
+
+  router.post('/music/fetch', requireAuth, wrap(async (req, res) => {
+    const track = await fetchPending(req.body?.item, { addedBy: addedByOf(req) });
     res.json({ track });
   }));
 

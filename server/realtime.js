@@ -100,6 +100,7 @@ export function attachRealtime(io, { uploadsDir }) {
     const user = userByToken(auth.token);
     if (!user) return next(new Error('unauthorized'));
     socket.data.user = user;
+    socket.data.token = auth.token;
     next();
   });
 
@@ -117,7 +118,7 @@ export function attachRealtime(io, { uploadsDir }) {
       if (typeof payload === 'function') { ack = payload; payload = {}; }
       const reply = typeof ack === 'function' ? ack : () => {};
       try {
-        if (!findUser(user.id)) fail('Сессия недействительна');
+        if (!findUser(user.id) || !db.data.sessions[socket.data.token]) fail('Сессия недействительна');
         const res = await handler(isObj(payload) ? payload : {});
         reply({ ok: true, ...(res || {}) });
       } catch (err) {
@@ -363,14 +364,26 @@ export function attachRealtime(io, { uploadsDir }) {
 
     botOn('bot:music-state', (st) => {
       const channel = channelOfType(st.channelId, 'voice');
-      const cleanTrack = (t) => (isObj(t) ? {
-        id: str(t.id).slice(0, 64), title: str(t.title).slice(0, 200), artist: str(t.artist).slice(0, 200),
-        duration: Number.isFinite(t.duration) && t.duration > 0 ? t.duration : 0,
-        url: str(t.url).slice(0, 500), addedBy: typeof t.addedBy === 'string' ? t.addedBy.slice(0, 50) : null,
-      } : null);
+      const cleanTrack = (t) => {
+        if (!isObj(t)) return null;
+        const out = {
+          id: str(t.id).slice(0, 64), title: str(t.title).slice(0, 200), artist: str(t.artist).slice(0, 200),
+          duration: Number.isFinite(t.duration) && t.duration > 0 ? t.duration : 0,
+          addedBy: typeof t.addedBy === 'string' ? t.addedBy.slice(0, 50) : null,
+        };
+        if (t.pending) {
+          // «ожидающий» элемент очереди (ещё не скачан): без url
+          out.pending = true;
+          out.source = ['youtube', 'soundcloud', 'spotify', 'search'].includes(t.source) ? t.source : 'search';
+          if (t.loading) out.loading = true;
+        } else {
+          out.url = str(t.url).slice(0, 500);
+        }
+        return out;
+      };
       const state = {
         channelId: channel.id,
-        track: cleanTrack(st.track),
+        track: isObj(st.track) && !st.track.pending ? cleanTrack(st.track) : null,
         queue: Array.isArray(st.queue) ? st.queue.slice(0, 500).map(cleanTrack).filter(Boolean) : [],
         paused: !!st.paused,
         position: Number.isFinite(st.position) && st.position >= 0 ? st.position : 0,
@@ -389,5 +402,23 @@ export function attachRealtime(io, { uploadsDir }) {
     });
   }
 
-  return { isBotOnline };
+  // ---------- профиль ----------
+  // user:updated {user} — самому пользователю (все вкладки) и всем, кто делит с ним сервер
+  function emitUserUpdated(userRec) {
+    const user = publicUser(userRec);
+    const rooms = [userRoom(userRec.id), ...userServers(userRec.id).map((s) => serverRoom(s.id))];
+    io.to(rooms).emit('user:updated', { user });
+    voice.updateUser(userRec);
+  }
+
+  // Смена пароля: сокеты удалённых сессий отключаем (при переподключении — connect_error 'unauthorized')
+  function disconnectSessions(userId, tokens) {
+    if (!tokens?.length) return;
+    const set = new Set(tokens);
+    for (const s of io.sockets.sockets.values()) {
+      if (!s.data.isBot && s.data.user?.id === userId && set.has(s.data.token)) s.disconnect(true);
+    }
+  }
+
+  return { isBotOnline, emitUserUpdated, disconnectSessions };
 }

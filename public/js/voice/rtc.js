@@ -4,11 +4,8 @@
 import { emit } from '../socket.js';
 import { state } from '../state.js';
 import { toast } from '../ui/toasts.js';
-
-const SPEAK_THRESHOLD = 0.018;   // RMS
-const SPEAK_ON_MS = 0;      // атака мгновенная, дебаунс — на отпускание
-const SPEAK_OFF_MS = 450;
-const SPEAK_INTERVAL = 60;
+import { engine as audio } from '../audio/engine.js';
+// Обработка микрофона, шумовой гейт («говорит»), громкость собеседников — в js/audio/engine.js.
 
 class Peer {
   constructor(id, polite, mgr) {
@@ -61,6 +58,8 @@ class Peer {
         }
       } else if (pc.connectionState === 'connected') {
         this.iceRestarts = 0;
+        // сервер только ретранслирует voice:speaking — новичок не знает, что мы уже говорим
+        if (mgr.localSpeaking && state.myVoice) emit('voice:speaking', { speaking: true });
       }
       mgr.changed();
     };
@@ -171,10 +170,13 @@ class RtcManager {
     this.local = { mic: null, screen: null, camera: null };
     this.iceServers = [];
     this.listeners = new Set();
-    this.audioCtx = null;
-    this.speakTimer = null;
     this.localSpeaking = false;
+    // смена отправляемого трека (пересборка цепочки микрофона) → replaceTrack у всех пиров, без перезахода
+    audio.onOutgoingTrack((track) => this.replaceMicTrack(track));
+    audio.onGateChange(() => this.updateSpeaking());
   }
+
+  get audioCtx() { return audio.outCtx; }
 
   onChange(fn) { this.listeners.add(fn); }
 
@@ -192,26 +194,30 @@ class RtcManager {
 
   /** Вызывать синхронно в обработчике клика (разблокирует AudioContext) */
   prepareAudio() {
-    try {
-      if (!this.audioCtx) this.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      if (this.audioCtx.state === 'suspended') this.audioCtx.resume().catch(() => {});
-    } catch { /* нет WebAudio */ }
+    audio.unlock();
   }
 
   start({ iceServers, mic }) {
-    this.stop();
+    // микрофон уже захвачен движком (audio/engine.js) — не освобождаем его здесь
+    for (const p of this.peers.values()) p.close();
+    this.peers.clear();
+    for (const k of ['screen', 'camera']) {
+      this.local[k]?.getTracks().forEach((t) => t.stop());
+      this.local[k] = null;
+    }
     this.iceServers = iceServers || [];
     this.local.mic = mic || null;
     this.applyMute();
-    this.startSpeakingDetection();
     this.changed();
   }
 
   stop() {
     for (const p of this.peers.values()) p.close();
     this.peers.clear();
-    this.stopSpeakingDetection();
-    for (const k of ['mic', 'screen', 'camera']) {
+    audio.releaseVoiceMic();
+    this.local.mic = null;
+    this.setLocalSpeaking(false);
+    for (const k of ['screen', 'camera']) {
       this.local[k]?.getTracks().forEach((t) => t.stop());
       this.local[k] = null;
     }
@@ -266,85 +272,37 @@ class RtcManager {
     this.changed();
   }
 
+  /** Новый отправляемый трек микрофона → replaceTrack у всех пиров (pc не пересоздаётся). */
+  replaceMicTrack(track) {
+    if (!track || !this.local.mic) return;
+    if (this.local.mic.getAudioTracks()[0] === track) return;
+    this.local.mic = new MediaStream([track]);
+    for (const p of this.peers.values()) {
+      if (p.micSender) p.micSender.replaceTrack(track).catch((e) => console.warn('[rtc] replaceTrack', e));
+    }
+    this.applyMute();
+  }
+
   applyMute() {
-    const enabled = !state.muted && !state.deafened;
-    this.local.mic?.getAudioTracks().forEach((t) => { t.enabled = enabled; });
-    if (!enabled) this.setLocalSpeaking(false);
+    audio.setVoiceMuted(state.muted || state.deafened);
+    this.updateSpeaking();
+  }
+
+  /** «Говорит» = гейт открыт (или зажата рация) и не muted/deafened. */
+  updateSpeaking() {
+    this.setLocalSpeaking(!!this.local.mic && !state.muted && !state.deafened && audio.voiceGateOpen);
   }
 
   /* ---------- удалённое аудио ---------- */
   syncAudio() {
-    const box = document.getElementById('remote-audio');
-    if (!box) return;
-    const want = new Map();
+    const list = [];
     for (const p of this.peers.values()) {
       for (const kind of ['mic', 'screen']) {
-        const s = p.remote[kind];
-        if (s && s.getAudioTracks().length) want.set(`${p.id}|${kind}`, { s, id: p.id, kind });
+        const st = p.remote[kind];
+        if (st && st.getAudioTracks().length) list.push({ socketId: p.id, kind, stream: st });
       }
     }
-    for (const el of Array.from(box.children)) {
-      const key = `${el.dataset.socketId}|${el.dataset.kind}`;
-      const w = want.get(key);
-      if (!w || el.srcObject !== w.s) { el.srcObject = null; el.remove(); } else want.delete(key);
-    }
-    for (const [, w] of want) {
-      const el = document.createElement('audio');
-      el.className = 'remote-audio';
-      el.autoplay = true;
-      el.dataset.socketId = w.id;
-      el.dataset.kind = w.kind;
-      el.srcObject = w.s;
-      box.append(el);
-      el.play().catch(() => { /* разблокируется жестом join */ });
-    }
-    for (const el of box.children) el.muted = !!state.deafened;
-  }
-
-  /* ---------- определение речи ---------- */
-  startSpeakingDetection() {
-    this.stopSpeakingDetection();
-    const mic = this.local.mic;
-    if (!mic || !mic.getAudioTracks().length) return;
-    this.prepareAudio();
-    if (!this.audioCtx) return;
-    try {
-      const src = this.audioCtx.createMediaStreamSource(mic);
-      const analyser = this.audioCtx.createAnalyser();
-      analyser.fftSize = 512;
-      src.connect(analyser);
-      const buf = new Float32Array(analyser.fftSize);
-      let aboveSince = 0;
-      let belowSince = 0;
-      this.speakSrc = src;
-      this.speakTimer = setInterval(() => {
-        if (state.muted || state.deafened) { this.setLocalSpeaking(false); return; }
-        analyser.getFloatTimeDomainData(buf);
-        let sum = 0;
-        for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
-        const rms = Math.sqrt(sum / buf.length);
-        const now = performance.now();
-        if (rms > SPEAK_THRESHOLD) {
-          belowSince = 0;
-          if (!aboveSince) aboveSince = now;
-          if (!this.localSpeaking && now - aboveSince >= SPEAK_ON_MS) this.setLocalSpeaking(true);
-        } else {
-          aboveSince = 0;
-          if (!belowSince) belowSince = now;
-          if (this.localSpeaking && now - belowSince >= SPEAK_OFF_MS) this.setLocalSpeaking(false);
-        }
-      }, SPEAK_INTERVAL);
-    } catch (e) {
-      console.warn('[rtc] speaking detection', e);
-    }
-  }
-
-  stopSpeakingDetection() {
-    clearInterval(this.speakTimer);
-    this.speakTimer = null;
-    try { this.speakSrc?.disconnect(); } catch { /* ignore */ }
-    this.speakSrc = null;
-    this.setLocalSpeaking(false);
+    audio.syncRemote(list);
   }
 
   setLocalSpeaking(v) {

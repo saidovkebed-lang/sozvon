@@ -1,6 +1,6 @@
 // Playwright config for Sozvon QA (owner: qa)
 import { defineConfig } from '@playwright/test';
-import { PORT, BASE_URL, DATA_DIR } from './tests/fixtures/env.js';
+import { PORT, BASE_URL, DATA_DIR, MUSIC_PORT, MUSIC_BASE_URL } from './tests/fixtures/env.js';
 
 export default defineConfig({
   testDir: './tests',
@@ -51,7 +51,7 @@ export default defineConfig({
       },
     },
   ],
-  webServer: {
+  webServer: [{
     // tests/start-server.js очищает DATA_DIR и затем импортирует server/index.js.
     // (webServer в Playwright стартует ДО globalSetup, поэтому очистка — здесь, иначе
     //  globalSetup снёс бы данные уже работающего сервера.)
@@ -63,5 +63,15 @@ export default defineConfig({
     stdout: 'pipe',
     stderr: 'pipe',
     env: { PORT: String(PORT), HTTPS: '1', DATA_DIR },
-  },
+  }, {
+    // v2: музыкальный стенд — фейковые yt-dlp и Spotify embed (tests/start-server-music.js)
+    command: 'node tests/start-server-music.js',
+    url: `${MUSIC_BASE_URL}/api/config`,
+    ignoreHTTPSErrors: true,
+    reuseExistingServer: false,
+    timeout: 30_000,
+    stdout: 'pipe',
+    stderr: 'pipe',
+    env: { PORT: String(MUSIC_PORT), HTTPS: '1' },
+  }],
 });
