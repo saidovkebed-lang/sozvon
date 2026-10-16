@@ -139,7 +139,9 @@ export async function joinVoiceUI(page, name = 'Голосовой') {
   const join = page.locator('#voice-join');
   // Клик по каналу либо сразу подключает, либо показывает «Подключиться»
   await page.waitForTimeout(300);
-  for (let i = 0; i < 3 && !(await page.locator('#voice-panel').isVisible()); i++) {
+  // #voice-panel живёт в сайдбаре: на мобиле он в закрытом выезжающем меню, поэтому «подключён» = панель не скрыта (hidden/display)
+  const joined = () => page.locator('#voice-panel').evaluate((el) => !el.hidden && getComputedStyle(el).display !== 'none').catch(() => false);
+  for (let i = 0; i < 3 && !(await joined()); i++) {
     if (!(await join.isVisible())) { await page.waitForTimeout(300); continue; }
     const btn = join.locator('button');
     // кнопка может исчезнуть, если подключение уже идёт — не ждём её бесконечно
@@ -147,7 +149,11 @@ export async function joinVoiceUI(page, name = 'Голосовой') {
     else await join.click({ timeout: 3000 }).catch(() => {});
     await page.waitForTimeout(300);
   }
-  await expect(page.locator('#voice-panel')).toBeVisible();
+  if (await page.locator('#btn-menu').isVisible() && !(await page.locator('#app.is-nav-open').count())) {
+    await expect.poll(joined, { message: '#voice-panel не скрыт (мобильный)' }).toBe(true);
+  } else {
+    await expect(page.locator('#voice-panel')).toBeVisible();
+  }
   await expect(page.locator('#voice-view')).toBeVisible();
 }
 

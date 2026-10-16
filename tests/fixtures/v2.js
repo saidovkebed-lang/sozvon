@@ -28,13 +28,23 @@ export async function openSettings(page) {
 export async function openSection(page, id) {
   const modal = await openSettings(page);
   const panel = modal.locator(`[data-panel="${id}"]`);
-  if (!(await panel.isVisible())) {
-    const back = modal.locator('.settings__back');
-    const nav = modal.locator(`button[data-section="${id}"]`);
-    if (!(await nav.isVisible()) && await back.isVisible()) await back.click();
+  const nav = modal.locator(`button[data-section="${id}"]`);
+  const mobile = (page.viewportSize()?.width || 1440) < 640;
+  if (mobile) {
+    // на мобиле: либо список разделов, либо панель раздела (класс .is-section-open) + «назад»
+    const sectionOpen = page.locator('#modal-user-settings.is-section-open, #modal-user-settings .is-section-open');
+    if ((await sectionOpen.count()) && await panel.isVisible()) return panel;
+    if (await sectionOpen.count()) {
+      await modal.locator('.settings__back').click();
+      await expect(sectionOpen).toHaveCount(0);
+      await page.waitForTimeout(300);
+    }
+    await nav.click();
+  } else if (!(await panel.isVisible())) {
     await nav.click();
   }
   await expect(panel).toBeVisible();
+  if (mobile) await page.waitForTimeout(300);
   return panel;
 }
 
