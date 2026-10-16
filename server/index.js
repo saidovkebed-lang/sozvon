@@ -13,7 +13,7 @@ import { ensureCerts, localIPv4 } from './certs.js';
 import { createApiRouter } from './routes.js';
 import { attachRealtime } from './realtime.js';
 import { initMusicLibrary, syncLibrary, hasYtDlp } from './music-library.js';
-import { getIceServers, turnConfigured } from './ice.js';
+import { getIceServers, turnConfigured, forceRelay } from './ice.js';
 import { startTunnel, getPublicUrl } from './tunnel.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -36,7 +36,8 @@ initBotToken(DATA_DIR);
 // ---------- HTTP(S) ----------
 const app = express();
 app.disable('x-powered-by');
-app.set('trust proxy', false);
+// За nginx (deploy/install.sh) — доверяем одному прокси, чтобы видеть реальные IP
+app.set('trust proxy', ['1', 'true'].includes(String(process.env.TRUST_PROXY)) ? 1 : false);
 
 const server = USE_HTTPS ? https.createServer(ensureCerts(DATA_DIR)) : http.createServer();
 server.on('request', app);
@@ -49,7 +50,14 @@ const io = new IOServer(server, {
 });
 const realtime = attachRealtime(io, { uploadsDir });
 
-app.use('/api', createApiRouter({ uploadsDir, getIceServers, getPublicUrl, turnConfigured, isBotOnline: realtime.isBotOnline }));
+app.use('/api', createApiRouter({
+  uploadsDir,
+  getIceServers,
+  getPublicUrl: () => process.env.PUBLIC_URL || getPublicUrl(),
+  turnConfigured,
+  forceRelay,
+  isBotOnline: realtime.isBotOnline,
+}));
 
 const INLINE_TYPES = /^(image|audio|video)\//;
 app.use('/media/uploads', express.static(uploadsDir, {

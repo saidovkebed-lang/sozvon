@@ -14,7 +14,7 @@ function wrap(fn) {
   return (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 }
 
-export function createApiRouter({ uploadsDir, getIceServers, getPublicUrl, turnConfigured, isBotOnline }) {
+export function createApiRouter({ uploadsDir, getIceServers, getPublicUrl, turnConfigured, forceRelay, isBotOnline }) {
   const router = express.Router();
   router.use(express.json({ limit: '100kb' }));
 
@@ -61,6 +61,7 @@ export function createApiRouter({ uploadsDir, getIceServers, getPublicUrl, turnC
     res.json({
       iceServers: await getIceServers(),
       relay: turnConfigured(),
+      forceRelay: forceRelay(),
       publicUrl: getPublicUrl(),
       botOnline: isBotOnline(),
     });
