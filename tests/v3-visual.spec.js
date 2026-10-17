@@ -114,8 +114,10 @@ for (const vp of [{ w: 1440, h: 900, tag: '1440' }, { w: 375, h: 812, tag: '375'
       }
       // модалка стрима (в голосе)
       const { joinVoiceUI } = await import('./fixtures/ui.js');
+      await openNavIfMobile(pb);
       await joinVoiceUI(pb);
-      await pb.locator('#ctrl-screen').click();
+      await closeNav(pb);
+      await pb.locator('#ctrl-screen').click({ timeout: 10000 });
       await expect(pb.locator('#modal-stream')).toBeVisible();
       await pb.screenshot({ path: `${DIR}/${vp.tag}-amoled-stream-modal.png` });
       await pb.keyboard.press('Escape');

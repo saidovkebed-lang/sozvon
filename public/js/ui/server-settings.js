@@ -222,8 +222,9 @@ async function saveOverview() {
     notify('servers');
     overviewDirty = false;
     fillOverview(true);
-    if (dlg().open && document.activeElement === btn) $('#server-rename-input').focus();
     toastOk('Изменения сохранены');
+    // контракт v1: после сохранения названия модалка закрывается (как прежний #modal-settings)
+    closeModal(dlg());
   } catch (e) {
     err.textContent = e.message;
   } finally { btn.disabled = false; }
