@@ -3335,3 +3335,8 @@ body.dl-page {
   .modal__footer { flex-wrap: wrap; }
   .modal__footer-left { flex-basis: 100% !important; order: 3; }
 }
+@media (max-width: 639.98px) {
+  .modal--stream .modal__footer .btn--ghost { flex: 0 0 auto; }
+  .modal--stream .modal__footer .btn--primary { flex: 1 1 auto; min-width: 0; }
+  .modal--stream .modal__footer .btn--primary .icon { display: none; }
+}

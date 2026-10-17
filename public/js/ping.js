@@ -223,7 +223,7 @@ function openPopup(anchor) {
   fillPopup();
   document.body.append(popup);
   const r = anchor.getBoundingClientRect();
-  const pr = popup.getBoundingClientRect();
+  const pr = { width: popup.offsetWidth, height: popup.offsetHeight };
   const vw = document.documentElement.clientWidth;
   popup.style.left = `${Math.max(8, Math.min(r.left, vw - pr.width - 8))}px`;
   popup.style.top = `${Math.max(8, r.top - pr.height - 8)}px`;

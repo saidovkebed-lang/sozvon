@@ -188,7 +188,7 @@ function showPage(nodes) {
 
 function position(m, x, y) {
   const pad = 8;
-  const r = m.getBoundingClientRect();
+  const r = { width: m.offsetWidth, height: m.offsetHeight }; // без учёта scale() анимации появления
   const vw = document.documentElement.clientWidth;
   const vh = window.innerHeight;
   let left = x; let top = y;

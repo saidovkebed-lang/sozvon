@@ -154,6 +154,10 @@ test.describe('v3 UI: профиль', () => {
     await msg.locator('.message__author').click();
     const pop = pb.locator('.profile-popup').locator('visible=true').first();
     await expect(pop).toBeVisible();
+    await pb.waitForTimeout(300); // анимация появления
+    const box = await pop.boundingBox(); const vpH = pb.viewportSize().height;
+    expect(box.y, 'попап не прилипает к верху').toBeGreaterThanOrEqual(4);
+    expect(box.y + box.height, `попап профиля целиком во вьюпорте с отступом (UI-v3-1): низ ${Math.round(box.y + box.height)} из ${vpH}`).toBeLessThanOrEqual(vpH - 4);
     await expect(pop.locator('.profile-popup__name')).toHaveText(/Аня QA/);
     await expect(pop.locator('.profile-popup__username')).toContainText('@');
     await expect(pop.locator('.profile-popup__pronouns')).toHaveText(/она\/её/);

@@ -177,7 +177,8 @@ function placePopup(el, anchor, at) {
   const vw = document.documentElement.clientWidth;
   const vh = window.innerHeight;
   if (vw < 640) { el.classList.add('profile-popup--sheet'); return; }
-  const r = el.getBoundingClientRect();
+  // offset*, а не getBoundingClientRect: во время анимации появления (scale 0.96) прямоугольник меньше настоящего
+  const r = { width: el.offsetWidth, height: el.offsetHeight };
   const a = at ? { left: at.x, right: at.x, top: at.y, bottom: at.y } : anchor.getBoundingClientRect();
   // справа от якоря, а если не влезает (колонка участников справа) — слева
   let left = a.right + pad;
@@ -205,6 +206,8 @@ export function openProfile(userId, anchor, { serverId = null, at = null } = {})
   popup = { el: wrap, userId, serverId: server?.id || null, anchor, at };
   anchor?.classList?.add('is-profile-open');
   placePopup(wrap, anchor, at);
+  // баннер/аватар догружаются и меняют высоту — переставить, чтобы попап не упирался в край экрана
+  wrap.addEventListener('load', () => { if (popup?.el === wrap) placePopup(wrap, popup.anchor, popup.at); }, true);
   wrap.focus({ preventScroll: true });
   setTimeout(() => {
     document.addEventListener('pointerdown', onOutside, true);
@@ -296,7 +299,7 @@ function openStatusMenu() {
     h('span', { class: 'status-menu__text' }, h('span', null, s.label), s.hint ? h('small', null, s.hint) : null))));
   document.body.append(statusMenu);
   const r = btn.getBoundingClientRect();
-  const mr = statusMenu.getBoundingClientRect();
+  const mr = { width: statusMenu.offsetWidth, height: statusMenu.offsetHeight };
   statusMenu.style.left = `${Math.max(8, Math.min(r.left, document.documentElement.clientWidth - mr.width - 8))}px`;
   statusMenu.style.top = `${Math.max(8, r.top - mr.height - 8)}px`;
   btn.setAttribute('aria-expanded', 'true');

@@ -187,3 +187,157 @@ Running 89 tests using 1 worker
 - **Системные уведомления (Notification)**: в headless разрешение `denied`. Проверено только то, что раздел рендерится и показывает пояснение.
 - **Долгий тап на мобильном** для контекстного меню: проверены правый клик и кнопка «⋯», touch-жесты — нет.
 - Firefox и Safari (AudioWorklet и `setSinkId` там ведут себя иначе): прогон только в Chromium.
+
+---
+
+# v3: роли и права, профили «Нитро для всех», пинг, приложение для ПК (SPEC-v3)
+
+Окружение: Node 22.22, @playwright/test 1.56.1, Chromium headless, ffmpeg/ffprobe из системы, Xvfb.
+Прогон: `QA_PORT=3900 npx playwright test` (основной сервер :3900, музыкальный :3910, фейковый Spotify :3991,
+отдельные серверы из тестов: миграция :3920, лимит вложений :3921). Все серверы останавливаются по PID.
+
+Новые файлы: `tests/v3-roles.spec.js` (21), `tests/v3-migration.spec.js` (3), `tests/v3-profile.spec.js` (13),
+`tests/v3-ui.spec.js` (10), `tests/v3-visual.spec.js` (2), `tests/v3-desktop.spec.js` (1); хелперы `tests/fixtures/v3.js`;
+фикстура старой базы `tests/fixtures/v3-legacy/` (+ генератор `make-legacy.mjs`).
+
+**Фикстура миграции.** `db.json` и `uploads/` созданы **старым кодом** (коммит 28bc738, git worktree): скрипт поднимает
+старый сервер и наполняет его через настоящие REST/Socket.IO (3 пользователя, 2 сервера, лишний канал, сообщения,
+PNG-вложение, цвет аватара). Перед стартом тест проверяет, что у серверов нет `roles/memberRoles`, а у пользователей
+нет `avatar/displayName`.
+
+**Значения прав** продублированы в `tests/fixtures/v3.js` прямо из SPEC §1.1, а не импортированы из `server/`. Тест
+сверяет их с `server/permissions.js` и `public/js/perms.js`.
+
+## Матрица проверок v3
+
+| # | Требование | Статус | Чем проверено |
+|---|------------|:-----:|---------------|
+| 1 | Миграция старого db.json | ✅ | v3-migration: на старой базе стартует отдельный сервер. Вход старыми паролями работает. Сервер, владелец, инвайт, участники, каналы, история и вложение (200, image/png) на месте. `roles=[@everyone{id=server.id, pos 0, DEFAULT_EVERYONE}]`, `memberRoles/bans/channelOverwrites={}`, `description=''`, `banner=null`; новые поля пользователя null/''. Владелец может всё (роли, server:update, каналы, кик), участник действует с правами по умолчанию (пишет, голос, видит инвайт; не управляет). Перезапуск идемпотентен: @everyone не дублируется, роли и изменения сохраняются, db.json на диске уже в новом формате. |
+| 2 | PERMS сервер = клиент = SPEC | ✅ | Все 19 битов и DEFAULT_EVERYONE совпадают (server/permissions.js, public/js/perms.js). |
+| 3 | Роли: create/update/reorder/delete, валидация, выдача | ✅ | Имя 1–32, цвет `#rrggbb`, @everyone нельзя удалить или переименовать, `role:reorder` меняет position (сверху вниз), удаление роли чистит `memberRoles`, несуществующую роль не выдать. |
+| 4 | MANAGE_ROLES и иерархия | ✅ | Без права — отказ. С правом можно выдавать и менять только роли ниже своей высшей; свою и выше — нельзя; снять роли владельцу нельзя; созданная модератором роль встаёт ниже его роли; ADMINISTRATOR через роль ниже не выдаётся. |
+| 5 | SEND_MESSAGES / ATTACH_FILES / MANAGE_MESSAGES | ✅ | Ошибки на сервере. Роль возвращает право. Своё сообщение удалить можно всегда. Overwrite канала: deny @everyone в одном канале, allow роли перекрывает. В UI без SEND композер `disabled`, сообщение не уходит. |
+| 6 | Приватный канал (overwrite VIEW_CHANNEL) | ✅ | У участника без роли канала нет в персональном `server:updated` и в bootstrap, нет его `channelOverwrites`. history/send/voice:join → отказ. `message:new`, `typing`, `voice:members` и `bootstrap.voice` приватного канала ему не приходят. После выдачи роли канал появляется, история доступна. В UI канал не виден в сайдбаре и появляется без перезагрузки. |
+| 7 | ADMINISTRATOR / владелец | ✅ | Игнорируют overwrites, могут server:update, каналы, видят bans. Не могут server:delete, server:transfer и кик владельца. |
+| 8 | inviteCode / bans по правам | ✅ | Без CREATE_INVITE `inviteCode:null` (приходит в server:updated). Без BAN_MEMBERS `bans:null`. |
+| 9 | server:update (MANAGE_SERVER) | ✅ | name, description ≤300 (301 → ошибка), regenerateInvite (старый код перестаёт работать). Старый `server:rename` тоже требует права. |
+| 10 | Кик / бан / разбан / иерархия | ✅ | `server:removed {reason:'kick'|'ban'}`. После кика можно вернуться по инвайту. Бан: `bans[userId]={by,reason,at}`, `deleteMessages` удаляет сообщения, повторный вход → «Вы заблокированы на этом сервере», после разбана вход работает. Модератор не может тронуть админа выше, равного по роли и владельца. Бота кикнуть нельзя. |
+| 11 | Голос: CONNECT, SPEAK→serverMute, STREAM, member:voice | ✅ | Без CONNECT — отказ. Без SPEAK вход с `serverMute:true`, клиент его не снимет. Без STREAM `streaming/camera=true` не применяются, с правом применяются. member:voice: serverMute/serverDeafen в `voice:members`, `voice:moved {channelId}` перемещённому, `moveTo:null` отключает, без права или против владельца — отказ, перенос в текстовый канал — отказ. |
+| 12 | USE_MUSIC_BOT | ✅ | С запущенным ботом: `music:command` и `!queue` в чате → «Нет права управлять музыкой»; владелец может. |
+| 13 | Передача владения | ✅ | Может только владелец и только участнику сервера. Новый владелец получает всё, бывший теряет права и может выйти с сервера. |
+| 14 | UI: настройки сервера → Роли | ✅ | `#btn-role-create` создаёт роль. Имя (`#role-name-input`) и право (`data-perm=KICK_MEMBERS`, вкладка «Права») доходят до сервера. |
+| 15 | UI: цвет ника и hoist-группы | ✅ | `.members__group[data-group=<roleId>]` «Админы — 1» у обоих пользователей, плюс группы online/offline. `.member__name` и `.message__author` окрашены в цвет роли. |
+| 16 | UI: контекстное меню участника | ✅ | Рядовой участник видит только «Профиль». Владелец видит profile/roles/kick/ban. Кик через меню и `#modal-reason`: у кикнутого сервер пропадает. |
+| 17 | Аватар PNG/GIF (ffmpeg) | ✅ | PNG 640×360 → 256×256 (ffprobe), `avatarAnimated=null`. GIF 20 кадров → animated WebP ≤256, квадрат, >5 кадров (кадры считаются по RIFF/ANMF: ffmpeg не декодирует animated WebP), ≤4 МБ, плюс статичный первый кадр 256×256. Кадрирование x,y,size учитывается. Кэш `/media/...` long max-age. DELETE работает. Не картинка → 400, >10 МБ → 413, без токена → 401. |
+| 18 | Баннер 960×340, иконка/баннер сервера | ✅ | Баннер 960×340, анимированный — `bannerAnimated`. Иконка сервера 256×256, только с MANAGE_SERVER (403 без права), приходит `server:updated`. |
+| 19 | Профиль: displayName/about 190/pronouns/bannerColor/theme/customStatus | ✅ | Валидация всех полей (7 видов мусора → 400). `user:updated` уходит другому участнику. `color` из v2 работает. |
+| 20 | Статус invisible / кастомный статус с истечением | ✅ | Другим invisible видно как `online:false`, `status:'offline'` (сам `invisible` не утекает). Себе — `invisible`. dnd виден другим. После `expiresAt` статус не отдаётся (lazy). В UI: меню `#me-avatar` → Невидимый → у B `.is-offline` и группа «Не в сети»; «Задать статус…» → текст у B. |
+| 21 | UI: аватар и попап профиля | ✅ | `.avatar.has-img > img.avatar__img`: статичный src, при hover на сообщении анимированный, после ухода курсора снова статичный. При reduced-motion hover анимацию не включает. Без аватара — буква. Попап: displayName, @username, местоимения, кастомный статус, «Обо мне» с markdown (**жирный**), роли-таблетки, «Участник с», баннер `/media/banners/`, анимированный аватар, градиент темы primary→accent; целиком во вьюпорте; Esc закрывает. |
+| 22 | UI: Настройки → Профиль | ✅ | about обрезается до 190, есть счётчик, живой предпросмотр, сохранение доходит до сервера. Аватар через `#profile-avatar-input` → `#modal-crop` → `#crop-ok` сохраняется и появляется у другого участника. |
+| 23 | Лимит вложений 100 МБ | ✅ | 30 МБ на основном сервере принимается. Отдельный сервер с `UPLOAD_LIMIT_MB=2`: 1,5 МБ → 200, 3 МБ → 413 «…2 МБ» (так поведение лимита проверяется без 100 МБ в памяти). Старый тест «>25 МБ» адаптирован: >100 МБ → 4xx. Код ссылается на `UPLOAD_LIMIT_MB`, nginx `client_max_body_size` ≥ 100m (было 60m, BUG-B1). |
+| 24 | Пинг | ✅ | `ping:rtt` → `{now}`. `__sozvon.ping.last > 0`, есть `history`. `#ping-user` «N мс» с `data-level`. В голосе `#ping-voice`, `ping.voice.rtt` — число ≥0, есть loss/jitter, попап с `svg.ping-chart`. |
+| 25 | Стрим 1080p60 | ✅ | `#modal-stream`, 1080p60 → у sender'а экрана `getParameters().encodings[0]`: `maxBitrate === 6_000_000`, `maxFramerate === 60` (через перехват RTCPeerConnection и через `__sozvon.rtc.screenEncodings()`). Выбор запоминается в prefs `stream.quality` и предвыбирается. 720p30 → 2 500 000 / 30. |
+| 26 | Desktop smoke (Electron, xvfb) | ✅ | `_electron.launch` на `desktop/dist/linux-unpacked/sozvon` (`--server=`, `--user-data-dir`, `SOZVON_ALLOW_INSECURE_LOCALHOST=1`). Открывается окно со страницей сервера (`#auth-screen`). `sozvonDesktop.isDesktop===true`, `version` — строка, все 6 функций моста на месте. `window.require/process` нет. У главного окна `contextIsolation:true`, `sandbox:true`, `nodeIntegration:false`. `html.is-desktop`. Если сборки нет — тест пропускается (skip) с причиной. Скриншот `tests/screens-qa/v3/desktop-linux.png`. |
+| 27 | Регрессия: прежние 89 | ✅ | Все зелёные (с адаптациями ниже). |
+| 28 | Визуал v3 1440/375 × 3 темы | ✅ | `tests/screens-qa/v3/`: app, profile-popup, members, settings-profile, status-menu, ping-popup, server-roles, member-menu, stream-modal. Горизонтального скролла нет ни в одной теме. |
+
+### Адаптации старых тестов (законное изменение контракта)
+- `api.spec.js` «вложения: > 25 МБ» → «> 100 МБ» (101 МБ): по SPEC-v3 §2.2 лимит поднят до 100 МБ.
+- `e2e.spec.js` (2 места) и `visual.spec.js`: старт демонстрации теперь идёт через `#modal-stream` → `#btn-stream-start` (SPEC-v3 §2.4). Добавлен хелпер `startScreenShare(page, quality)` в `tests/fixtures/ui.js`.
+- `inviteCode` в старых тестах не менялся: у @everyone по умолчанию есть CREATE_INVITE.
+
+## v3: результат последнего прогона (реальный вывод)
+
+`QA_PORT=3900 npx playwright test` (дерево 17.10 после правок backend/frontend/desktop; строки v3, обрезаны до 200 символов):
+
+```
+Running 139 tests using 1 worker
+  ✓   86 [chromium] › tests/v3-desktop.spec.js:38:1 › desktop: окно открывается, грузит страницу сервера, мост window.sozvonDesktop.isDesktop === true (1.
+  ✓   87 [chromium] › tests/v3-migration.spec.js:38:1 › старт на старом db.json: вход, серверы, история, вложение — всё на месте; @everyone = D
+  ✓   88 [chromium] › tests/v3-migration.spec.js:77:1 › после миграции: владелец может всё, участник — права @everyone по умолчанию, инв
+  ✓   89 [chromium] › tests/v3-migration.spec.js:110:1 › миграция идемпотентна: перезапуск сохраняет роли/изменения, @everyone не дубли
+  ✓   90 [chromium] › tests/v3-profile.spec.js:17:3 › v3 аватар и баннер (ffmpeg) › PNG 640×360 → avatar 256×256 (центр-кроп), avatarAnimated=null; user:updated др�
+  ✓   91 [chromium] › tests/v3-profile.spec.js:37:3 › v3 аватар и баннер (ffmpeg) › GIF (анимированный, 20 кадров) → avatarAnimated ≤256×256 с анима�
+  ✓   92 [chromium] › tests/v3-profile.spec.js:57:3 › v3 аватар и баннер (ffmpeg) › кадрирование x,y,size из UI учитывается (PNG) (420ms)
+  ✓   93 [chromium] › tests/v3-profile.spec.js:71:3 › v3 аватар и баннер (ffmpeg) › баннер PNG → 960×340; анимированный баннер → bannerAnimated; DELE
+  ✓   94 [chromium] › tests/v3-profile.spec.js:96:3 › v3 аватар и баннер (ffmpeg) › аватар > 10 МБ → 413/400 с {error} (261ms)
+  ✓   95 [chromium] › tests/v3-profile.spec.js:104:3 › v3 аватар и баннер (ffmpeg) › иконка/баннер сервера: MANAGE_SERVER; иконка 256×256 (629ms)
+  ✓   96 [chromium] › tests/v3-profile.spec.js:121:3 › v3 PATCH /api/me: профиль и статус › displayName/about(190)/pronouns(40)/bannerColor/profileTheme/customStatus — вали
+  ✓   97 [chromium] › tests/v3-profile.spec.js:148:3 › v3 PATCH /api/me: профиль и статус › статус invisible → для других offline (presence/members), себе �
+  ✓   98 [chromium] › tests/v3-profile.spec.js:171:3 › v3 PATCH /api/me: профиль и статус › кастомный статус с истечением: после expiresAt не о�
+  ✓   99 [chromium] › tests/v3-profile.spec.js:187:3 › v3 лимит вложений 100 МБ › конфиг: multer = UPLOAD_LIMIT_MB (100 по умолчанию), nginx client_max_body_siz
+  ✓  100 [chromium] › tests/v3-profile.spec.js:203:3 › v3 лимит вложений 100 МБ › отдельный сервер с UPLOAD_LIMIT_MB=2: 1.5 МБ проходит, 3 МБ → 413
+  ✓  101 [chromium] › tests/v3-profile.spec.js:222:3 › v3 лимит вложений 100 МБ › основной сервер: 30 МБ (больше старого лимита 25) прини
+  ✓  102 [chromium] › tests/v3-profile.spec.js:233:3 › v3 пинг (сервер) › ping:rtt → ack {now} (90ms)
+  ✓  103 [chromium] › tests/v3-roles.spec.js:26:3 › v3 права: модель и отдача клиенту › PERMS сервера и клиента совпадают с контракто
+  ✓  104 [chromium] › tests/v3-roles.spec.js:41:3 › v3 права: модель и отдача клиенту › новый сервер: @everyone (id=server.id, position 0, DEFAULT_EVERYONE)
+  ✓  105 [chromium] › tests/v3-roles.spec.js:59:3 › v3 права: модель и отдача клиенту › inviteCode только при CREATE_INVITE (иначе null) (217ms)
+  ✓  106 [chromium] › tests/v3-roles.spec.js:71:3 › v3 роли: CRUD, порядок, выдача › role:create/update/reorder/delete; валидация; @everyone нельзя удалит
+  ✓  107 [chromium] › tests/v3-roles.spec.js:111:3 › v3 роли: CRUD, порядок, выдача › без MANAGE_ROLES нельзя создавать/менять роли; с MANAGE_ROLE
+  ✓  108 [chromium] › tests/v3-roles.spec.js:146:3 › v3 права: сообщения › SEND_MESSAGES: снять у @everyone → ошибка; роль с правом → можно; вл�
+  ✓  109 [chromium] › tests/v3-roles.spec.js:160:3 › v3 права: сообщения › ATTACH_FILES: без права вложение отклоняется, текст проходит (2
+  ✓  110 [chromium] › tests/v3-roles.spec.js:170:3 › v3 права: сообщения › MANAGE_MESSAGES: без права чужое не удалить; своё — можно; с прав
+  ✓  111 [chromium] › tests/v3-roles.spec.js:184:3 › v3 права: сообщения › overwrite канала: deny SEND для @everyone в одном канале, allow для роли п
+  ✓  112 [chromium] › tests/v3-roles.spec.js:205:3 › v3 права: приватный канал › deny VIEW_CHANNEL у @everyone + allow роли: канал не виден, история/
+  ✓  113 [chromium] › tests/v3-roles.spec.js:253:3 › v3 права: приватный канал › ADMINISTRATOR и владелец игнорируют overwrites; ADMINISTRATOR может 
+  ✓  114 [chromium] › tests/v3-roles.spec.js:278:3 › v3 server:update › MANAGE_SERVER: name/description(≤300)/regenerateInvite; без права — отказ (296ms)
+  ✓  115 [chromium] › tests/v3-roles.spec.js:304:3 › v3 модерация: кик, бан, иерархия › кик: server:removed {reason:"kick"}, можно вернуться по инв
+  ✓  116 [chromium] › tests/v3-roles.spec.js:316:3 › v3 модерация: кик, бан, иерархия › иерархия: модератор кикает рядового, но не а�
+  ✓  117 [chromium] › tests/v3-roles.spec.js:340:3 › v3 модерация: кик, бан, иерархия › бан: server:removed {reason:"ban"}, «Вы заблокированы на э�
+  ✓  118 [chromium] › tests/v3-roles.spec.js:365:3 › v3 модерация: кик, бан, иерархия › передача владения: только владелец; новый вл
+  ✓  119 [chromium] › tests/v3-roles.spec.js:383:3 › v3 права: голос › CONNECT: без права voice:join отклоняется (189ms)
+  ✓  120 [chromium] › tests/v3-roles.spec.js:390:3 › v3 права: голос › SPEAK: без права вход с серверным mute, клиент сам его не снимет (704
+  ✓  121 [chromium] › tests/v3-roles.spec.js:404:3 › v3 права: голос › STREAM: без права streaming/camera=true не применяются; с правом — применя
+  ✓  122 [chromium] › tests/v3-roles.spec.js:422:3 › v3 права: голос › member:voice: серверный mute/deafen, перемещение (voice:moved), отключение; бе�
+  ✓  123 [chromium] › tests/v3-roles.spec.js:462:3 › v3 права: музыкальный бот › USE_MUSIC_BOT: без права music:command и !-команда → «Нет права �
+  ✓  124 [chromium] › tests/v3-ui.spec.js:24:3 › v3 UI: роли › настройки сервера → Роли: создать роль через UI, она есть на сервере; �
+  ✓  125 [chromium] › tests/v3-ui.spec.js:70:3 › v3 UI: роли › контекстное меню участника: владелец видит kick/ban/роли, рядовой — нет;
+  ✓  126 [chromium] › tests/v3-ui.spec.js:95:3 › v3 UI: роли › приватный канал не виден в сайдбаре у участника без роли; появляется
+  ✓  127 [chromium] › tests/v3-ui.spec.js:106:3 › v3 UI: роли › без SEND_MESSAGES композер у участника заблокирован/понятная ошибка, а не 
+  ✓  128 [chromium] › tests/v3-ui.spec.js:122:3 › v3 UI: профиль › аватар (GIF): img вместо буквы, статичный src, анимированный при hover; по
+  ✓  129 [chromium] › tests/v3-ui.spec.js:191:3 › v3 UI: профиль › без аватара — буква как раньше; reduced-motion — hover не включает анимац�
+  ✓  130 [chromium] › tests/v3-ui.spec.js:205:3 › v3 UI: профиль › настройки → Профиль: about со счётчиком 190, displayName, сохранение; загр�
+  ✓  131 [chromium] › tests/v3-ui.spec.js:228:3 › v3 UI: профиль › статус: меню у аватара → Невидимый → у другого offline; Задать стату
+  ✓  132 [chromium] › tests/v3-ui.spec.js:249:3 › v3 UI: пинг и стрим › пинг: __sozvon.ping.last > 0, значок «мс»; в голосе — WebRTC RTT (5.9s)
+  ✓  133 [chromium] › tests/v3-ui.spec.js:268:3 › v3 UI: пинг и стрим › стрим 1080p60: getParameters().encodings[0].maxBitrate === 6_000_000, maxFramerate 60; 720p30 → 2.5 М�
+  ✓  134 [chromium] › tests/v3-visual.spec.js:37:3 › скриншоты v3 1440: участники с ролями, попап профиля, роли, профиль, стрим, пинг × 
+  ✓  135 [chromium] › tests/v3-visual.spec.js:37:3 › скриншоты v3 375: участники с ролями, попап профиля, роли, профиль, стрим, пинг × 3
+  …(строки 1–85 и 136–139 — старые api/e2e/v2/visual + 2 @autoplay, все ✓)
+  139 passed (7.6m)
+```
+
+Состав: старые 89 (api 39, e2e 19 + 2 @autoplay, visual 2, v2: 27) и новые v3 50 (roles 21, profile 13, ui 10, migration 3, visual 2, desktop 1).
+Failed: 0, flaky: 0, skipped: 0 (desktop-сборка была на месте, smoke выполнялся).
+
+### История циклов v3
+| Цикл | Результат | Что было |
+|------|-----------|----------|
+| 0 | 10/37 (API) | Сервер ещё правился. Плюс мои ошибки: `makeUser()` возвращает `{user:{id}}`, а не `id`; `memberIds` не входит в публичный контракт (есть `members`). Исправлено в тестах. |
+| 1 | 32/34 API; UI 6/10 | ffprobe не считает кадры animated WebP — подсчёт перенесён в разбор RIFF/ANMF. Старый файл аватара удаляется при замене (тест скачивает его до повторной загрузки). Предикат `server:updated` для приватного канала был неверным (overwrites скрытых каналов честно не отдаются). **BUG-B1** nginx 60m → backend. UI: права роли на вкладке «Права», пункт «Роли» в меню появляется, только когда есть роли, `button[data-status]` (в иконке тоже был data-status), градиент темы смешан с фоном — проверка по оттенкам точек. |
+| 2 | **139/139** | Первый полный прогон после исправления BUG-B1 и правок frontend (TDZ в voice-stage.js, закрытие `#modal-settings`). |
+| 3 | **139/139** | Повторный полный прогон, вывод выше. Добавлена проверка «попап профиля целиком во вьюпорте». |
+
+## v3: баги и замечания
+
+| ID | Владелец | Серьёзность | Описание | Статус |
+|----|----------|-------------|----------|--------|
+| BUG-B1 | backend | major | `deploy/templates/nginx.conf`: `client_max_body_size 60m` при лимите вложений 100 МБ. Файлы 60–100 МБ на проде отсекал бы nginx. | ✅ Закрыт: 110m, update.sh перерендеривает конфиг; тест зелёный |
+| UI-v3-1 | frontend | minor | 1440: попап профиля, открытый из сообщения внизу чата, прилегает к нижнему краю вьюпорта почти без отступа. | ⚠️ Открыт (косметика); в тесте ограничение ≥4 px выполняется |
+| UI-v3-2 | frontend | trivial | В ранней версии редактор роли без цвета показывал «nullnull» под заголовком. В текущих скриншотах не воспроизводится. | ✅ Не воспроизводится |
+| BUG-T2 | qa | — | Мои ошибки в тестах цикла 0–1 (id пользователя, memberIds, ffprobe и WebP, предикат приватного канала, мобильное меню в v3-visual). | ✅ Исправлены в tests/ |
+
+Открытых функциональных багов нет.
+
+### Наблюдения v3 (к сведению)
+- Истёкший кастомный статус отдаётся как `null` лениво, при сериализации. Отдельного `user:updated` в момент истечения нет: клиент должен скрывать статус по `expiresAt` сам.
+- `customStatus` с `expiresAt` в прошлом сервер принимает и сразу отдаёт `null` (тест допускает и 400).
+- Пункт «Роли» в контекстном меню скрыт, пока на сервере нет ролей, кроме @everyone. Логично, но в контракте этого нет.
+- Анимированный аватар сохраняется как animated WebP. ffmpeg/ffprobe его не декодируют, поэтому для проверки и для будущей перекодировки нужен разбор контейнера или libwebp.
+
+## v3: что не проверить в headless
+- **Глобальная рация desktop вне фокуса (uiohook)**, трей, автозапуск, нативные уведомления, бейдж: smoke проверяет только окно, мост и безопасность webPreferences. desktop прогонял PTT отдельно своим `scripts/smoke.mjs` через xdotool. Windows NSIS/zip и SmartScreen не проверялись (только linux-unpacked под Xvfb).
+- **Реальное качество стрима 1080p60**: проверены параметры энкодера (`maxBitrate`, `maxFramerate`), но не фактический битрейт и fps на фейковом источнике экрана.
+- **RTT через TURN (FORCE_RELAY)**: пиры на localhost, `voice.rtt` ≈ 0–2 мс по host-кандидатам.
+- **Загрузка 100 МБ через nginx**: конфиг проверен статически, поведение лимита — на отдельном сервере с `UPLOAD_LIMIT_MB=2`. backend отдельно проверял в Docker: 95 МБ через nginx → 200.
+- **Кадрирование drag/zoom на canvas**: проверены открытие `#modal-crop` и сохранение, жесты мыши и тача — нет.
+- «Не беспокоить» без звуков: системные уведомления в headless запрещены, звуки на слух не проверялись.
