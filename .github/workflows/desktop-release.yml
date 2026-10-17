@@ -59,10 +59,14 @@ jobs:
           merge-multiple: true
       - name: SHA256SUMS
         run: cd out && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
+      - name: Тег релиза
+        id: tag
+        run: echo "tag=desktop-v$(node -p "require('./desktop/package.json').version")" >> "$GITHUB_OUTPUT"
       - uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || format('desktop-v{0}', github.run_number) }}
-          name: Созвон для ПК ${{ github.ref_name }}
+          tag_name: ${{ steps.tag.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: Созвон для ПК ${{ steps.tag.outputs.tag }}
           body_path: desktop/RELEASE_NOTES.md
           files: out/*
           fail_on_unmatched_files: true
