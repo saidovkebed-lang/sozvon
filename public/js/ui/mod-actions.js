@@ -89,6 +89,7 @@ export function initModActions() {
     e.preventDefault();
     $('#modal-reason').close('ok');
   });
+  $('#reason-ok')?.addEventListener('click', () => $('#modal-reason').close('ok'));
 }
 
 export async function kickMember(server, userId) {

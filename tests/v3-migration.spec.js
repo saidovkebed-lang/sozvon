@@ -53,7 +53,7 @@ test('старт на старом db.json: вход, серверы, истор
   expect(s, 'старый сервер на месте').toBeTruthy();
   expect(s.ownerId).toBe(old.ownerId);
   expect(s.inviteCode).toBe(old.inviteCode);
-  expect(s.memberIds.sort()).toEqual([...old.memberIds].sort());
+  expect(s.members.map((m) => m.id).sort()).toEqual([...old.memberIds].sort());
   expect(s.channels.map((c) => c.name).sort()).toEqual(['Голосовой', 'мемы', 'общий']);
   expect(s.roles).toHaveLength(1);
   expect(s.roles[0]).toMatchObject({ id: s.id, position: 0, permissions: DEFAULT_EVERYONE });

@@ -76,8 +76,8 @@ usage() {
   --no-relay        не гнать весь голос через свой TURN (FORCE_RELAY=0)
   --relay           весь голос и видео через свой TURN (FORCE_RELAY=1, по умолчанию)
   --no-firewall     не настраивать ufw
-  --no-ytdlp        не ставить yt-dlp и ffmpeg (музыка по ссылкам YouTube/Spotify/SoundCloud
-                    будет недоступна; по умолчанию ставятся, с ежедневным автообновлением)
+  --no-ytdlp        не ставить yt-dlp (музыка по ссылкам YouTube/Spotify/SoundCloud
+                    будет недоступна; по умолчанию ставится, с ежедневным автообновлением)
   --branch ВЕТКА    ветка git (по умолчанию main)
   --source КАТАЛОГ  взять код из локального каталога вместо git clone
   --local-test      тестовый режим (Docker): без certbot/ufw/определения IP,
@@ -244,10 +244,9 @@ install_packages() {
   step "Установка пакетов (nginx, coturn, certbot, git…)"
   info "Это займёт 1–3 минуты…"
   DEBIAN_FRONTEND=noninteractive apt-get update -qq -o DPkg::Lock::Timeout=600 </dev/null
-  local pkgs=(ca-certificates curl git openssl xz-utils iproute2 procps nginx coturn certbot python3)
-  # ffmpeg: yt-dlp собирает из него аудио (HLS SoundCloud, opus → mp3 для всех браузеров)
+  # ffmpeg: аватары/баннеры (обрезка, анимация) и аудио для yt-dlp (HLS SoundCloud, opus → mp3)
+  local pkgs=(ca-certificates curl git openssl xz-utils iproute2 procps nginx coturn certbot python3 ffmpeg)
   [ "$OPT_FIREWALL" = 1 ] && pkgs+=(ufw)
-  [ "$OPT_YTDLP" = 1 ] && pkgs+=(ffmpeg)
   apt_install "${pkgs[@]}"
   ok "Пакеты установлены"
 }
@@ -705,6 +704,18 @@ setup_services() {
   ok "Запущены: coturn, sozvon, sozvon-bot"
 }
 
+# Приложение для ПК: свежий релиз с GitHub → $DATA_DIR/downloads (страница /download)
+setup_app_release() {
+  step "Приложение для ПК (GitHub Releases → свой сервер)"
+  if [ "$LOCAL_TEST" = 1 ] && [ -z "${SOZVON_GITHUB_API:-}" ]; then
+    info "Тестовый режим — пропущено"
+    return 0
+  fi
+  DATA_DIR=$DATA_DIR APP_USER=$APP_USER timeout 1800 bash "$APP_DIR/deploy/app-release.sh" \
+    || warn "Не удалось скачать приложение для ПК. Повторить: sudo bash $APP_DIR/deploy/app-release.sh"
+  return 0
+}
+
 ssh_ports() {
   local p
   p=$(ss -Htlnp 2>/dev/null | awk '/"sshd"/ {n = split($4, a, ":"); print a[n]}' | sort -u)
@@ -828,6 +839,7 @@ main() {
   setup_coturn
   setup_nginx_and_cert
   setup_services
+  setup_app_release
   setup_firewall
   health_check
   banner

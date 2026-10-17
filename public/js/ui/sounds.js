@@ -86,6 +86,10 @@ const GROUP = {
   deafen: 'notifications.soundMute', undeafen: 'notifications.soundMute',
 };
 
+let dndCheck = () => false;
+/** main.js передаёт проверку статуса «Не беспокоить» (без импорта state — модуль остаётся независимым) */
+export function setDndCheck(fn) { if (typeof fn === 'function') dndCheck = fn; }
+
 export const SOUND_NAMES = Object.keys(SOUNDS);
 
 export function previewSound(name) {
@@ -96,6 +100,7 @@ export function previewSound(name) {
 export function playSound(name) {
   if (!SOUNDS[name]) return false;
   if (!prefs.get('notifications.sounds')) return false;
+  if (dndCheck()) return false; // «Не беспокоить» глушит звуки
   if (GROUP[name] && !prefs.get(GROUP[name])) return false;
   // без жеста пользователя браузер не даст играть — не создаём контекст зря
   if (!ctx && navigator.userActivation && !navigator.userActivation.hasBeenActive) return false;

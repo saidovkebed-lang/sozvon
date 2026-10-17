@@ -3,8 +3,10 @@
 # (yt-dlp и его ежедневное автообновление, обновлённые службы systemd), перезапуск.
 #   sudo bash /opt/sozvon/deploy/update.sh
 # Данные и настройки (/var/lib/sozvon, /etc/sozvon.env) не трогаются.
-# Если менялись шаблоны nginx/coturn — запустите полную установку ещё раз:
+# Конфиг nginx перерисовывается из шаблона (сертификат и домен — прежние); если менялся
+# шаблон coturn или нужен новый домен — запустите полную установку ещё раз:
 #   sudo bash /opt/sozvon/deploy/install.sh
+# Также скачивает свежее приложение для ПК (GitHub Releases, тег desktop-v*) в $DATA_DIR/downloads.
 #
 # Устройство: этап 1 скачивает код и запускает УЖЕ НОВУЮ версию этого скрипта (этап 2),
 # так что новые шаги обновления применяются за один запуск.
@@ -14,6 +16,8 @@ APP_DIR=/opt/sozvon
 DATA_DIR=/var/lib/sozvon
 ENV_FILE=/etc/sozvon.env
 APP_USER=sozvon
+NGINX_SITE=/etc/nginx/sites-available/sozvon.conf
+ACME_ROOT=/var/www/letsencrypt
 BRANCH="${SOZVON_BRANCH:-main}"
 NPM_REGISTRY_MAIN=https://registry.npmjs.org/
 NPM_REGISTRY_MIRROR=https://registry.npmmirror.com/
@@ -72,12 +76,13 @@ fi
 render_unit() {
   local tpl=$1 dest=$2 kv k v tmp expr=()
   shift 2
+  [ -f "$tpl" ] || die "Нет шаблона $tpl"
   for kv in "$@"; do
     k=${kv%%=*}
     v=$(printf '%s' "${kv#*=}" | sed 's/[\\|&]/\\&/g')
     expr+=(-e "s|@${k}@|${v}|g")
   done
-  tmp=$(mktemp /etc/systemd/system/.sozvon.XXXXXX)
+  tmp=$(mktemp "$(dirname "$dest")/.sozvon.XXXXXX")
   sed "${expr[@]}" "$tpl" >"$tmp"
   if grep -qE '@[A-Z][A-Z0-9_]*@' "$tmp"; then rm -f "$tmp"; die "В шаблоне $tpl остались неподставленные значения"; fi
   chmod 0644 "$tmp"
@@ -97,17 +102,19 @@ if [ -f "$ENV_FILE" ]; then
   fi
 fi
 
-if [ "$ytdlp_on" = 1 ]; then
-  if ! have ffmpeg && have apt-get; then
-    printf '  … ставлю ffmpeg (нужен yt-dlp для части треков)\n'
-    if DEBIAN_FRONTEND=noninteractive apt-get install -y -qq -o DPkg::Lock::Timeout=600 --no-install-recommends ffmpeg </dev/null >/dev/null 2>&1 \
-      || { DEBIAN_FRONTEND=noninteractive apt-get update -qq -o DPkg::Lock::Timeout=600 </dev/null >/dev/null 2>&1 \
-           && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq -o DPkg::Lock::Timeout=600 --no-install-recommends ffmpeg </dev/null >/dev/null 2>&1; }; then
-      ok "ffmpeg установлен"
-    else
-      warn "ffmpeg не установился — часть треков SoundCloud может не скачиваться (apt-get install ffmpeg)"
-    fi
+# ffmpeg: аватары/баннеры (кадрирование, анимация) и часть треков yt-dlp
+if ! have ffmpeg && have apt-get; then
+  printf '  … ставлю ffmpeg (аватары, баннеры, музыка)\n'
+  if DEBIAN_FRONTEND=noninteractive apt-get install -y -qq -o DPkg::Lock::Timeout=600 --no-install-recommends ffmpeg </dev/null >/dev/null 2>&1 \
+    || { DEBIAN_FRONTEND=noninteractive apt-get update -qq -o DPkg::Lock::Timeout=600 </dev/null >/dev/null 2>&1 \
+         && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq -o DPkg::Lock::Timeout=600 --no-install-recommends ffmpeg </dev/null >/dev/null 2>&1; }; then
+    ok "ffmpeg установлен"
+  else
+    warn "ffmpeg не установился — аватары будут сохраняться без обрезки (apt-get install ffmpeg)"
   fi
+fi
+
+if [ "$ytdlp_on" = 1 ]; then
   bash "$APP_DIR/deploy/ytdlp.sh" install || warn "yt-dlp не установлен — музыка по ссылкам недоступна (повторить: sudo bash $APP_DIR/deploy/ytdlp.sh install)"
   if [ -f "$ENV_FILE" ] && [ -z "$(env_get YTDLP_PATH)" ] && [ -x /usr/local/bin/yt-dlp ]; then
     env_set YTDLP_PATH /usr/local/bin/yt-dlp
@@ -135,6 +142,48 @@ if have_systemd; then
     systemctl daemon-reload
   fi
   install -d -o "$APP_USER" -g "$APP_USER" -m 0750 "$DATA_DIR/.cache"
+fi
+
+# nginx: перерисовать конфиг из шаблона (новый лимит загрузки и т.п.), домен и сертификат — прежние
+nginx_rerender() {
+  [ -f "$NGINX_SITE" ] && have nginx || return 0
+  local cert key domain port l80="" l443="" backup
+  cert=$(sed -n 's/^[[:space:]]*ssl_certificate[[:space:]]\{1,\}\([^;]*\);.*/\1/p' "$NGINX_SITE" | head -n 1)
+  key=$(sed -n 's/^[[:space:]]*ssl_certificate_key[[:space:]]\{1,\}\([^;]*\);.*/\1/p' "$NGINX_SITE" | head -n 1)
+  if [ -z "$cert" ] || [ -z "$key" ]; then
+    warn "nginx: в $NGINX_SITE нет HTTPS (сертификат ещё не получен) — пропускаю; запустите deploy/install.sh"
+    return 0
+  fi
+  domain=$(env_get SOZVON_DOMAIN)
+  [ -n "$domain" ] || domain=$(sed -n 's/^[[:space:]]*server_name[[:space:]]\{1,\}\([^;]*\);.*/\1/p' "$NGINX_SITE" | head -n 1)
+  port=$(env_get PORT)
+  if [ -f /proc/net/if_inet6 ]; then
+    l80="    listen [::]:80;"
+    l443="    listen [::]:443 ssl http2;"
+  fi
+  backup=$(mktemp /tmp/sozvon-nginx.XXXXXX)
+  cp -p "$NGINX_SITE" "$backup"
+  if render_unit "$APP_DIR/deploy/templates/nginx.conf" "$NGINX_SITE" \
+      "DOMAIN=$domain" "ACME_ROOT=$ACME_ROOT" "APP_PORT=${port:-3000}" \
+      "SSL_CERT=$cert" "SSL_KEY=$key" "LISTEN6_80=$l80" "LISTEN6_443=$l443"; then
+    if nginx -t -q 2>/dev/null; then
+      if have_systemd; then systemctl reload-or-restart nginx; else nginx -s reload 2>/dev/null || true; fi
+      ok "nginx: конфиг обновлён из шаблона ($(grep -o 'client_max_body_size [^;]*' "$NGINX_SITE"))"
+    else
+      cp -p "$backup" "$NGINX_SITE"
+      warn "nginx -t: новый конфиг с ошибкой — вернул прежний ($(nginx -t 2>&1 | tail -n 1))"
+    fi
+  else
+    ok "nginx: конфиг уже актуален"
+  fi
+  rm -f "$backup"
+}
+nginx_rerender
+
+# Приложение для ПК: свежий релиз с GitHub → $DATA_DIR/downloads (ошибки сети не мешают обновлению)
+if [ -f "$APP_DIR/deploy/app-release.sh" ]; then
+  DATA_DIR=$DATA_DIR APP_USER=$APP_USER timeout 1800 bash "$APP_DIR/deploy/app-release.sh" \
+    || warn "Приложение для ПК не обновлено (GitHub недоступен?). Повторить: sudo bash $APP_DIR/deploy/app-release.sh"
 fi
 
 # мост из npm: старый update.sh сам перезапустит службы следующим шагом

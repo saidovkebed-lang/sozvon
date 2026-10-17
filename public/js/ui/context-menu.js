@@ -18,7 +18,7 @@ let anchorEl = null;
 let restoreFocus = null;
 let lastPoint = null;
 
-const SCOPE = '#channels .voice-user[data-user-id], #stage-grid .tile[data-socket-id], #members .member[data-user-id], .message[data-author-id] .message__author, .message[data-author-id] > .avatar';
+const SCOPE = '#channels .voice-user[data-user-id], .sm-member[data-user-id], #stage-grid .tile[data-socket-id], #members .member[data-user-id], .message[data-author-id] .message__author, .message[data-author-id] > .avatar';
 
 function findUser(target) {
   const el = target.closest(SCOPE);
@@ -124,7 +124,7 @@ function buildMenu(u) {
   const mod = [];
   if (caps.roles && assignableRoles(server).length) mod.push(item('roles', 'i-tag', 'Роли', () => showPage(rolesPage(u, server)), { chevron: true }));
   if (caps.mute) {
-    mod.push(checkItem('server-mute', 'i-mic-off', 'Отключить микрофон на сервере', caps.inVoice.member.serverMute, (v) => setServerMute(server, u.userId, v)));
+    mod.push(checkItem('server-mute', 'i-mic-off', 'Заглушить на сервере', caps.inVoice.member.serverMute, (v) => setServerMute(server, u.userId, v)));
   }
   if (caps.deafen) {
     mod.push(checkItem('server-deafen', 'i-headphones-off', 'Отключить звук на сервере', caps.inVoice.member.serverDeafen, (v) => setServerDeafen(server, u.userId, v)));
@@ -199,7 +199,7 @@ function position(m, x, y) {
   m.style.top = `${Math.round(top)}px`;
 }
 
-export function openMenuFor(target, x, y) {
+export function openMenuFor(target, x, y, { page = null } = {}) {
   const u = findUser(target);
   if (!u) return false;
   closeMenu(false);
@@ -217,6 +217,7 @@ export function openMenuFor(target, x, y) {
   position(menu, x, y);
   const first = menu.querySelector('input, button');
   (first || menu).focus({ preventScroll: true });
+  if (page === 'roles') menu.querySelector('[data-action="roles"]')?.click();
   setTimeout(() => {
     document.addEventListener('pointerdown', onOutside, true);
     window.addEventListener('scroll', onScroll, true);

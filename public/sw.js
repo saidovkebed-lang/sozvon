@@ -5,7 +5,7 @@
 //  - /api/, /socket.io/, /media/ и любые не-GET запросы SW не трогает вообще.
 // При изменении списка/логики — поднять VERSION: старые кэши удалятся при activate.
 
-const VERSION = 'v2-2.0.0';
+const VERSION = 'v3-3.0.0';
 const CACHE = `sozvon-shell-${VERSION}`;
 
 const SHELL = [
@@ -22,6 +22,10 @@ const SHELL = [
   '/js/pwa.js',
   '/js/prefs.js',
   '/js/theme-boot.js',
+  '/js/perms.js',
+  '/js/ping.js',
+  '/js/desktop.js',
+  '/js/download.js',
   '/js/ui/auth.js',
   '/js/ui/chat.js',
   '/js/ui/members.js',
@@ -37,6 +41,12 @@ const SHELL = [
   '/js/ui/notifications.js',
   '/js/ui/sounds.js',
   '/js/ui/user-settings.js',
+  '/js/ui/server-settings.js',
+  '/js/ui/mod-actions.js',
+  '/js/ui/profile.js',
+  '/js/ui/cropper.js',
+  '/js/ui/stream.js',
+  '/js/ui/palette.js',
   '/js/voice/media.js',
   '/js/voice/rtc.js',
   '/js/voice/voice.js',

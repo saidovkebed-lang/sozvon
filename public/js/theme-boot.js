@@ -5,6 +5,7 @@
   var p = {};
   try { p = JSON.parse(localStorage.getItem('sozvon.prefs') || '{}') || {}; } catch (e) { p = {}; }
   var html = document.documentElement;
+  try { if (window.sozvonDesktop && window.sozvonDesktop.isDesktop) html.classList.add('is-desktop'); } catch (e) { /* нет моста */ }
   var theme = p['appearance.theme'];
   if (theme !== 'light' && theme !== 'amoled') theme = 'dark';
   html.setAttribute('data-theme', theme);

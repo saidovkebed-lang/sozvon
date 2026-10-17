@@ -6,7 +6,7 @@ import {
   ack, makeUser, createServer, textChannel, voiceChannel, waitEvent, collect, sleep, http, startBot,
 } from './fixtures/api.js';
 import { ROOT, MEDIA_DIR } from './fixtures/env.js';
-import { P, DEFAULT_EVERYONE, guild, ok, denied, makeRole, viewOf, setEveryone, closeAll } from './fixtures/v3.js';
+import { P, DEFAULT_EVERYONE, memberIds, withId, guild, ok, denied, makeRole, viewOf, setEveryone, closeAll } from './fixtures/v3.js';
 
 const opened = [];
 const track = (...us) => { opened.push(...us); return us; };
@@ -52,7 +52,7 @@ test.describe('v3 права: модель и отдача клиенту', () =
     expect((await viewOf(b, srv.id)).bans).toBeNull();
     // бот не в ролях
     const vb = await viewOf(b, srv.id);
-    const botId = (await ack(owner.socket, 'bootstrap')).servers.find((s) => s.id === srv.id).memberIds.find((id) => id !== owner.id && id !== b.id);
+    const botId = memberIds((await ack(owner.socket, 'bootstrap')).servers.find((s) => s.id === srv.id)).find((id) => id !== owner.id && id !== b.id);
     expect(vb.memberRoles[botId]).toBeUndefined();
   });
 
@@ -209,11 +209,16 @@ test.describe('v3 права: приватный канал', () => {
     const secret = (await ok(owner.socket, 'channel:create', { serverId: srv.id, name: 'секрет', type: 'text' })).channel;
     const secretVoice = (await ok(owner.socket, 'channel:create', { serverId: srv.id, name: 'тайная', type: 'voice' })).channel;
     const ow = { [srv.id]: { allow: 0, deny: P.VIEW_CHANNEL }, [vip.id]: { allow: P.VIEW_CHANNEL, deny: 0 } };
-    const updB = waitEvent(b.socket, 'server:updated', (d) => d.server?.id === srv.id && d.server.channelOverwrites?.[secretVoice.id]);
+    const updsB = collect(b.socket, 'server:updated');
     const updC = waitEvent(c.socket, 'server:updated', (d) => d.server?.id === srv.id && d.server.channelOverwrites?.[secretVoice.id]);
     await ok(owner.socket, 'channel:update', { channelId: secret.id, overwrites: ow });
     await ok(owner.socket, 'channel:update', { channelId: secretVoice.id, overwrites: ow });
-    const sb = (await updB).server; const sc = (await updC).server;
+    const sc = (await updC).server;
+    await sleep(300);
+    const sb = updsB.filter((d) => d.server?.id === srv.id).at(-1)?.server;
+    expect(sb, 'b получил персональный server:updated').toBeTruthy();
+    // b не видит overwrites скрытых каналов
+    expect(sb.channelOverwrites[secret.id]).toBeUndefined();
     expect(sb.channels.map((x) => x.id)).not.toContain(secret.id);
     expect(sb.channels.map((x) => x.id)).not.toContain(secretVoice.id);
     expect(sc.channels.map((x) => x.id)).toEqual(expect.arrayContaining([secret.id, secretVoice.id]));
@@ -283,7 +288,7 @@ test.describe('v3 server:update', () => {
     expect(after).toMatch(/^[a-z0-9]{8}$/);
     expect(after).not.toBe(before);
     // старый инвайт больше не работает
-    const x = await makeUser('x'); track(x);
+    const x = withId(await makeUser('x')); track(x);
     await denied(x.socket, 'server:join', { inviteCode: before });
     await ok(x.socket, 'server:join', { inviteCode: after });
     // роль с MANAGE_SERVER
@@ -302,7 +307,7 @@ test.describe('v3 модерация: кик, бан, иерархия', () => {
     const removed = waitEvent(b.socket, 'server:removed', (d) => d.serverId === srv.id);
     await ok(owner.socket, 'member:kick', { serverId: srv.id, userId: b.id, reason: 'тест' });
     expect(await removed).toMatchObject({ serverId: srv.id, reason: 'kick' });
-    expect((await viewOf(owner, srv.id)).memberIds).not.toContain(b.id);
+    expect(memberIds(await viewOf(owner, srv.id))).not.toContain(b.id);
     expect(await viewOf(b, srv.id)).toBeNull();
     await denied(b.socket, 'message:send', { channelId: textChannel(srv).id, content: 'я ещё тут?' });
     await ok(b.socket, 'server:join', { inviteCode: srv.inviteCode });
@@ -320,7 +325,7 @@ test.describe('v3 модерация: кик, бан, иерархия', () => {
     await denied(mod.socket, 'member:kick', { serverId: srv.id, userId: owner.id });
     await denied(admin.socket, 'member:kick', { serverId: srv.id, userId: owner.id });
     // равные по роли тоже не могут
-    const mod2 = await makeUser('mod2'); track(mod2);
+    const mod2 = withId(await makeUser('mod2')); track(mod2);
     await ok(mod2.socket, 'server:join', { inviteCode: srv.inviteCode });
     await ok(owner.socket, 'member:roles', { serverId: srv.id, userId: mod2.id, roleIds: [rMod.id] });
     await denied(mod.socket, 'member:kick', { serverId: srv.id, userId: mod2.id });
@@ -328,7 +333,7 @@ test.describe('v3 модерация: кик, бан, иерархия', () => {
     await ok(mod.socket, 'member:kick', { serverId: srv.id, userId: plain.id });
     await ok(admin.socket, 'member:kick', { serverId: srv.id, userId: mod.id });
     // бота кикнуть нельзя
-    const botId = (await viewOf(owner, srv.id)).memberIds.find((id) => ![owner.id, admin.id, mod2.id].includes(id));
+    const botId = memberIds(await viewOf(owner, srv.id)).find((id) => ![owner.id, admin.id, mod2.id].includes(id));
     await denied(owner.socket, 'member:kick', { serverId: srv.id, userId: botId });
   });
 
@@ -343,7 +348,7 @@ test.describe('v3 модерация: кик, бан, иерархия', () => {
     await ok(owner.socket, 'member:ban', { serverId: srv.id, userId: b.id, reason: 'спам', deleteMessages: true });
     expect(await removed).toMatchObject({ serverId: srv.id, reason: 'ban' });
     const vo = await viewOf(owner, srv.id);
-    expect(vo.memberIds).not.toContain(b.id);
+    expect(memberIds(vo)).not.toContain(b.id);
     expect(vo.bans[b.id]).toMatchObject({ by: owner.id, reason: 'спам' });
     expect(typeof vo.bans[b.id].at).toBe('number');
     expect((await viewOf(c, srv.id)).bans).toBeNull();
@@ -360,7 +365,7 @@ test.describe('v3 модерация: кик, бан, иерархия', () => {
   test('передача владения: только владелец; новый владелец может всё, бывший — нет', async () => {
     const { srv, owner, members: [b, c] } = await g(2);
     await denied(b.socket, 'server:transfer', { serverId: srv.id, userId: b.id });
-    const outsider = await makeUser('out'); track(outsider);
+    const outsider = withId(await makeUser('out')); track(outsider);
     await denied(owner.socket, 'server:transfer', { serverId: srv.id, userId: outsider.id });
     const upd = waitEvent(c.socket, 'server:updated', (d) => d.server?.id === srv.id && d.server.ownerId === b.id);
     await ok(owner.socket, 'server:transfer', { serverId: srv.id, userId: b.id });

@@ -79,9 +79,13 @@ export function upsertServer(server) {
   if (i >= 0) state.servers[i] = server; else state.servers.push(server);
 }
 
-export function setUserOnline(userId, online) {
+export function setUserOnline(userId, online, status) {
   for (const s of state.servers) {
-    for (const m of s.members) if (m.id === userId) m.online = online;
+    for (const m of s.members) {
+      if (m.id !== userId) continue;
+      m.online = online;
+      if (status && userId !== state.user?.id) m.status = status;
+    }
   }
 }
 

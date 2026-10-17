@@ -7,6 +7,11 @@ import { socketId } from '../socket.js';
 import { selectChannel } from '../nav.js';
 import { prefs } from '../prefs.js';
 import { playSound } from './sounds.js';
+import { bumpUnread, focusApp } from '../desktop.js';
+import { displayName } from '../util.js';
+
+/** «Не беспокоить» (v3): без звуков и системных уведомлений */
+export const isDnd = () => state.user?.status === 'dnd';
 
 let lastChannel = null;       // в каком голосовом канале были при прошлом рендере
 let lastMembers = new Set();  // socketId участников этого канала
@@ -54,12 +59,13 @@ export function canNotify() {
 }
 
 function showDesktop(m) {
+  if (isDnd()) return;
   if (!prefs.get('notifications.desktop') || !canNotify() || Notification.permission !== 'granted') return;
   if (document.hasFocus() && document.visibilityState === 'visible') return;
-  if (prefs.get('notifications.mentionsOnly') && !mentionsMe(m.content)) return;
+  if (prefs.get('notifications.mentionsOnly') && !mentionsMe(m.content) && !m.mentionEveryone) return;
   const ch = getChannel(m.channelId);
   const srv = ch ? getServer(ch.serverId) : null;
-  const who = m.author?.username || 'Кто-то';
+  const who = m.author ? displayName(m.author) : 'Кто-то';
   let body = (m.content || '').replace(/\s+/g, ' ').trim();
   if (!body && m.attachments?.length) body = `📎 ${m.attachments.length > 1 ? `Вложения (${m.attachments.length})` : (m.attachments[0].name || 'Вложение')}`;
   if (body.length > 140) body = body.slice(0, 139) + '…';
@@ -71,7 +77,7 @@ function showDesktop(m) {
       badge: '/assets/icons/icon-192.png',
       silent: true, // свой звук играем сами
     });
-    n.onclick = () => { window.focus(); if (ch) selectChannel(ch.id); n.close(); };
+    n.onclick = () => { focusApp(); if (ch) selectChannel(ch.id); n.close(); };
   } catch { /* например, Android Chrome требует SW.showNotification — молча пропускаем */ }
 }
 
@@ -80,6 +86,7 @@ function onMessage({ message: m } = {}) {
   const visible = document.visibilityState === 'visible' && document.hasFocus();
   const here = m.channelId === state.currentChannelId && visible;
   if (!here && !state.deafened) playSound('message');
+  if (!here) bumpUnread();
   showDesktop(m);
 }
 

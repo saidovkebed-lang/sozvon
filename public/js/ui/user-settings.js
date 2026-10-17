@@ -1,7 +1,7 @@
 // Полноэкранная модалка «Настройки пользователя» (#modal-user-settings), как в Discord:
 // слева разделы, справа содержимое. Все настройки — prefs.get/set с мгновенным применением
 // (без кнопки «Сохранить», кроме смены пароля). На узком экране — список разделов → экран раздела.
-import { $, $$, h, icon, safeColor, firstLetter } from '../util.js';
+import { $, $$, h, icon, safeColor, firstLetter, setAvatarImage, safeMediaUrl, displayName } from '../util.js';
 import { state, subscribe, applyUserUpdate } from '../state.js';
 import { getToken } from '../api.js';
 import { prefs, DEFAULTS } from '../prefs.js';
@@ -10,12 +10,17 @@ import { toast, toastOk, toastError } from './toasts.js';
 import { previewSound } from './sounds.js';
 import { codeLabel, comboFromEvent, isModifierCode, setCapturing } from './keybinds.js';
 import { canNotify, requestDesktopPermission } from './notifications.js';
+import { api } from '../api.js';
+import { profileCard } from './profile.js';
+import { openCropper } from './cropper.js';
+import { renderDownloads } from '../download.js';
 
-export const APP_VERSION = '2.0.0';
+export const APP_VERSION = '3.0.0';
 const GITHUB_URL = 'https://github.com/saidovkebed-lang/sozvon';
 
 const SECTIONS = [
   { id: 'account', title: 'Моя учётная запись', icon: 'i-user', group: 'Настройки пользователя' },
+  { id: 'profile', title: 'Профиль', icon: 'i-pencil' },
   { id: 'voice', title: 'Голос и видео', icon: 'i-mic', group: 'Настройки приложения' },
   { id: 'appearance', title: 'Внешний вид', icon: 'i-palette' },
   { id: 'notifications', title: 'Уведомления', icon: 'i-bell' },
@@ -23,10 +28,8 @@ const SECTIONS = [
   { id: 'about', title: 'О приложении', icon: 'i-info', group: '' },
 ];
 
-export const AVATAR_PALETTE = [
-  '#6a45ff', '#5865f2', '#3b82f6', '#06b6d4', '#14b8a6', '#22c55e',
-  '#84cc16', '#eab308', '#f97316', '#ef4444', '#ec4899', '#a855f7',
-];
+import { AVATAR_PALETTE } from './palette.js';
+export { AVATAR_PALETTE };
 
 const MOBILE = '(max-width: 639.98px)';
 const dlg = () => $('#modal-user-settings');
@@ -308,8 +311,16 @@ function renderAccountCard() {
   const color = safeColor(u.color);
   card.style.setProperty('--c', color);
   $('.account-card__avatar', card).style.setProperty('--c', color);
-  $('.account-card__avatar', card).textContent = firstLetter(u.username);
-  $('.account-card__name', card).textContent = u.username;
+  const av = $('.account-card__avatar', card);
+  av.textContent = firstLetter(u.username);
+  setAvatarImage(av, u);
+  const bn = $('.account-card__banner', card);
+  const bu = safeMediaUrl(u.banner);
+  bn.style.backgroundImage = bu ? `url("${bu.replace(/"/g, '%22')}")` : '';
+  bn.classList.toggle('has-img', !!bu);
+  if (!bu && u.bannerColor) card.style.setProperty('--c', u.bannerColor);
+  $('.account-card__name', card).textContent = displayName(u);
+  $('.account-card__tag', card).textContent = `@${u.username} · имя пользователя изменить нельзя`;
   $$('[data-color]', dlg()).forEach((b) => {
     const on = b.dataset.color.toLowerCase() === color.toLowerCase();
     b.classList.toggle('is-selected', on);
@@ -425,6 +436,200 @@ function buildAccount() {
           h('span', { class: 'setting__label' }, 'Выйти из аккаунта'),
           h('p', { class: 'setting__desc' }, 'На этом устройстве. Настройки приложения сохранятся.')),
         h('button', { type: 'button', class: 'btn btn--danger', onclick: () => onLogout() }, icon('i-logout'), 'Выйти'))),
+  ];
+}
+
+/* ---------- 1b. Профиль (v3 §2.3) ---------- */
+let draft = null;          // несохранённые текстовые поля профиля
+let profileBusy = false;
+
+const PROFILE_KEYS = ['displayName', 'pronouns', 'about', 'bannerColor', 'profileTheme'];
+
+function profileDraftFromUser() {
+  const u = state.user || {};
+  return {
+    displayName: u.displayName || '',
+    pronouns: u.pronouns || '',
+    about: u.about || '',
+    bannerColor: u.bannerColor || null,
+    profileTheme: u.profileTheme ? { ...u.profileTheme } : null,
+  };
+}
+
+function profileDirty() {
+  if (!draft) return false;
+  const cur = profileDraftFromUser();
+  return JSON.stringify(cur) !== JSON.stringify(draft);
+}
+
+function renderProfilePreview() {
+  const box = $('#profile-preview');
+  if (!box || !state.user) return;
+  const u = { ...state.user, ...draft, displayName: draft?.displayName?.trim() || null };
+  box.replaceChildren(profileCard(u, { preview: true }));
+  $('#profile-save-bar').hidden = !profileDirty();
+  const about = $('#profile-about');
+  if (about) $('#profile-about-count').textContent = `${about.value.length}/190`;
+  $('#profile-avatar-remove').hidden = !(state.user.avatar || state.user.avatarAnimated);
+  $('#profile-banner-remove').hidden = !(state.user.banner || state.user.bannerAnimated);
+  $$('[data-banner-color]', dlg()).forEach((b) => {
+    const on = (b.dataset.bannerColor || null) === (draft.bannerColor || null);
+    b.classList.toggle('is-selected', on);
+    b.setAttribute('aria-checked', String(on));
+  });
+  const themeOn = !!draft.profileTheme;
+  const tsw = $('#profile-theme-on');
+  if (tsw) tsw.checked = themeOn;
+  $$('.profile-theme__colors', dlg()).forEach((e) => e.classList.toggle('is-disabled', !themeOn));
+  if ($('#profile-theme-primary')) {
+    $('#profile-theme-primary').disabled = !themeOn;
+    $('#profile-theme-accent').disabled = !themeOn;
+  }
+}
+
+function fillProfileForm() {
+  draft = profileDraftFromUser();
+  const set = (id, v) => { const el = $(id); if (el) el.value = v; };
+  set('#profile-display-name', draft.displayName);
+  set('#profile-pronouns', draft.pronouns);
+  set('#profile-about', draft.about);
+  set('#profile-banner-color', draft.bannerColor || safeColor(state.user?.color));
+  set('#profile-theme-primary', draft.profileTheme?.primary || '#6a45ff');
+  set('#profile-theme-accent', draft.profileTheme?.accent || '#ec4899');
+  $('#profile-error') && ($('#profile-error').textContent = '');
+  renderProfilePreview();
+}
+
+async function uploadProfileMedia(kind, input) {
+  const file = input.files?.[0];
+  input.value = '';
+  if (!file || profileBusy) return;
+  const limit = kind === 'avatar' ? 10 : 15;
+  if (file.size > limit * 1024 * 1024) { toast(`Файл больше ${limit} МБ`); return; }
+  const res = await openCropper(file, { aspect: kind === 'avatar' ? 1 : 960 / 340, round: kind === 'avatar', title: kind === 'avatar' ? 'Аватар' : 'Баннер профиля' });
+  if (!res) return;
+  profileBusy = true;
+  const box = $(kind === 'avatar' ? '#profile-avatar-box' : '#profile-banner-box');
+  box?.classList.add('is-busy');
+  try {
+    const r = kind === 'avatar' ? await api.uploadAvatar(res.file, res.crop) : await api.uploadBanner(res.file, res.crop);
+    if (r?.user) applyUserUpdate(r.user);
+    toastOk(kind === 'avatar' ? 'Аватар обновлён' : 'Баннер обновлён');
+  } catch (e) { toastError(e); } finally {
+    profileBusy = false;
+    box?.classList.remove('is-busy');
+    renderProfilePreview();
+  }
+}
+
+async function removeProfileMedia(kind) {
+  try {
+    const r = kind === 'avatar' ? await api.deleteAvatar() : await api.deleteBanner();
+    if (r?.user) applyUserUpdate(r.user);
+    renderProfilePreview();
+  } catch (e) { toastError(e); }
+}
+
+async function saveProfile() {
+  if (!draft || !state.user) return;
+  const err = $('#profile-error');
+  const body = {};
+  const cur = profileDraftFromUser();
+  for (const k of PROFILE_KEYS) if (JSON.stringify(cur[k]) !== JSON.stringify(draft[k])) body[k] = draft[k];
+  if ('displayName' in body) body.displayName = draft.displayName.trim() || null;
+  if ('about' in body) body.about = draft.about.slice(0, 190);
+  if (!Object.keys(body).length) return;
+  const btn = $('#btn-profile-save');
+  btn.disabled = true;
+  err.textContent = '';
+  try {
+    const r = await api.patchMe(body);
+    applyUserUpdate(r?.user || { id: state.user.id, ...body });
+    fillProfileForm();
+    toastOk('Профиль сохранён');
+  } catch (e) { err.textContent = e.message; } finally { btn.disabled = false; }
+}
+
+function buildProfile() {
+  draft = profileDraftFromUser();
+  const avatarInput = h('input', { type: 'file', id: 'profile-avatar-input', accept: 'image/png,image/jpeg,image/webp,image/gif,image/apng', hidden: true });
+  const bannerInput = h('input', { type: 'file', id: 'profile-banner-input', accept: 'image/png,image/jpeg,image/webp,image/gif,image/apng', hidden: true });
+  avatarInput.addEventListener('change', () => uploadProfileMedia('avatar', avatarInput));
+  bannerInput.addEventListener('change', () => uploadProfileMedia('banner', bannerInput));
+  const text = (id, label, max, placeholder, key, hintText) => {
+    const input = h('input', { class: 'input', id, maxlength: String(max), placeholder, autocomplete: 'off' });
+    input.addEventListener('input', () => { draft[key] = input.value; renderProfilePreview(); });
+    return h('div', { class: 'field' }, h('label', { class: 'field__label', for: id }, label), input, hintText ? h('p', { class: 'field__hint' }, hintText) : null);
+  };
+  const about = h('textarea', { class: 'input', id: 'profile-about', maxlength: '190', rows: '4', placeholder: 'Пара слов о себе. Работает **жирный**, *курсив*, `код` и ссылки.' });
+  about.addEventListener('input', () => { draft.about = about.value; renderProfilePreview(); });
+  const bannerSwatches = h('div', { class: 'swatches swatches--sm', role: 'radiogroup', 'aria-label': 'Цвет баннера' },
+    h('button', { type: 'button', class: 'swatch swatch--none', role: 'radio', dataset: { bannerColor: '' }, title: 'Как цвет аватара', 'aria-label': 'Как цвет аватара' }, icon('i-close', 'swatch__check')),
+    ...AVATAR_PALETTE.slice(0, 7).map((c) => h('button', { type: 'button', class: 'swatch', role: 'radio', dataset: { bannerColor: c }, style: { '--c': c }, title: c, 'aria-label': `Цвет ${c}` }, icon('i-check', 'swatch__check'))),
+    h('label', { class: 'swatch swatch--custom', title: 'Свой цвет' },
+      h('input', { type: 'color', id: 'profile-banner-color', 'aria-label': 'Свой цвет баннера' }), icon('i-palette', 'swatch__icon')));
+  bannerSwatches.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-banner-color]');
+    if (!b) return;
+    draft.bannerColor = b.dataset.bannerColor || null;
+    renderProfilePreview();
+  });
+  bannerSwatches.addEventListener('input', (e) => {
+    if (e.target.id !== 'profile-banner-color') return;
+    draft.bannerColor = e.target.value;
+    renderProfilePreview();
+  });
+  const themeSw = h('input', { type: 'checkbox', class: 'switch', id: 'profile-theme-on', role: 'switch' });
+  themeSw.addEventListener('change', () => {
+    draft.profileTheme = themeSw.checked ? { primary: $('#profile-theme-primary').value, accent: $('#profile-theme-accent').value } : null;
+    renderProfilePreview();
+  });
+  const themeColor = (id, label) => {
+    const inp = h('input', { type: 'color', id, class: 'color-chip__input', 'aria-label': label });
+    inp.addEventListener('input', () => {
+      if (!draft.profileTheme) return;
+      draft.profileTheme = { primary: $('#profile-theme-primary').value, accent: $('#profile-theme-accent').value };
+      renderProfilePreview();
+    });
+    return h('label', { class: 'color-chip' }, inp, h('span', null, label));
+  };
+  const form = h('div', { class: 'profile-form' },
+    section('Аватар',
+      h('div', { class: 'media-row', id: 'profile-avatar-box' },
+        h('button', { type: 'button', class: 'btn btn--primary btn--sm', onclick: () => avatarInput.click() }, icon('i-upload'), 'Сменить аватар'),
+        h('button', { type: 'button', class: 'btn btn--ghost btn--sm', id: 'profile-avatar-remove', onclick: () => removeProfileMedia('avatar') }, 'Удалить'),
+        avatarInput),
+      hint('PNG, JPG, WebP или GIF до 10 МБ. Анимированные GIF играют при наведении — как в Discord, только бесплатно.')),
+    section('Баннер',
+      h('div', { class: 'media-row', id: 'profile-banner-box' },
+        h('button', { type: 'button', class: 'btn btn--sm', onclick: () => bannerInput.click() }, icon('i-image'), 'Сменить баннер'),
+        h('button', { type: 'button', class: 'btn btn--ghost btn--sm', id: 'profile-banner-remove', onclick: () => removeProfileMedia('banner') }, 'Удалить'),
+        bannerInput),
+      h('span', { class: 'field__label' }, 'Цвет баннера (если нет картинки)'),
+      bannerSwatches),
+    section('О себе',
+      text('profile-display-name', 'Отображаемое имя', 32, state.user?.username || '', 'displayName', 'Видно вместо имени пользователя. @имя для входа не меняется.'),
+      text('profile-pronouns', 'Местоимения', 40, 'он/его, она/её…', 'pronouns'),
+      h('div', { class: 'field' },
+        h('div', { class: 'field__row' }, h('label', { class: 'field__label', for: 'profile-about' }, 'Обо мне'), h('span', { class: 'field__count', id: 'profile-about-count' }, '0/190')),
+        about)),
+    section('Тема профиля',
+      h('div', { class: 'setting' },
+        h('div', { class: 'setting__text' }, h('label', { class: 'setting__label', for: 'profile-theme-on' }, 'Цветная тема карточки'), h('p', { class: 'setting__desc' }, 'Градиент из двух цветов на фоне вашего профиля.')),
+        themeSw),
+      h('div', { class: 'profile-theme__colors' }, themeColor('profile-theme-primary', 'Основной'), themeColor('profile-theme-accent', 'Акцент'))),
+    h('p', { class: 'form__error', id: 'profile-error', role: 'alert' }));
+  const bar = h('div', { class: 'save-bar save-bar--sticky', id: 'profile-save-bar', hidden: true },
+    h('span', { class: 'save-bar__text' }, 'Есть несохранённые изменения'),
+    h('button', { type: 'button', class: 'btn btn--ghost btn--sm', onclick: fillProfileForm }, 'Сбросить'),
+    h('button', { type: 'button', class: 'btn btn--primary btn--sm', id: 'btn-profile-save', onclick: saveProfile }, 'Сохранить'));
+  return [
+    h('div', { class: 'profile-layout' },
+      form,
+      h('aside', { class: 'profile-preview-wrap' },
+        h('div', { class: 'field__label' }, 'Предпросмотр'),
+        h('div', { class: 'profile-preview', id: 'profile-preview' }))),
+    bar,
   ];
 }
 
@@ -777,7 +982,16 @@ function buildAbout() {
         h('div', { class: 'about-hero__ver' }, `Версия ${APP_VERSION}`),
         h('a', { class: 'about-hero__link', href: GITHUB_URL, target: '_blank', rel: 'noopener noreferrer' },
           'Исходный код на GitHub', icon('i-external', 'icon--sm')))),
-    section('Возможности этого браузера', list),
+    window.sozvonDesktop?.isDesktop ? section('Приложение для ПК',
+      h('div', { class: 'setting' },
+        h('div', { class: 'setting__text' },
+          h('span', { class: 'setting__label' }, `Созвон для ПК ${window.sozvonDesktop.version || ''}`.trim()),
+          h('p', { class: 'setting__desc' }, 'Глобальные клавиши рации и mute работают, даже когда окно не в фокусе.')),
+        window.sozvonDesktop.openServerSettings ? h('button', { type: 'button', class: 'btn btn--sm', onclick: () => { try { window.sozvonDesktop.openServerSettings(); } catch { /* ignore */ } } }, icon('i-link'), 'Сервер…') : null))
+      : section('Приложение для ПК',
+        hint('Рация и mute в фоне (даже в игре), трей, автозапуск, выбор окна для демонстрации.'),
+        h('div', { class: 'dl', id: 'about-download', dataset: { hideDesktop: '' } })),
+    section(window.sozvonDesktop?.isDesktop ? 'Возможности' : 'Возможности этого браузера', list),
     section('Сброс',
       h('div', { class: 'setting setting--danger' },
         h('div', { class: 'setting__text' },
@@ -795,7 +1009,7 @@ function buildAbout() {
   ];
 }
 
-const BUILDERS = { account: buildAccount, voice: buildVoice, appearance: buildAppearance, notifications: buildNotifications, keybinds: buildKeybinds, about: buildAbout };
+const BUILDERS = { account: buildAccount, profile: buildProfile, voice: buildVoice, appearance: buildAppearance, notifications: buildNotifications, keybinds: buildKeybinds, about: buildAbout };
 
 /* ============================================================
    Каркас модалки
@@ -871,7 +1085,7 @@ function build() {
     updateDependents();
     if (key === 'audio.noiseSuppression') updateRnnoise();
   });
-  subscribe('me', () => { if (root.open) renderAccountCard(); });
+  subscribe('me', () => { if (root.open) { renderAccountCard(); if (current === 'profile' && !profileDirty()) fillProfileForm(); else if (current === 'profile') renderProfilePreview(); } });
 }
 
 function showSection(id, { focusPanel = false } = {}) {
@@ -891,6 +1105,8 @@ function showSection(id, { focusPanel = false } = {}) {
   $('.settings__scroll', root).scrollTop = 0;
   if (id === 'voice') { refreshDevices(); updateRnnoise(); }
   if (id === 'account') renderAccountCard();
+  if (id === 'profile') fillProfileForm();
+  if (id === 'about') { const dl = $('#about-download'); if (dl && !dl.dataset.loaded) { dl.dataset.loaded = '1'; renderDownloads(dl); } }
   if (id === 'about') $('#about-features')?.refresh?.();
   if (id === 'notifications') renderDesktopState();
   if (focusPanel) $('.settings__back', root).focus();

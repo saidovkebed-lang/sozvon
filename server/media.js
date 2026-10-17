@@ -144,8 +144,12 @@ function place(tmpFile, dir, prefix, suffix, ext) {
   return `/media/${dir}/${name}`;
 }
 
+// Формат анимированной версии: gif (по умолчанию — читается везде, в т.ч. ffprobe) или webp
+const ANIM_FORMAT = String(process.env.SOZVON_ANIM_FORMAT || 'gif').toLowerCase() === 'webp' ? 'webp' : 'gif';
+
 async function encodeAnimated(input, filterBase, info, out, cfg, c) {
-  const srcFps = info.fps > 0 ? info.fps : 25;
+  const srcFps = info.fps > 0 && info.fps < 1000 ? info.fps : 25;
+  const useWebp = ANIM_FORMAT === 'webp' && c.webpAnim;
   const ladder = [
     { fps: Math.min(srcFps, ANIM_MAX_FPS), q: 80, colors: 256, scale: 1 },
     { fps: Math.min(srcFps, 30), q: 70, colors: 192, scale: 1 },
@@ -154,20 +158,26 @@ async function encodeAnimated(input, filterBase, info, out, cfg, c) {
     { fps: Math.min(srcFps, 12), q: 45, colors: 64, scale: 0.75 },
     { fps: Math.min(srcFps, 10), q: 40, colors: 32, scale: 0.5 },
   ];
-  for (const step of ladder) {
-    const W = Math.max(2, Math.round(cfg.w * step.scale / 2) * 2), H = Math.max(2, Math.round(cfg.h * step.scale / 2) * 2);
-    const fpsF = step.fps < srcFps - 0.01 ? `,fps=${Math.round(step.fps * 100) / 100}` : '';
-    const base = `${filterBase},scale=${W}:${H}:flags=lanczos${fpsF}`;
-    const args = ['-hide_banner', '-v', 'error', '-y', '-i', input, '-t', String(ANIM_MAX_SECONDS), '-an'];
-    if (c.webpAnim) {
-      args.push('-vf', base, '-c:v', 'libwebp_anim', '-lossless', '0', '-quality', String(step.q),
-        '-compression_level', '4', '-loop', '0', '-f', 'webp', out);
-    } else {
-      args.push('-filter_complex', `[0:v]${base},split[a][b];[a]palettegen=max_colors=${step.colors}:stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=3`,
-        '-loop', '0', '-f', 'gif', out);
+  const palette = `${out}.palette.png`;
+  try {
+    for (const step of ladder) {
+      const W = Math.max(2, Math.round(cfg.w * step.scale / 2) * 2), H = Math.max(2, Math.round(cfg.h * step.scale / 2) * 2);
+      const fpsF = step.fps < srcFps - 0.01 ? `,fps=${Math.round(step.fps * 100) / 100}` : '';
+      const base = `${filterBase},scale=${W}:${H}:flags=lanczos${fpsF}`;
+      const head = ['-hide_banner', '-v', 'error', '-y', '-t', String(ANIM_MAX_SECONDS), '-i', input];
+      if (useWebp) {
+        await run(FFMPEG, [...head, '-an', '-vf', base, '-c:v', 'libwebp_anim', '-lossless', '0', '-quality', String(step.q),
+          '-compression_level', '4', '-loop', '0', '-f', 'webp', out]);
+      } else {
+        // два прохода (палитра отдельно): split+palettegen держит в памяти все кадры
+        await run(FFMPEG, [...head, '-an', '-vf', `${base},palettegen=max_colors=${step.colors}:stats_mode=diff`, '-frames:v', '1', '-update', '1', palette]);
+        await run(FFMPEG, [...head, '-i', palette, '-an', '-lavfi', `[0:v]${base}[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=3:diff_mode=rectangle`,
+          '-loop', '0', '-f', 'gif', out]);
+      }
+      if (fs.statSync(out).size <= ANIM_MAX_BYTES) return useWebp ? 'webp' : 'gif';
     }
-    await run(FFMPEG, args);
-    if (fs.statSync(out).size <= ANIM_MAX_BYTES) return c.webpAnim ? 'webp' : 'gif';
+  } finally {
+    fs.rmSync(palette, { force: true });
   }
   throw new HttpError(400, 'Анимация слишком большая даже после сжатия (максимум 4 МБ) — возьмите файл покороче');
 }
@@ -239,7 +249,7 @@ export function removeMediaUrl(url, stillUsed = () => false) {
   const m = url.match(/^\/media\/(avatars|banners|icons)\/([A-Za-z0-9._-]+)$/);
   if (!m || m[2].startsWith('.')) return;
   if (stillUsed(url)) return;
-  fs.rm(path.join(mediaRoot, m[1], m[2]), { force: true }, () => {});
+  try { fs.rmSync(path.join(mediaRoot, m[1], m[2]), { force: true }); } catch (err) { console.error('[media] удаление:', err.message); }
 }
 
 /** Проверить, что url — существующий наш файл нужного каталога. */

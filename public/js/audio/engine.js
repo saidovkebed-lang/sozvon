@@ -130,7 +130,7 @@ class AudioEngine {
 
   /** Итоговый коэффициент для пользователя: userVolume × outputVolume / 10000; userMuted/deafen → 0. */
   computeGain(userId) {
-    if (state.deafened) return 0;
+    if (state.deafened || state.serverDeafened) return 0;
     if (userId && prefs.isUserMuted(userId)) return 0;
     const uv = userId ? prefs.getUserVolume(userId) : 100;
     const ov = Number(prefs.get('audio.outputVolume'));

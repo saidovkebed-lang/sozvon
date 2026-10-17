@@ -1,5 +1,5 @@
 // Колонка серверов + модалка «создать / войти по коду»
-import { $, $$, h, initials } from '../util.js';
+import { $, $$, h, initials, safeMediaUrl } from '../util.js';
 import { state, subscribe, upsertServer, notify } from '../state.js';
 import { emitAck } from '../socket.js';
 import { selectServer } from '../nav.js';
@@ -18,7 +18,7 @@ function render() {
     'aria-label': s.name,
     'aria-current': s.id === state.currentServerId ? 'true' : null,
     onclick: () => selectServer(s.id),
-  }, initials(s.name)))));
+  }, safeMediaUrl(s.icon) ? h('img', { src: safeMediaUrl(s.icon), alt: '' }) : initials(s.name)))));
   const home = $('#btn-home');
   home.classList.toggle('is-active', !state.currentServerId);
   home.closest('.servers__item').classList.toggle('is-active', !state.currentServerId);

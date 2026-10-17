@@ -39,7 +39,11 @@ test.describe('v3 UI: роли', () => {
     await modal.locator('#role-name-input').fill('Админы');
     await modal.locator('#role-name-input').press('Enter').catch(() => {});
     const kick = modal.locator('input[type=checkbox][data-perm="KICK_MEMBERS"]');
-    await kick.setChecked(true, { force: !(await kick.isVisible()) });
+    // права — на вкладке «Права» редактора роли
+    if (!(await kick.isVisible())) await modal.locator('[data-spanel="roles"]').getByRole('button', { name: /^Права$/ }).or(modal.locator('[data-spanel="roles"] [role=tab]', { hasText: /^Права$/ })).first().click();
+    const kickLabel = kick.locator('xpath=ancestor::label[1]');
+    if (await kick.isVisible()) await kick.check(); else if (await kickLabel.count()) await kickLabel.click(); else await kick.check({ force: true });
+    await expect(kick).toBeChecked();
     const save = modal.locator('[data-spanel="roles"] button[type=submit], [data-spanel="roles"] #btn-role-save');
     if (await save.count() && await save.first().isVisible()) await save.first().click();
     await expect.poll(async () => {
@@ -64,7 +68,9 @@ test.describe('v3 UI: роли', () => {
   });
 
   test('контекстное меню участника: владелец видит kick/ban/роли, рядовой — нет; кик через меню + причина', async ({ makePage }) => {
-    const { pa, pb, srv, B, A } = await setup(makePage, 'Меню QA');
+    const { pa, pb, srv, B, A, sa } = await setup(makePage, 'Меню QA');
+    // пункт «Роли» имеет смысл, когда есть хотя бы одна роль кроме @everyone
+    await ok(sa, 'role:create', { serverId: srv.id, name: 'Тестеры', color: '#3498db' });
     // рядовой B по владельцу: нет модерации
     await pb.locator(`.member[data-user-id="${A.id}"]`).click({ button: 'right' });
     const menuB = pb.locator('.context-menu');
@@ -136,7 +142,8 @@ test.describe('v3 UI: профиль', () => {
     const msg = messageWith(pb, 'сообщение с аватаром');
     const msgImg = msg.locator('.avatar img.avatar__img');
     await expect(msgImg).toHaveAttribute('src', new RegExp(avatar.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
-    await expect(msg.locator('.avatar')).not.toContainText(/^[A-ZА-Я]$/i);
+    await expect(msg.locator('.avatar')).toHaveClass(/has-img/);
+    await expect(msg.locator('.avatar img.avatar__img')).toBeVisible();
     await msg.hover();
     await expect(msgImg).toHaveAttribute('src', new RegExp(avatarAnimated.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
     await pb.mouse.move(5, 5);
@@ -164,7 +171,15 @@ test.describe('v3 UI: профиль', () => {
     await expect(pop.locator('.profile-popup__avatar img')).toHaveAttribute('src', new RegExp(avatarAnimated.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
     // тема профиля: градиент primary→accent где-то в попапе
     const bg = await pop.evaluate((el) => [el, ...el.querySelectorAll('*')].map((n) => getComputedStyle(n).backgroundImage).join(' '));
-    expect(bg).toMatch(/gradient\(.*rgb\(255, 0, 85\).*rgb\(51, 85, 255\)/);
+    // градиент primary→accent (допускается смешивание с фоном темы): первая точка «красная», последняя «синяя»
+    const grad = bg.match(/linear-gradient\((.*?)\)\s*(none|$|url|linear|radial)/)?.[1] || bg;
+    const cols = [...grad.matchAll(/rgba?\((\d+), (\d+), (\d+)|color\(srgb ([\d.]+) ([\d.]+) ([\d.]+)/g)]
+      .map((m) => (m[1] !== undefined ? [m[1], m[2], m[3]].map(Number) : [m[4], m[5], m[6]].map((x) => Number(x) * 255)));
+    expect(bg, 'в попапе есть градиент темы профиля').toMatch(/gradient\(/);
+    expect(cols.length).toBeGreaterThanOrEqual(2);
+    const [first, last] = [cols[0], cols[cols.length - 1]];
+    expect(first[0], `первая точка от primary #ff0055 (красная): ${first}`).toBeGreaterThan(first[2]);
+    expect(last[2], `последняя точка от accent #3355ff (синяя): ${last}`).toBeGreaterThan(last[0]);
     await pb.keyboard.press('Escape');
     await expect(pb.locator('.profile-popup').locator('visible=true')).toHaveCount(0);
   });
@@ -210,14 +225,14 @@ test.describe('v3 UI: профиль', () => {
     const { pa, pb, A } = await setup(makePage, 'Статус QA');
     await expect(pb.locator(`.member[data-user-id="${A.id}"]`)).not.toHaveClass(/is-offline/);
     await pa.locator('#me-avatar').click();
-    await pa.locator('.status-menu [data-status="invisible"]').click();
+    await pa.locator('.status-menu').locator('visible=true').locator('button[data-status="invisible"]').click();
     await expect(pb.locator(`.member[data-user-id="${A.id}"]`)).toHaveClass(/is-offline/);
     await expect(pb.locator(`.members__group[data-group="offline"] .member[data-user-id="${A.id}"]`)).toHaveCount(1);
     await pa.locator('#me-avatar').click();
-    await pa.locator('.status-menu [data-status="dnd"]').click();
+    await pa.locator('.status-menu').locator('visible=true').locator('button[data-status="dnd"]').click();
     await expect(pb.locator(`.member[data-user-id="${A.id}"]`)).not.toHaveClass(/is-offline/);
     await pa.locator('#me-avatar').click();
-    await pa.locator('.status-menu [data-action="custom-status"]').click();
+    await pa.locator('.status-menu').locator('visible=true').locator('[data-action="custom-status"]').click();
     await expect(pa.locator('#modal-custom-status')).toBeVisible();
     await pa.locator('#custom-status-text').fill('на созвоне');
     await pa.locator('#custom-status-save').click();

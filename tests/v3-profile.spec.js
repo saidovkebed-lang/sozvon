@@ -5,7 +5,7 @@ import path from 'node:path';
 import { test, expect } from '@playwright/test';
 import { http, httpAt, ack, makeUser, waitEvent, sleep, registerApi } from './fixtures/api.js';
 import { BASE_URL, ROOT } from './fixtures/env.js';
-import { guild, ok, closeAll, ensureV3Media, probe, upload, download, viewOf, startStandalone, LIMIT_PORT } from './fixtures/v3.js';
+import { guild, ok, withId, closeAll, ensureV3Media, probe, upload, download, viewOf, startStandalone, LIMIT_PORT } from './fixtures/v3.js';
 
 const opened = [];
 test.afterEach(() => { closeAll(opened.splice(0)); });
@@ -57,10 +57,12 @@ test.describe('v3 аватар и баннер (ffmpeg)', () => {
   test('кадрирование x,y,size из UI учитывается (PNG)', async () => {
     const a = await registerApi();
     // левый верхний квадрат 100×100 testsrc — заведомо другой контент, чем центр
+    // (старый файл аватара удаляется при замене — скачиваем сразу)
     const r1 = await upload(BASE_URL, '/api/me/avatar', a.token, media.png, 'image/png', { x: 0, y: 0, size: 100 });
-    const r2 = await upload(BASE_URL, '/api/me/avatar', a.token, media.png, 'image/png');
-    expect(r1.status).toBe(200); expect(r2.status).toBe(200);
+    expect(r1.status).toBe(200);
     const f1 = (await download(BASE_URL, r1.json.user.avatar, path.join(TMP, 'c1.png'))).file;
+    const r2 = await upload(BASE_URL, '/api/me/avatar', a.token, media.png, 'image/png');
+    expect(r2.status).toBe(200);
     const f2 = (await download(BASE_URL, r2.json.user.avatar, path.join(TMP, 'c2.png'))).file;
     expect(probe(f1)).toMatchObject({ width: 256, height: 256 });
     expect(fs.readFileSync(f1).equals(fs.readFileSync(f2)), 'кроп x,y,size даёт другой результат, чем центр').toBe(false);

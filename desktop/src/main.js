@@ -110,6 +110,14 @@ const isAppFile = (url) => typeof url === 'string' && url.startsWith(APP_FILE_PR
 
 // ---------------- Сертификаты: только явное согласие для конкретного хоста и отпечатка ----------------
 const lastCertErrors = new Map(); // host → {fingerprint, issuer, subject, error, validExpiry}
+const isTrustedCert = (host, fp) => (config.trustedCerts || []).some((c) => c.host === host && c.fingerprint === fp)
+  || (ALLOW_INSECURE_LOCALHOST && (host === 'localhost' || host === '127.0.0.1'));
+// Страница/WebSocket: если проверка в сессии уже закэширована как ошибка — решаем здесь (тот же список согласий)
+app.on('certificate-error', (e, _wc, url, _err, cert, cb) => {
+  let host = '';
+  try { host = new URL(url).hostname; } catch { /* ignore */ }
+  if (host && isTrustedCert(host, cert?.fingerprint)) { e.preventDefault(); cb(true); } else cb(false);
+});
 function setupCertificates(ses) {
   ses.setCertificateVerifyProc((req, cb) => {
     if (req.errorCode === 0) return cb(-3); // всё хорошо — решение Chromium
@@ -119,9 +127,7 @@ function setupCertificates(ses) {
       issuer: req.certificate?.issuerName, subject: req.certificate?.subjectName,
       validExpiry: req.certificate?.validExpiry,
     });
-    const trusted = (config.trustedCerts || []).some((c) => c.host === req.hostname && c.fingerprint === fp)
-      || (ALLOW_INSECURE_LOCALHOST && (req.hostname === 'localhost' || req.hostname === '127.0.0.1'));
-    cb(trusted ? 0 : -3);
+    cb(isTrustedCert(req.hostname, fp) ? 0 : -3);
   });
 }
 
@@ -423,6 +429,7 @@ function openSetup() {
   setupWindow.loadFile(path.join(__dirname, 'setup.html'));
 }
 
+let checkSeq = 0;
 async function checkServer(url, trustCert) {
   const origin = normalizeUrl(url);
   if (!origin) return { ok: false, error: 'Неверный адрес. Пример: https://89-108-81-153.sslip.io' };
@@ -432,13 +439,18 @@ async function checkServer(url, trustCert) {
     if (ce?.fingerprint && !(config.trustedCerts || []).some((c) => c.host === host && c.fingerprint === ce.fingerprint)) {
       config.trustedCerts = [...(config.trustedCerts || []).filter((c) => c.host !== host), { host, fingerprint: ce.fingerprint }];
       saveConfig(true);
+
     }
   }
   lastCertErrors.delete(host);
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 10000);
   try {
-    const res = await session.defaultSession.fetch(`${origin}/api/config`, { signal: ctrl.signal, cache: 'no-store' });
+    // Отдельная временная сессия на каждую проверку: Chromium кэширует результат проверки сертификата,
+    // и отказ, закэшированный в основной сессии, мешал бы открыть сервер после согласия пользователя.
+    const ses = session.fromPartition(`sozvon-check-${++checkSeq}`, { cache: false });
+    setupCertificates(ses);
+    const res = await ses.fetch(`${origin}/api/config`, { signal: ctrl.signal, cache: 'no-store' });
     if (!res.ok) return { ok: false, origin, error: `Сервер ответил ${res.status}. Это точно сервер Созвона?` };
     const data = await res.json().catch(() => null);
     if (!data || !Array.isArray(data.iceServers)) return { ok: false, origin, error: 'По этому адресу не Созвон (нет /api/config).' };

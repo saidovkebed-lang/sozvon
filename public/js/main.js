@@ -1,5 +1,5 @@
 // Бутстрап приложения «Созвон»
-import { $ } from './util.js';
+import { $, initAvatarHover } from './util.js';
 import { state, notify, upsertServer, setUserOnline, getServer, applyNetConfig, applyUserUpdate } from './state.js';
 import { api, getToken, setToken } from './api.js';
 import * as sock from './socket.js';
@@ -24,11 +24,23 @@ import { initNotifications } from './ui/notifications.js';
 import { initKeybinds } from './ui/keybinds.js';
 import { initUserSettings, closeUserSettings } from './ui/user-settings.js';
 import { initContextMenu, closeMenu } from './ui/context-menu.js';
+import { initServerSettings } from './ui/server-settings.js';
+import { initModActions } from './ui/mod-actions.js';
+import { initProfile, closeProfile } from './ui/profile.js';
+import { initPing, measureNow } from './ping.js';
+import { initStream } from './ui/stream.js';
+import { initDesktop } from './desktop.js';
+import { initAuthDownload } from './download.js';
+import { setDndCheck } from './ui/sounds.js';
+import { toggleMute, toggleDeafen } from './voice/voice.js';
+import { audioEngine } from './audio/engine.js';
+import * as perms from './perms.js';
 
 // тема/масштаб уже выставлены /js/theme-boot.js до отрисовки; дальше — по подписке на prefs
 initAppearance();
 
-window.__sozvon = { state, rtc, music, get socket() { return sock.getSocket(); } };
+window.__sozvon = Object.assign(window.__sozvon || {}, { state, rtc, music, perms });
+Object.defineProperty(window.__sozvon, 'socket', { get: () => sock.getSocket(), configurable: true });
 
 let started = false;
 let firstBootstrap = true;
@@ -51,6 +63,14 @@ function initUi() {
   initKeybinds();
   initUserSettings({ logout });
   initContextMenu();
+  initServerSettings();
+  initModActions();
+  initProfile();
+  initPing();
+  initStream();
+  initAvatarHover();
+  setDndCheck(() => state.user?.status === 'dnd');
+  initDesktop({ toggleMute, toggleDeafen, setPttPressed: (p) => audioEngine.setPttPressed(p) });
   initSocketEvents();
 
   $('#btn-logout').addEventListener('click', logout);
@@ -102,7 +122,7 @@ function initSocketEvents() {
     revalidateSelection();
     notify('servers');
   });
-  sock.on('server:removed', ({ serverId }) => {
+  sock.on('server:removed', ({ serverId, reason }) => {
     const srv = getServer(serverId);
     state.servers = state.servers.filter((s) => s.id !== serverId);
     for (const ch of srv?.channels || []) {
@@ -110,13 +130,15 @@ function initSocketEvents() {
       delete state.voice[ch.id];
     }
     if (state.myVoice?.serverId === serverId) leaveVoice({ silent: true });
-    if (srv && state.currentServerId === serverId) toast(`Сервер «${srv.name}» больше недоступен`, '');
+    if (srv && reason === 'ban') toast(`Вас забанили на сервере «${srv.name}»`, 'error', 7000);
+    else if (srv && reason === 'kick') toast(`Вас выгнали с сервера «${srv.name}»`, 'error', 7000);
+    else if (srv && state.currentServerId === serverId) toast(`Сервер «${srv.name}» больше недоступен`, '');
     revalidateSelection();
     notify('servers');
   });
   sock.on('user:updated', ({ user } = {}) => { applyUserUpdate(user); });
-  sock.on('presence', ({ userId, online }) => {
-    setUserOnline(userId, online);
+  sock.on('presence', ({ userId, online, status }) => {
+    setUserOnline(userId, online, status);
     notify('presence');
   });
   sock.on('bot:status', ({ online }) => {
@@ -146,6 +168,7 @@ async function onConnect() {
   state.messages = {};
   state.hasMore = {};
   hideAuth();
+  measureNow();
   if (firstBootstrap) {
     firstBootstrap = false;
     const last = restoreLast();
@@ -181,6 +204,7 @@ function start(token) {
 
 function logout() {
   closeMenu(false);
+  closeProfile(false);
   closeUserSettings();
   if (state.myVoice) leaveVoice({ silent: true });
   setToken(null);
@@ -197,6 +221,7 @@ export function applyConfig(cfg) {
 async function boot() {
   initPwa();
   initAuth(start);
+  initAuthDownload($('#btn-download-app'));
   try {
     const cfg = await api.config();
     applyConfig(cfg);

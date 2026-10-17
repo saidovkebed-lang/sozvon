@@ -17,13 +17,16 @@ export const P = {
 export const DEFAULT_EVERYONE = P.CREATE_INVITE | P.VIEW_CHANNEL | P.SEND_MESSAGES | P.ATTACH_FILES
   | P.CONNECT | P.SPEAK | P.STREAM | P.USE_MUSIC_BOT;
 
+export const withId = (u) => Object.assign(u, { id: u.user.id });
+export const memberIds = (srv) => (srv.members || []).map((m) => m.id);
+
 /** Владелец A создаёт сервер; остальные входят по инвайту. Возвращает {srv, owner, members[]} */
 export async function guild(n = 2, name = 'v3 сервер') {
-  const owner = await makeUser('own');
+  const owner = withId(await makeUser('own'));
   const srv = await createServer(owner, name);
   const members = [];
   for (let i = 0; i < n; i++) {
-    const u = await makeUser('mem');
+    const u = withId(await makeUser('mem'));
     const r = await ack(u.socket, 'server:join', { inviteCode: srv.inviteCode });
     if (!r.ok) throw new Error('server:join ' + JSON.stringify(r));
     members.push(u);
@@ -117,8 +120,16 @@ export function ensureV3Media() {
   };
 }
 
-/** ffprobe: {width,height,frames,codec} первого видеопотока файла */
+/** Размеры и число кадров картинки. ffprobe; для animated WebP (декодер ffmpeg не поддерживает ANIM) —
+ *  разбор RIFF: холст из VP8X, кадры — число чанков ANMF. */
 export function probe(file) {
+  const buf = fs.readFileSync(file);
+  if (buf.toString('ascii', 0, 4) === 'RIFF' && buf.toString('ascii', 8, 12) === 'WEBP' && buf.toString('ascii', 12, 16) === 'VP8X') {
+    const w = 1 + buf.readUIntLE(24, 3); const h = 1 + buf.readUIntLE(27, 3);
+    let frames = 0; let off = 12;
+    while (off + 8 <= buf.length) { const id = buf.toString('ascii', off, off + 4); const sz = buf.readUInt32LE(off + 4); if (id === 'ANMF') frames++; off += 8 + sz + (sz & 1); }
+    return { width: w, height: h, frames: frames || 1, codec: 'webp' };
+  }
   const out = execFileSync('ffprobe', ['-v', 'error', '-count_frames', '-select_streams', 'v:0',
     '-show_entries', 'stream=width,height,nb_read_frames,codec_name', '-of', 'json', file], { encoding: 'utf8' });
   const s = JSON.parse(out).streams[0];
