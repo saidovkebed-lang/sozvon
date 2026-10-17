@@ -44,6 +44,11 @@
         <p class="auth__switch"><span id="auth-switch-text">Нет аккаунта?</span> <a href="#" id="auth-toggle">Зарегистрироваться</a></p>
       </form>
     </div>
+    <a class="auth__download" id="btn-download-app" href="/download" data-hide-desktop hidden>
+      <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-monitor"/></svg>
+      <span><strong>Созвон для ПК</strong><small id="auth-download-ver">Рация в фоне, трей, уведомления</small></span>
+      <svg class="icon icon--sm" aria-hidden="true"><use href="/assets/icons.svg#i-download"/></svg>
+    </a>
   </section>
 
   <!-- ===== Основной интерфейс ===== -->
@@ -78,9 +83,15 @@
       <div class="sidebar__scroll" id="channels"></div>
 
       <div class="voice-panel" id="voice-panel" hidden>
-        <div class="voice-panel__info">
-          <div class="voice-panel__status"><span class="dot dot--ok"></span> <span id="voice-status-text">Голос подключён</span></div>
-          <div class="voice-panel__channel" id="voice-panel-channel"></div>
+        <div class="voice-panel__head">
+          <div class="voice-panel__info">
+            <div class="voice-panel__status"><span class="dot dot--ok"></span> <span id="voice-status-text">Голос подключён</span></div>
+            <div class="voice-panel__channel" id="voice-panel-channel"></div>
+          </div>
+          <button class="ping-badge" id="ping-voice" type="button" data-ping aria-haspopup="dialog" aria-label="Подключение" title="Подключение">
+            <svg class="ping-badge__bars" viewBox="0 0 16 16" aria-hidden="true"><rect x="1" y="10" width="3" height="5" rx="1"/><rect x="6.5" y="6" width="3" height="9" rx="1"/><rect x="12" y="2" width="3" height="13" rx="1"/></svg>
+            <span class="ping-badge__ms">— мс</span>
+          </button>
         </div>
         <div class="voice-panel__actions">
           <button class="icon-btn" id="btn-screen" type="button" aria-label="Демонстрация экрана" title="Демонстрация экрана">
@@ -96,10 +107,16 @@
       </div>
 
       <footer class="user-panel">
-        <div class="avatar" id="me-avatar"></div>
-        <div class="user-panel__info">
+        <button class="avatar avatar--btn" id="me-avatar" type="button" aria-label="Статус" aria-haspopup="menu" aria-expanded="false" title="Сменить статус"></button>
+        <div class="user-panel__info" role="button" tabindex="0" aria-label="Мой профиль" title="Мой профиль">
           <div class="user-panel__name" id="me-name"></div>
-          <div class="user-panel__tag" id="me-tag">в сети</div>
+          <div class="user-panel__sub">
+            <span class="user-panel__tag" id="me-tag">в сети</span>
+            <button class="ping-badge ping-badge--mini" id="ping-user" type="button" data-ping aria-haspopup="dialog" aria-label="Пинг до сервера" title="Подключение">
+              <svg class="ping-badge__bars" viewBox="0 0 16 16" aria-hidden="true"><rect x="1" y="10" width="3" height="5" rx="1"/><rect x="6.5" y="6" width="3" height="9" rx="1"/><rect x="12" y="2" width="3" height="13" rx="1"/></svg>
+              <span class="ping-badge__ms">— мс</span>
+            </button>
+          </div>
         </div>
         <button class="icon-btn" id="btn-mute" type="button" aria-label="Выключить микрофон" aria-pressed="false" title="Микрофон">
           <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-mic"/></svg>
@@ -182,9 +199,14 @@
           <button class="ctrl" id="ctrl-camera" type="button" aria-label="Включить камеру" aria-pressed="false" title="Камера">
             <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-camera"/></svg>
           </button>
-          <button class="ctrl" id="ctrl-screen" type="button" aria-label="Демонстрация экрана" aria-pressed="false" title="Демонстрация экрана">
-            <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-screen"/></svg>
-          </button>
+          <div class="ctrl-split">
+            <button class="ctrl" id="ctrl-screen" type="button" aria-label="Демонстрация экрана" aria-pressed="false" title="Демонстрация экрана">
+              <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-screen"/></svg>
+            </button>
+            <button class="ctrl-split__opt" id="ctrl-screen-opts" type="button" aria-label="Качество демонстрации" aria-haspopup="dialog" title="Качество и звук демонстрации">
+              <svg class="icon icon--sm" aria-hidden="true"><use href="/assets/icons.svg#i-chevron-down"/></svg>
+            </button>
+          </div>
           <button class="ctrl ctrl--danger" id="ctrl-leave" type="button" aria-label="Отключиться" title="Отключиться">
             <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-phone-off"/></svg>
           </button>
@@ -292,28 +314,150 @@
     </form>
   </dialog>
 
-  <dialog class="modal" id="modal-settings" aria-labelledby="modal-settings-title">
-    <form id="form-settings" class="form" method="dialog">
+  <!-- ===== Настройки сервера (полноэкранная, разделы строит js/ui/server-settings.js) ===== -->
+  <dialog class="modal settings server-settings" id="modal-settings" aria-labelledby="modal-settings-title">
+    <div class="settings__layout">
+      <nav class="settings__nav" aria-label="Разделы настроек сервера">
+        <div class="settings__nav-inner">
+          <h2 class="settings__heading ss-heading" id="modal-settings-title">Настройки сервера</h2>
+          <div class="settings__nav-list" id="ss-nav" role="tablist" aria-orientation="vertical"></div>
+        </div>
+      </nav>
+      <div class="settings__content">
+        <header class="settings__bar">
+          <button class="icon-btn settings__back" type="button" aria-label="Назад к разделам"><svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-arrow-left"/></svg></button>
+          <span class="settings__bar-title" id="ss-bar-title">Настройки сервера</span>
+        </header>
+        <div class="settings__scroll" id="ss-scroll"></div>
+      </div>
+    </div>
+    <div class="settings__close-wrap">
+      <button class="settings__close" type="button" data-close aria-label="Закрыть настройки сервера" title="Закрыть (Esc)"><svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-close"/></svg></button>
+      <span class="settings__esc" aria-hidden="true">ESC</span>
+    </div>
+  </dialog>
+
+  <dialog class="modal modal--perms" id="modal-channel-perms" aria-labelledby="modal-channel-perms-title">
+    <div class="modal__header">
+      <h3 id="modal-channel-perms-title">Настройки канала</h3>
+      <button class="icon-btn" type="button" data-close aria-label="Закрыть"><svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-close"/></svg></button>
+    </div>
+    <div class="modal__body" id="channel-perms-body"></div>
+    <div class="modal__footer">
+      <p class="form__error modal__footer-error" data-error></p>
+      <button class="btn btn--ghost" type="button" data-close>Отмена</button>
+      <button class="btn btn--primary" type="button" id="btn-channel-perms-save">Сохранить</button>
+    </div>
+  </dialog>
+
+  <dialog class="modal" id="modal-reason" aria-labelledby="modal-reason-title">
+    <form id="form-reason" class="form" method="dialog">
       <div class="modal__header">
-        <h3 id="modal-settings-title">Настройки сервера</h3>
-        <button class="icon-btn" type="button" data-close aria-label="Закрыть">
-          <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-close"/></svg>
-        </button>
+        <h3 id="modal-reason-title">Выгнать</h3>
+        <button class="icon-btn" type="button" data-close aria-label="Закрыть"><svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-close"/></svg></button>
       </div>
       <div class="modal__body">
-        <div class="field" data-owner-only>
-          <label class="field__label" for="server-rename-input">Название сервера</label>
-          <input class="input" id="server-rename-input" name="name" maxlength="40" required>
+        <p id="modal-reason-text"></p>
+        <div class="field">
+          <label class="field__label" for="reason-input">Причина <span class="field__optional">— необязательно</span></label>
+          <input class="input" id="reason-input" maxlength="200" placeholder="Например: спам" autocomplete="off">
         </div>
-        <p class="form__error" data-error></p>
+        <label class="check" id="reason-delete-wrap"><input type="checkbox" id="reason-delete"> <span>Удалить его сообщения за последние сутки</span></label>
       </div>
       <div class="modal__footer">
-        <button class="btn btn--danger" type="button" id="btn-server-delete" data-owner-only>Удалить сервер</button>
-        <button class="btn btn--danger" type="button" id="btn-server-leave" data-member-only>Покинуть сервер</button>
         <button class="btn btn--ghost" type="button" data-close>Отмена</button>
-        <button class="btn btn--primary" type="submit" data-owner-only>Сохранить</button>
+        <button class="btn btn--danger" type="button" id="reason-ok">Подтвердить</button>
       </div>
     </form>
+  </dialog>
+
+  <dialog class="modal" id="modal-custom-status" aria-labelledby="modal-custom-status-title">
+    <form id="form-custom-status" class="form" method="dialog">
+      <div class="modal__header">
+        <h3 id="modal-custom-status-title">Задать статус</h3>
+        <button class="icon-btn" type="button" data-close aria-label="Закрыть"><svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-close"/></svg></button>
+      </div>
+      <div class="modal__body">
+        <div class="field">
+          <label class="field__label" for="custom-status-text">Что у вас происходит?</label>
+          <div class="cs-input">
+            <button class="cs-input__emoji is-empty" id="custom-status-emoji-btn" type="button" aria-label="Выбрать эмодзи" title="Эмодзи"></button>
+            <input class="input" id="custom-status-text" maxlength="128" placeholder="Играю в шахматы" autocomplete="off">
+            <span class="cs-input__count" id="custom-status-count">0/128</span>
+          </div>
+          <div class="emoji-grid" id="custom-status-emojis" hidden></div>
+          <input type="hidden" id="custom-status-emoji">
+        </div>
+        <div class="field">
+          <label class="field__label" for="custom-status-expire">Сбросить через</label>
+          <select class="input" id="custom-status-expire"></select>
+        </div>
+      </div>
+      <div class="modal__footer">
+        <button class="btn btn--ghost modal__footer-left" type="button" id="custom-status-clear">Сбросить статус</button>
+        <button class="btn btn--ghost" type="button" data-close>Отмена</button>
+        <button class="btn btn--primary" type="submit" id="custom-status-save">Сохранить</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="modal modal--crop" id="modal-crop" aria-labelledby="modal-crop-title">
+    <div class="modal__header">
+      <h3 id="modal-crop-title">Кадрирование</h3>
+      <button class="icon-btn" type="button" data-close aria-label="Закрыть"><svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-close"/></svg></button>
+    </div>
+    <div class="modal__body">
+      <div class="crop" id="crop-box">
+        <canvas id="crop-canvas" class="crop__canvas" width="480" height="480" tabindex="0" aria-label="Перетаскивайте, чтобы выбрать область; колесо или ползунок — масштаб"></canvas>
+        <p class="crop__note" id="crop-note" hidden></p>
+      </div>
+      <div class="crop__zoom">
+        <svg class="icon icon--sm" aria-hidden="true"><use href="/assets/icons.svg#i-image"/></svg>
+        <input type="range" class="slider slider--wide" id="crop-zoom" min="100" max="400" value="100" step="1" aria-label="Масштаб">
+        <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-image"/></svg>
+      </div>
+    </div>
+    <div class="modal__footer">
+      <button class="btn btn--ghost modal__footer-left" type="button" id="crop-reset">Сбросить</button>
+      <button class="btn btn--ghost" type="button" data-close>Отмена</button>
+      <button class="btn btn--primary" type="button" id="crop-ok">Применить</button>
+    </div>
+  </dialog>
+
+  <dialog class="modal modal--stream" id="modal-stream" aria-labelledby="modal-stream-title">
+    <div class="modal__header">
+      <h3 id="modal-stream-title">Демонстрация экрана</h3>
+      <button class="icon-btn" type="button" data-close aria-label="Закрыть"><svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-close"/></svg></button>
+    </div>
+    <div class="modal__body" id="stream-body">
+      <div class="stream-sources" id="stream-sources" hidden>
+        <div class="tabs" role="tablist" id="stream-source-tabs">
+          <button class="tab is-active" type="button" role="tab" data-source-type="screen" aria-selected="true">Экраны</button>
+          <button class="tab" type="button" role="tab" data-source-type="window" aria-selected="false">Окна</button>
+        </div>
+        <div class="source-grid" id="source-grid" role="listbox" aria-label="Источник"></div>
+      </div>
+      <fieldset class="stream-quality">
+        <legend class="field__label">Качество</legend>
+        <div class="quality-cards" id="stream-quality">
+          <label class="quality-card" data-quality="720p30"><input type="radio" name="stream-quality" value="720p30"><span class="quality-card__res">720p</span><span class="quality-card__fps">30 к/с</span><span class="quality-card__hint">2,5 Мбит/с · для слабого интернета</span></label>
+          <label class="quality-card" data-quality="1080p60"><input type="radio" name="stream-quality" value="1080p60"><span class="quality-card__res">1080p</span><span class="quality-card__fps">60 к/с</span><span class="quality-card__hint">6 Мбит/с · игры и видео</span></label>
+          <label class="quality-card" data-quality="source"><input type="radio" name="stream-quality" value="source"><span class="quality-card__res">Исходное</span><span class="quality-card__fps">до 60 к/с</span><span class="quality-card__hint">8 Мбит/с · разрешение экрана</span></label>
+        </div>
+      </fieldset>
+      <div class="setting">
+        <div class="setting__text">
+          <label class="setting__label" for="stream-audio">Звук экрана</label>
+          <p class="setting__desc" id="stream-audio-desc">Передавать звук вкладки или системы вместе с картинкой.</p>
+        </div>
+        <input type="checkbox" class="switch" id="stream-audio" role="switch" aria-describedby="stream-audio-desc">
+      </div>
+      <p class="settings-note" id="stream-live-note" hidden><svg class="icon icon--sm" aria-hidden="true"><use href="/assets/icons.svg#i-info"/></svg>Вы уже показываете экран — новое качество применится сразу.</p>
+    </div>
+    <div class="modal__footer">
+      <button class="btn btn--ghost" type="button" data-close>Отмена</button>
+      <button class="btn btn--primary" type="button" id="btn-stream-start"><svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-screen"/></svg> <span>Начать демонстрацию</span></button>
+    </div>
   </dialog>
 
   <dialog class="modal modal--wide" id="modal-music" aria-labelledby="modal-music-title">

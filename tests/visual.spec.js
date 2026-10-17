@@ -1,5 +1,5 @@
 // Скриншоты ключевых экранов для ручной визуальной проверки (tests/screens-qa/*.png)
-import { test, expect, loginViaToken, createServerUI, joinServerUI, inviteCode, openTextChannel, joinVoiceUI, sendMessageUI } from './fixtures/ui.js';
+import { test, expect, loginViaToken, createServerUI, joinServerUI, inviteCode, openTextChannel, joinVoiceUI, sendMessageUI, startScreenShare } from './fixtures/ui.js';
 import { startBot } from './fixtures/api.js';
 import { ensureMedia } from './fixtures/media.js';
 
@@ -61,7 +61,7 @@ for (const vp of [{ w: 1440, h: 900, tag: '1440' }, { w: 375, h: 812, tag: '375'
       await joinVoiceUI(pa);
       await joinVoiceUI(pb);
       await expect(pa.locator('#stage-grid .tile[data-connected="true"]')).not.toHaveCount(0, { timeout: 20000 });
-      await pb.locator('#ctrl-screen').click();
+      await startScreenShare(pb); // v3: через #modal-stream
       await expect(pa.locator('.tile--screen video')).toHaveCount(1, { timeout: 20000 });
       await pa.waitForTimeout(1200);
       await shot(pa, `${vp.tag}-06-voice-screen`);

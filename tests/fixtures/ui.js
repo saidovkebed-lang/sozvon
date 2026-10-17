@@ -186,3 +186,19 @@ export async function noHorizontalScroll(page) {
     return { doc: [d.scrollWidth, d.clientWidth], body: [b.scrollWidth, b.clientWidth], ok: d.scrollWidth <= d.clientWidth && b.scrollWidth <= b.clientWidth };
   });
 }
+
+/** Начать демонстрацию экрана. v3 (SPEC-v3 §2.4): клик по #ctrl-screen открывает #modal-stream
+ *  с выбором качества → #btn-stream-start. quality: '720p30'|'1080p60'|'source' (по умолчанию — как в prefs). */
+export async function startScreenShare(page, quality) {
+  await page.locator('#ctrl-screen').click();
+  const modal = page.locator('#modal-stream');
+  await expect(modal, '#modal-stream (выбор качества стрима)').toBeVisible();
+  if (quality) {
+    const radio = modal.locator(`input[type=radio][name=stream-quality][value="${quality}"]`);
+    const label = modal.locator(`[data-quality="${quality}"]`);
+    if (await label.count()) await label.first().click(); else await radio.check({ force: true });
+    await expect(radio).toBeChecked();
+  }
+  await modal.locator('#btn-stream-start').click();
+  await expect(modal).toBeHidden();
+}

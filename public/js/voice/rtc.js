@@ -35,6 +35,7 @@ class Peer {
         this.makingOffer = true;
         await pc.setLocalDescription();
         this.send({ description: pc.localDescription.toJSON() });
+        this.applyEncodings();
       } catch (e) {
         console.warn('[rtc] negotiation', e);
       } finally {
@@ -58,6 +59,7 @@ class Peer {
         }
       } else if (pc.connectionState === 'connected') {
         this.iceRestarts = 0;
+        this.applyEncodings();
         // сервер только ретранслирует voice:speaking — новичок не знает, что мы уже говорим
         if (mgr.localSpeaking && state.myVoice) emit('voice:speaking', { speaking: true });
       }
@@ -88,6 +90,31 @@ class Peer {
     if (this.pendingLocal) return; // добавится вместе с остальными после первого offer
     this.send({ trackInfo: { streamId: stream.id, kind } });
     this.senders[kind] = stream.getTracks().map((t) => this.pc.addTrack(t, stream));
+    if (kind === 'screen') this.applyEncodings();
+  }
+
+  /** v3 §2.4: битрейт/частота кадров демонстрации (RTCRtpSender.setParameters) */
+  applyEncodings() {
+    const want = this.mgr.screenParams;
+    if (!want) return;
+    for (const sender of this.senders.screen) {
+      if (sender.track?.kind !== 'video') continue;
+      let p;
+      try { p = sender.getParameters(); } catch { continue; }
+      if (!p.encodings || !p.encodings.length) continue; // до negotiation encodings пусты — применим позже
+      const e = p.encodings[0];
+      if (e.maxBitrate === want.maxBitrate && e.maxFramerate === want.maxFramerate) continue;
+      e.maxBitrate = want.maxBitrate;
+      e.maxFramerate = want.maxFramerate;
+      if (want.degradation) p.degradationPreference = want.degradation;
+      sender.setParameters(p).catch((err) => {
+        // degradationPreference поддерживается не везде — повтор без него
+        if (p.degradationPreference) {
+          delete p.degradationPreference;
+          sender.setParameters(p).catch((e2) => console.warn('[rtc] setParameters', e2));
+        } else console.warn('[rtc] setParameters', err);
+      });
+    }
   }
 
   removeStream(kind) {
@@ -140,9 +167,11 @@ class Peer {
       } finally {
         this.isSettingRemoteAnswerPending = false;
       }
+      if (description.type === 'answer') this.applyEncodings();
       if (description.type === 'offer') {
         await pc.setLocalDescription();
         this.send({ description: pc.localDescription.toJSON() });
+        this.applyEncodings();
         if (this.pendingLocal) {
           // polite-сторона добавляет свои треки после первого ответа → чистая повторная negotiation
           this.pendingLocal = false;
@@ -171,6 +200,7 @@ class RtcManager {
     this.iceServers = [];
     this.listeners = new Set();
     this.localSpeaking = false;
+    this.screenParams = null;   // { maxBitrate, maxFramerate, degradation } — качество демонстрации
     // смена отправляемого трека (пересборка цепочки микрофона) → replaceTrack у всех пиров, без перезахода
     audio.onOutgoingTrack((track) => this.replaceMicTrack(track));
     audio.onGateChange(() => this.updateSpeaking());
@@ -272,6 +302,24 @@ class RtcManager {
     this.changed();
   }
 
+  /** Задать качество демонстрации для всех текущих и будущих пиров */
+  setScreenParams(params) {
+    this.screenParams = params || null;
+    for (const p of this.peers.values()) p.applyEncodings();
+  }
+
+  /** Отладка (qa): encodings[0] всех видеосендеров демонстрации */
+  screenEncodings() {
+    const out = [];
+    for (const p of this.peers.values()) {
+      for (const s of p.senders.screen) {
+        if (s.track?.kind !== 'video') continue;
+        try { out.push({ peer: p.id, ...(s.getParameters().encodings?.[0] || {}) }); } catch { /* ignore */ }
+      }
+    }
+    return out;
+  }
+
   /** Новый отправляемый трек микрофона → replaceTrack у всех пиров (pc не пересоздаётся). */
   replaceMicTrack(track) {
     if (!track || !this.local.mic) return;
@@ -284,13 +332,13 @@ class RtcManager {
   }
 
   applyMute() {
-    audio.setVoiceMuted(state.muted || state.deafened);
+    audio.setVoiceMuted(state.muted || state.deafened || state.serverMuted || state.serverDeafened);
     this.updateSpeaking();
   }
 
   /** «Говорит» = гейт открыт (или зажата рация) и не muted/deafened. */
   updateSpeaking() {
-    this.setLocalSpeaking(!!this.local.mic && !state.muted && !state.deafened && audio.voiceGateOpen);
+    this.setLocalSpeaking(!!this.local.mic && !state.muted && !state.deafened && !state.serverMuted && !state.serverDeafened && audio.voiceGateOpen);
   }
 
   /* ---------- удалённое аудио ---------- */

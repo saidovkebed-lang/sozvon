@@ -1,0 +1,131 @@
+{
+  "name": "sozvon-desktop",
+  "productName": "Sozvon",
+  "version": "1.0.0",
+  "description": "Созвон — приложение для ПК",
+  "author": "Sozvon",
+  "license": "UNLICENSED",
+  "private": true,
+  "main": "src/main.js",
+  "homepage": "https://89-108-81-153.sslip.io",
+  "scripts": {
+    "start": "electron .",
+    "icons": "node scripts/make-icons.mjs",
+    "pack": "electron-builder --dir",
+    "dist:win": "electron-builder --win nsis zip --x64",
+    "dist:linux": "electron-builder --linux AppImage --x64",
+    "dist": "electron-builder --win nsis zip --x64 --linux AppImage --x64",
+    "check": "node --check src/main.js && node --check src/preload.js && node --check src/setup-preload.js && node --check src/keymap.js"
+  },
+  "dependencies": {
+    "uiohook-napi": "1.5.5"
+  },
+  "devDependencies": {
+    "electron": "44.8.0",
+    "electron-builder": "26.15.3",
+    "sharp": "0.35.5"
+  },
+  "build": {
+    "appId": "io.sslip.sozvon.desktop",
+    "productName": "Sozvon",
+    "copyright": "© 2026 Созвон",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "src/**/*",
+      "package.json",
+      "!**/*.map",
+      "!node_modules/uiohook-napi/{src,libuiohook,binding.gyp,*.md}",
+      "!node_modules/uiohook-napi/dist/prebuild-test-noop*"
+    ],
+    "asarUnpack": [
+      "node_modules/uiohook-napi/**"
+    ],
+    "npmRebuild": false,
+    "electronLanguages": [
+      "ru",
+      "en-US"
+    ],
+    "extraMetadata": {
+      "main": "src/main.js"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico",
+      "executableName": "Sozvon",
+      "artifactName": "Sozvon-${version}-win-${arch}.${ext}",
+      "requestedExecutionLevel": "asInvoker",
+      "files": [
+        "!node_modules/uiohook-napi/prebuilds/{darwin-*,linux-*,win32-arm64}/**",
+        "!scripts{,/**/*}"
+      ]
+    },
+    "nsis": {
+      "artifactName": "Sozvon-Setup-${version}.${ext}",
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Созвон",
+      "uninstallDisplayName": "Созвон ${version}",
+      "installerLanguages": [
+        "ru_RU"
+      ],
+      "language": "1049",
+      "deleteAppDataOnUninstall": false,
+      "runAfterFinish": true
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icons",
+      "executableName": "sozvon",
+      "category": "Network",
+      "synopsis": "Созвон — голосовой чат и мессенджер",
+      "artifactName": "Sozvon-${version}-x86_64.${ext}",
+      "desktop": {
+        "entry": {
+          "Name": "Созвон",
+          "StartupWMClass": "sozvon"
+        }
+      },
+      "files": [
+        "!node_modules/uiohook-napi/prebuilds/{darwin-*,win32-*,linux-arm64,linux-loong64}/**",
+        "!scripts{,/**/*}"
+      ],
+      "syncDesktopName": true
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "icon": "build/icon.icns",
+      "category": "public.app-category.social-networking",
+      "artifactName": "Sozvon-${version}-mac-${arch}.${ext}"
+    },
+    "publish": null
+  },
+  "desktopName": "sozvon.desktop"
+}

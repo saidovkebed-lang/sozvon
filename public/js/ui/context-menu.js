@@ -1,19 +1,30 @@
-// Контекстное меню собеседника: громкость 0–200 %, «Заглушить локально»; для бота — громкость музыки.
-// Открывается: правый клик / долгий тап (500 мс) / кнопка «⋯» на .voice-user (сайдбар) и .tile (сцена).
-import { h, icon, avatar } from '../util.js';
-import { state, getServer } from '../state.js';
+// Контекстное меню участника (v2 + v3): Профиль, громкость 0–200 % и «Заглушить локально» (в голосе),
+// Роли (чекбоксы), серверный mute/deafen, Переместить в канал, Отключить, Выгнать, Забанить — по правам
+// и иерархии (SPEC-v3 §1). Для бота — громкость музыки.
+// Открывается: правый клик / долгий тап (500 мс) / кнопка «⋯» на .voice-user, .tile, .member, нике в чате.
+import { h, icon, avatar, displayName } from '../util.js';
+import { state, getServer, findUser as findUserData } from '../state.js';
 import { prefs } from '../prefs.js';
 import { openUserSettings } from './user-settings.js';
+import { roleColor, memberRoleIds, sortedRoles } from '../perms.js';
+import {
+  capabilities, assignableRoles, toggleMemberRole, setServerMute, setServerDeafen, moveMember, kickMember, banMember, transferOwnership,
+} from './mod-actions.js';
+import { openProfile } from './profile.js';
 
 const LONG_PRESS_MS = 500;
 let menu = null;
 let anchorEl = null;
 let restoreFocus = null;
+let lastPoint = null;
+
+const SCOPE = '#channels .voice-user[data-user-id], .sm-member[data-user-id], #stage-grid .tile[data-socket-id], #members .member[data-user-id], .message[data-author-id] .message__author, .message[data-author-id] > .avatar';
 
 function findUser(target) {
-  const el = target.closest('.voice-user[data-user-id], .tile[data-socket-id]');
+  const el = target.closest(SCOPE);
   if (!el) return null;
-  let userId = el.dataset.userId || null;
+  const msg = el.closest('.message[data-author-id]');
+  let userId = el.dataset.userId || msg?.dataset.authorId || null;
   const sid = el.dataset.socketId;
   let member = null;
   for (const list of Object.values(state.voice)) {
@@ -22,15 +33,15 @@ function findUser(target) {
   }
   if (!userId) userId = member?.userId || (el.dataset.self === 'true' ? state.user?.id : null);
   if (!userId) return null;
-  let isBot = !!member?.isBot || el.classList.contains('voice-user--bot') || el.classList.contains('tile--bot');
-  let username = member?.username || el.querySelector('.voice-user__name, .tile__label > span')?.textContent || '';
-  let color = member?.color;
-  if (!member) {
-    const srv = getServer();
-    const u = srv?.members.find((m) => m.id === userId);
-    if (u) { username = u.username; color = u.color; isBot = isBot || !!u.isBot; }
-  }
-  return { el, userId, isBot, username: username.replace(/ — экран$/, ''), color, self: userId === state.user?.id };
+  const data = findUserData(userId) || {};
+  let isBot = !!member?.isBot || !!data.isBot || el.classList.contains('voice-user--bot') || el.classList.contains('tile--bot');
+  const username = data.username || member?.username || el.querySelector('.voice-user__name, .tile__label > span, .member__name')?.textContent || '';
+  return {
+    el, userId, isBot, data: { ...data, id: userId, username },
+    username: username.replace(/ — экран$/, ''), color: data.color || member?.color,
+    self: userId === state.user?.id,
+    inVoice: !!member,
+  };
 }
 
 function volumeRow({ label, value, max, action, onInput, resetTo }) {
@@ -55,42 +66,129 @@ function volumeRow({ label, value, max, action, onInput, resetTo }) {
     h('div', { class: 'context-menu__marks', 'aria-hidden': 'true' }, ...marks.map((m) => h('span', null, m))));
 }
 
-function buildMenu(u) {
-  const items = [];
-  items.push(h('div', { class: 'context-menu__head' },
-    avatar({ username: u.username, color: u.color }, 'sm'),
-    h('span', { class: 'context-menu__name' }, u.username),
+function item(action, iconName, label, onclick, { danger = false, chevron = false, cls = '' } = {}) {
+  return h('button', {
+    type: 'button', class: 'context-menu__item' + (danger ? ' context-menu__item--danger' : '') + (cls ? ` ${cls}` : ''),
+    role: 'menuitem', dataset: { action }, onclick,
+  }, icon(iconName, 'icon--sm'), h('span', null, label), chevron ? icon('i-chevron-right', 'icon--sm context-menu__chev') : null);
+}
+
+function checkItem(action, iconName, label, checked, onchange) {
+  const id = `cm-${action}`;
+  const cb = h('input', { type: 'checkbox', class: 'switch switch--sm', dataset: { action }, id });
+  cb.checked = !!checked;
+  cb.addEventListener('change', () => onchange(cb.checked));
+  return h('label', { class: 'context-menu__item context-menu__item--check', for: id, role: 'menuitemcheckbox', 'aria-checked': String(!!checked) },
+    icon(iconName, 'icon--sm'), h('span', null, label), cb);
+}
+
+const sep = () => h('div', { class: 'context-menu__sep', role: 'separator' });
+
+function headEl(u) {
+  const color = roleColor(getServer(), u.userId);
+  return h('div', { class: 'context-menu__head' },
+    avatar(u.data, 'sm'),
+    h('span', { class: 'context-menu__name', style: color ? { color } : null }, displayName(u.data)),
     u.isBot ? h('span', { class: 'badge badge--bot' }, 'БОТ') : null,
-    u.self ? h('span', { class: 'context-menu__you' }, 'это вы') : null));
+    u.self ? h('span', { class: 'context-menu__you' }, 'это вы') : null);
+}
+
+function buildMenu(u) {
+  const server = getServer();
+  const items = [headEl(u)];
+  items.push(item('profile', 'i-user', 'Профиль', () => {
+    const anchor = anchorEl;
+    const at = lastPoint;
+    closeMenu(false);
+    openProfile(u.userId, anchor, { at });
+  }));
   if (u.self) {
-    items.push(h('button', {
-      type: 'button', class: 'context-menu__item', role: 'menuitem',
-      onclick: () => { closeMenu(false); openUserSettings('voice'); },
-    }, icon('i-settings', 'icon--sm'), 'Настройки голоса'));
+    items.push(item('voice-settings', 'i-settings', 'Настройки голоса', () => { closeMenu(false); openUserSettings('voice'); }));
   } else if (u.isBot) {
     items.push(volumeRow({
       label: 'Громкость музыки', value: prefs.get('audio.musicVolume'), max: 100, action: 'music-volume', resetTo: 70,
       onInput: (v) => prefs.set('audio.musicVolume', v),
     }));
     items.push(h('p', { class: 'context-menu__hint' }, 'Только для вас — у остальных своя громкость.'));
-  } else {
+    return items;
+  } else if (u.inVoice || u.el.matches('.voice-user, .tile')) {
     items.push(volumeRow({
       label: 'Громкость пользователя', value: prefs.getUserVolume(u.userId), max: 200, action: 'user-volume', resetTo: 100,
       onInput: (v) => prefs.setUserVolume(u.userId, v),
     }));
-    const cb = h('input', { type: 'checkbox', class: 'switch switch--sm', dataset: { action: 'mute-user' }, id: 'cm-mute' });
-    cb.checked = prefs.isUserMuted(u.userId);
-    cb.addEventListener('change', () => prefs.setUserMuted(u.userId, cb.checked));
-    items.push(h('label', { class: 'context-menu__item context-menu__item--check', for: 'cm-mute' },
-      icon('i-volume-x', 'icon--sm'), h('span', null, 'Заглушить локально'), cb));
+    items.push(checkItem('mute-user', 'i-volume-x', 'Заглушить локально', prefs.isUserMuted(u.userId), (v) => prefs.setUserMuted(u.userId, v)));
     items.push(h('p', { class: 'context-menu__hint' }, 'Слышите только вы. Двойной клик по ползунку — 100%.'));
   }
+  if (!server) return items;
+  const caps = capabilities(server, u.userId);
+  const mod = [];
+  if (caps.roles && assignableRoles(server).length) mod.push(item('roles', 'i-tag', 'Роли', () => showPage(rolesPage(u, server)), { chevron: true }));
+  if (caps.mute) {
+    mod.push(checkItem('server-mute', 'i-mic-off', 'Заглушить на сервере', caps.inVoice.member.serverMute, (v) => setServerMute(server, u.userId, v)));
+  }
+  if (caps.deafen) {
+    mod.push(checkItem('server-deafen', 'i-headphones-off', 'Отключить звук на сервере', caps.inVoice.member.serverDeafen, (v) => setServerDeafen(server, u.userId, v)));
+  }
+  if (caps.move) {
+    mod.push(item('move', 'i-move', 'Переместить в', () => showPage(movePage(u, server, caps.inVoice.channel.id)), { chevron: true }));
+    mod.push(item('disconnect', 'i-phone-off', 'Отключить от голосового', () => { closeMenu(false); moveMember(server, u.userId, null); }, { danger: true }));
+  }
+  if (mod.length) items.push(sep(), ...mod);
+  const danger = [];
+  if (caps.transfer) danger.push(item('transfer', 'i-crown', 'Передать владение', () => { closeMenu(false); transferOwnership(server, u.userId); }));
+  if (caps.kick) danger.push(item('kick', 'i-door', `Выгнать ${displayName(u.data)}`, () => { closeMenu(false); kickMember(server, u.userId); }, { danger: true }));
+  if (caps.ban) danger.push(item('ban', 'i-ban', `Забанить ${displayName(u.data)}`, () => { closeMenu(false); banMember(server, u.userId); }, { danger: true }));
+  if (danger.length) items.push(sep(), ...danger);
   return items;
+}
+
+function pageHead(title) {
+  return h('div', { class: 'context-menu__page-head' },
+    h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Назад', title: 'Назад', dataset: { action: 'back' }, onclick: () => showPage(null) }, icon('i-chevron-left', 'icon--sm')),
+    h('span', null, title));
+}
+
+function rolesPage(u, server) {
+  const have = new Set(memberRoleIds(server, u.userId));
+  const editable = new Set(assignableRoles(server).map((r) => r.id));
+  const list = sortedRoles(server).filter((r) => r.id !== server.id).map((r) => {
+    const id = `cm-role-${r.id}`;
+    const cb = h('input', { type: 'checkbox', id, dataset: { roleId: r.id }, disabled: !editable.has(r.id) });
+    cb.checked = have.has(r.id);
+    cb.addEventListener('change', () => toggleMemberRole(server, u.userId, r.id, cb.checked));
+    return h('label', { class: 'context-menu__item context-menu__role' + (editable.has(r.id) ? '' : ' is-disabled'), for: id, style: { '--rc': r.color || 'var(--text-faint)' } },
+      h('span', { class: 'role-pill__dot', 'aria-hidden': 'true' }), h('span', null, r.name), cb);
+  });
+  return [pageHead('Роли'), h('div', { class: 'context-menu__scroll' }, ...(list.length ? list : [h('p', { class: 'context-menu__hint' }, 'На сервере пока нет ролей')]))];
+}
+
+function movePage(u, server, currentId) {
+  const chans = (server.channels || []).filter((c) => c.type === 'voice').sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
+  return [pageHead('Переместить в'), h('div', { class: 'context-menu__scroll' }, ...chans.map((c) => h('button', {
+    type: 'button', class: 'context-menu__item' + (c.id === currentId ? ' is-current' : ''), role: 'menuitem',
+    dataset: { moveTo: c.id }, disabled: c.id === currentId,
+    onclick: () => { closeMenu(false); moveMember(server, u.userId, c.id); },
+  }, icon('i-volume', 'icon--sm'), h('span', null, c.name), c.id === currentId ? h('small', null, 'сейчас') : null)))];
+}
+
+let mainItems = null;
+function showPage(nodes) {
+  if (!menu) return;
+  if (nodes) {
+    mainItems = mainItems || [...menu.childNodes];
+    menu.replaceChildren(...nodes);
+  } else if (mainItems) {
+    menu.replaceChildren(...mainItems);
+    mainItems = null;
+  }
+  const r = menu.getBoundingClientRect();
+  position(menu, r.left, r.top);
+  (menu.querySelector('input:not(:disabled), button:not(:disabled)') || menu).focus({ preventScroll: true });
 }
 
 function position(m, x, y) {
   const pad = 8;
-  const r = m.getBoundingClientRect();
+  const r = { width: m.offsetWidth, height: m.offsetHeight }; // без учёта scale() анимации появления
   const vw = document.documentElement.clientWidth;
   const vh = window.innerHeight;
   let left = x; let top = y;
@@ -101,22 +199,25 @@ function position(m, x, y) {
   m.style.top = `${Math.round(top)}px`;
 }
 
-export function openMenuFor(target, x, y) {
+export function openMenuFor(target, x, y, { page = null } = {}) {
   const u = findUser(target);
   if (!u) return false;
   closeMenu(false);
   restoreFocus = document.activeElement;
   anchorEl = u.el;
+  lastPoint = { x, y };
+  mainItems = null;
   anchorEl.classList.add('is-menu-open');
   menu = h('div', {
     class: 'context-menu', role: 'menu', tabindex: '-1',
-    'aria-label': u.self ? 'Ваше меню' : `Меню: ${u.username}`,
+    'aria-label': u.self ? 'Ваше меню' : `Меню: ${displayName(u.data)}`,
     dataset: { userId: u.userId },
   }, ...buildMenu(u));
   (document.querySelector('dialog[open]') || document.body).append(menu);
   position(menu, x, y);
   const first = menu.querySelector('input, button');
   (first || menu).focus({ preventScroll: true });
+  if (page === 'roles') menu.querySelector('[data-action="roles"]')?.click();
   setTimeout(() => {
     document.addEventListener('pointerdown', onOutside, true);
     window.addEventListener('scroll', onScroll, true);
@@ -147,9 +248,16 @@ function onScroll(e) { if (menu && !menu.contains(e.target)) closeMenu(false); }
 function onResize() { closeMenu(false); }
 function onKey(e) {
   if (!menu) return;
-  if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeMenu(); }
+  if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); if (mainItems) showPage(null); else closeMenu(); }
+  else if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && document.activeElement?.type !== 'range') {
+    const f = [...menu.querySelectorAll('input:not(:disabled), button:not(:disabled)')];
+    if (!f.length) return;
+    const i = f.indexOf(document.activeElement);
+    e.preventDefault();
+    f[(i + (e.key === 'ArrowDown' ? 1 : -1) + f.length) % f.length].focus();
+  } else if (e.key === 'ArrowLeft' && mainItems && document.activeElement?.type !== 'range') { e.preventDefault(); showPage(null); }
   else if (e.key === 'Tab') {
-    const f = [...menu.querySelectorAll('input, button')];
+    const f = [...menu.querySelectorAll('input:not(:disabled), button:not(:disabled)')];
     if (!f.length) return;
     const i = f.indexOf(document.activeElement);
     e.preventDefault();
@@ -178,7 +286,7 @@ export function volumeBadge(userId, isBot) {
 }
 
 export function initContextMenu() {
-  const scope = (t) => t.closest?.('#channels .voice-user[data-user-id], #stage-grid .tile[data-socket-id]');
+  const scope = (t) => t.closest?.(SCOPE);
   let pressTimer = null;
   let pressStart = null;
   let suppressClick = false;

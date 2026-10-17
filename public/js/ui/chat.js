@@ -1,6 +1,8 @@
 // Текстовый чат: сообщения, группировка, история, typing, вложения, composer
-import { $, h, icon, avatar, fmtDate, fmtClock, fmtSize, renderMarkdown, safeColor } from '../util.js';
-import { state, subscribe, notify, getChannel, getServer, isOwner } from '../state.js';
+import { $, h, icon, avatar, fmtDate, fmtClock, fmtSize, renderMarkdown, safeColor, displayName } from '../util.js';
+import { state, subscribe, notify, getChannel, getServer, findUser } from '../state.js';
+import { can, roleColor } from '../perms.js';
+import { mentionsMe } from './notifications.js';
 import { emit, emitAck } from '../socket.js';
 import { api } from '../api.js';
 import { loadHistory, isLoading } from '../nav.js';
@@ -9,7 +11,7 @@ import { toast, toastError } from './toasts.js';
 const GROUP_MS = 5 * 60 * 1000;
 const TYPING_SEND_MS = 2500;
 const TYPING_SHOW_MS = 5000;
-const MAX_FILE = 25 * 1024 * 1024;
+const MAX_FILE = 100 * 1024 * 1024; // v3: UPLOAD_LIMIT_MB=100
 
 let renderedChannel = null;
 let pending = [];            // [{id, file, att?, uploading, error}]
@@ -49,20 +51,28 @@ function attachmentEl(att) {
 function messageEl(m, prev) {
   const grouped = isGrouped(prev, m);
   const author = m.author || { username: '?', color: '#888' };
+  const server = getServer(getChannel(m.channelId)?.serverId);
+  // свежие данные профиля участника (аватар/имя меняются без перезагрузки истории)
+  const fresh = author.id ? findUser(author.id, server) : null;
+  const who = fresh ? { ...author, ...fresh } : author;
+  const rc = !m.system && author.id ? roleColor(server, author.id) : null;
   const meta = h('div', { class: 'message__meta' },
-    h('span', { class: 'message__author', style: { color: safeColor(author.color) } }, author.username),
+    h('span', {
+      class: 'message__author' + (rc ? ' has-role-color' : ''), style: { color: rc || safeColor(who.color) },
+      role: m.system ? null : 'button', tabindex: m.system ? null : '0',
+    }, displayName(who)),
     author.isBot ? h('span', { class: 'badge badge--bot' }, 'БОТ') : null,
     h('time', { class: 'message__time', datetime: new Date(m.createdAt).toISOString(), title: new Date(m.createdAt).toLocaleString('ru-RU') },
       grouped ? fmtClock(m.createdAt) : fmtDate(m.createdAt)));
   const body = h('div', { class: 'message__body' }, meta);
   if (m.content) body.append(h('div', { class: 'message__content' }, renderMarkdown(m.content)));
   if (m.attachments?.length) body.append(h('div', { class: 'message__attachments' }, m.attachments.map(attachmentEl)));
+  const mentioned = !m.system && author.id !== state.user?.id && (m.mentionEveryone || mentionsMe(m.content));
   const el = h('div', {
-    class: 'message' + (grouped ? ' message--grouped' : '') + (m.system ? ' message--system' : ''),
+    class: 'message' + (grouped ? ' message--grouped' : '') + (m.system ? ' message--system' : '') + (mentioned ? ' message--mention' : ''),
     dataset: { messageId: m.id, authorId: author.id || '' },
-  }, avatar(author), body);
-  const server = getServer(getChannel(m.channelId)?.serverId);
-  const canDelete = !m.system && state.user && (author.id === state.user.id || isOwner(server));
+  }, avatar(who), body);
+  const canDelete = !m.system && state.user && (author.id === state.user.id || can(server, 'MANAGE_MESSAGES', m.channelId));
   if (canDelete) {
     el.append(h('button', {
       type: 'button', class: 'icon-btn message__delete',
@@ -121,7 +131,7 @@ function renderTyping() {
   const ch = state.currentChannelId;
   const t = state.typing[ch] || {};
   const now = Date.now();
-  const names = Object.values(t).filter((x) => x.until > now).map((x) => x.user.username);
+  const names = Object.values(t).filter((x) => x.until > now).map((x) => displayName(findUser(x.user.id) || x.user));
   if (!names.length) { el.textContent = ''; return; }
   if (names.length === 1) el.textContent = `${names[0]} печатает…`;
   else if (names.length <= 3) el.textContent = `${names.join(', ')} печатают…`;
@@ -148,7 +158,7 @@ async function addFiles(files) {
   for (const raw of files) {
     let file = raw;
     if (!file) continue;
-    if (file.size > MAX_FILE) { toast(`«${file.name}» больше 25 МБ`); continue; }
+    if (file.size > MAX_FILE) { toast(`«${file.name}» больше 100 МБ`); continue; }
     if (!file.name || file.name === 'image.png') {
       const ext = (file.type.split('/')[1] || 'png').replace(/[^a-z0-9]/gi, '');
       file = new File([file], `вставка-${Date.now()}.${ext}`, { type: file.type });
@@ -232,7 +242,14 @@ function renderHeaderAndView() {
   $('#channel-topic').textContent = ch ? (server?.name || '') : '';
   document.title = ch ? `${ch.type === 'text' ? '#' : '🔊 '}${ch.name} — ${server?.name} · Созвон` : 'Созвон';
   if (isText) {
-    $('#composer-input').placeholder = `Написать в #${ch.name}`;
+    const canSend = can(server, 'SEND_MESSAGES', ch.id);
+    const canAttach = canSend && can(server, 'ATTACH_FILES', ch.id);
+    const input = $('#composer-input');
+    input.disabled = !canSend;
+    $('#btn-send').disabled = !canSend;
+    $('#btn-attach').hidden = !canAttach;
+    $('#composer').classList.toggle('is-readonly', !canSend);
+    input.placeholder = canSend ? `Написать в #${ch.name}` : 'У вас нет прав писать в этом канале';
     if (renderedChannel !== ch.id) {
       pending = [];
       renderPending();
@@ -248,6 +265,23 @@ function renderHeaderAndView() {
 export function initChat(on) {
   subscribe(['nav', 'servers'], renderHeaderAndView);
   subscribe('messages', () => renderAll());
+  // аватары/имена/роли поменялись — перерисовать видимые сообщения, сохранив прокрутку
+  let lookSig = '';
+  subscribe(['profile', 'servers'], () => {
+    const el = box();
+    if (!renderedChannel || !el) return;
+    const srv = getServer();
+    const sig = JSON.stringify([srv?.id, (srv?.roles || []).map((r) => [r.id, r.color, r.position]), srv?.memberRoles,
+      (srv?.members || []).map((m) => [m.id, m.displayName, m.avatar, m.color]), srv?.channelOverwrites?.[renderedChannel]]);
+    if (sig === lookSig) return;
+    const first = !lookSig;
+    lookSig = sig;
+    if (first) return;
+    const fromBottom = el.scrollHeight - el.scrollTop;
+    const stick = nearBottom(el);
+    renderAll();
+    if (!stick) el.scrollTop = el.scrollHeight - fromBottom;
+  });
   subscribe('history', () => renderAll({ keepOffset: true }));
   subscribe('typing', renderTyping);
   setInterval(renderTyping, 1000);

@@ -63,12 +63,92 @@ export function initials(name) {
   return words.slice(0, 2).map((w) => Array.from(w)[0]).join('').toUpperCase();
 }
 
-export function avatar(user, size = '') {
-  return h('div', {
+/** Отображаемое имя: displayName (v3) или username */
+export function displayName(user) {
+  const d = user?.displayName;
+  return (typeof d === 'string' && d.trim()) ? d.trim() : (user?.username || '?');
+}
+
+/** Безопасный url медиа: только свои /media/… (или data:/blob: для предпросмотра) */
+export function safeMediaUrl(url) {
+  if (typeof url !== 'string' || !url) return null;
+  if (/^\/media\//.test(url) || /^(blob|data:image)\b/.test(url)) return url;
+  try {
+    const u = new URL(url, location.href);
+    if (u.origin === location.origin) return u.pathname + u.search;
+  } catch { /* не url */ }
+  return null;
+}
+
+/**
+ * Аватар: круг с буквой на фоне --c; если у пользователя есть картинка — <img class="avatar__img">.
+ * Анимированная версия лежит в data-animated и включается при наведении на строку (initAvatarHover)
+ * или всегда, если animate=true (попап профиля). Уважает уменьшение движения.
+ */
+export function avatar(user, size = '', { animate = false } = {}) {
+  const el = h('div', {
     class: 'avatar' + (size ? ` avatar--${size}` : ''),
     style: { '--c': safeColor(user?.color) },
     'aria-hidden': 'true',
   }, firstLetter(user?.username));
+  setAvatarImage(el, user, { animate });
+  return el;
+}
+
+/** Обновить картинку существующего .avatar (user-panel, тайлы) */
+export function setAvatarImage(el, user, { animate = false } = {}) {
+  if (!el) return;
+  const stat = safeMediaUrl(user?.avatar);
+  const anim = safeMediaUrl(user?.avatarAnimated);
+  let img = el.querySelector(':scope > img.avatar__img');
+  if (!stat && !anim) {
+    img?.remove();
+    el.classList.remove('has-img');
+    if (!el.firstChild || el.firstChild.nodeType !== 3) el.prepend(firstLetter(user?.username));
+    return;
+  }
+  const want = animate && anim && !motionReduced() ? anim : (stat || anim);
+  if (!img) {
+    img = document.createElement('img');
+    img.className = 'avatar__img';
+    img.alt = '';
+    img.decoding = 'async';
+    img.draggable = false;
+    img.addEventListener('error', () => { img.remove(); el.classList.remove('has-img'); });
+    el.append(img);
+  }
+  img.dataset.static = stat || anim;
+  if (anim && anim !== stat) img.dataset.animated = anim; else delete img.dataset.animated;
+  if (img.getAttribute('src') !== want) img.src = want;
+  el.classList.add('has-img');
+  // буква остаётся текстовым узлом под картинкой (фолбэк, если файл не загрузится)
+}
+
+export function motionReduced() {
+  const rm = document.documentElement.dataset.reduceMotion;
+  if (rm === 'on') return true;
+  if (rm === 'off') return false;
+  return matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+/** Анимированные аватары оживают при наведении на сообщение / участника / голосового участника */
+export function initAvatarHover() {
+  const ROW = '.message, .member, .voice-user, .tile, .sm-member, .context-menu__head, .role-member';
+  const swap = (row, on) => {
+    row.querySelectorAll('img.avatar__img[data-animated]').forEach((img) => {
+      if (img.closest('.profile-popup')) return;
+      const next = on && !motionReduced() ? img.dataset.animated : img.dataset.static;
+      if (next && img.getAttribute('src') !== next) img.src = next;
+    });
+  };
+  document.addEventListener('pointerover', (e) => {
+    const row = e.target.closest?.(ROW);
+    if (row && !row.contains(e.relatedTarget)) swap(row, true);
+  });
+  document.addEventListener('pointerout', (e) => {
+    const row = e.target.closest?.(ROW);
+    if (row && !row.contains(e.relatedTarget)) swap(row, false);
+  });
 }
 
 const pad = (n) => String(n).padStart(2, '0');

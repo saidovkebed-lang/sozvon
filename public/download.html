@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#12151b">
+  <meta name="description" content="Скачать Созвон для Windows и Linux: рация в фоне, трей, уведомления">
+  <title>Скачать Созвон для ПК</title>
+  <script src="/js/theme-boot.js"></script>
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/css/tokens.css">
+  <link rel="stylesheet" href="/css/app.css">
+</head>
+<body class="dl-page">
+  <main class="dl-hero">
+    <a class="dl-hero__back" href="/"><svg class="icon icon--sm" aria-hidden="true"><use href="/assets/icons.svg#i-arrow-left"/></svg> В Созвон</a>
+    <img class="dl-hero__logo" src="/assets/logo.svg" alt="" width="72" height="72">
+    <h1 class="dl-hero__title">Созвон для ПК</h1>
+    <p class="dl-hero__lead">Всё как в браузере, плюс то, что браузер не умеет.</p>
+    <p class="dl-hero__ver" id="dl-version"></p>
+    <section class="dl-card" id="dl-box" aria-live="polite"></section>
+    <ul class="dl-features">
+      <li><svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-keyboard"/></svg><span><strong>Рация в фоне</strong>Клавиша push-to-talk и mute работают, даже когда окно свёрнуто — в игре тоже.</span></li>
+      <li><svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-monitor"/></svg><span><strong>Выбор экрана или окна</strong>Демонстрация в 1080p 60 с превью источников.</span></li>
+      <li><svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-bell"/></svg><span><strong>Трей и уведомления</strong>Счётчик непрочитанных, автозапуск, быстрый mute из трея.</span></li>
+    </ul>
+    <p class="dl-hero__foot">Скачивание идёт с этого сервера. <a href="https://github.com/saidovkebed-lang/sozvon" target="_blank" rel="noopener noreferrer">Исходный код</a></p>
+  </main>
+  <script type="module">
+    import { renderDownloads } from '/js/download.js';
+    if (window.sozvonDesktop && window.sozvonDesktop.isDesktop) location.replace('/');
+    const data = await renderDownloads(document.getElementById('dl-box'), { full: true });
+    if (data.version) {
+      const d = data.publishedAt ? new Date(data.publishedAt) : null;
+      document.getElementById('dl-version').textContent = `Версия ${data.version}${d && !isNaN(d) ? ` · ${d.toLocaleDateString('ru-RU')}` : ''}`;
+    }
+  </script>
+</body>
+</html>

@@ -7,7 +7,9 @@ import { fileURLToPath } from 'node:url';
 import express from 'express';
 import { Server as IOServer } from 'socket.io';
 import { initDb, flushSync } from './db.js';
-import { ensureBotUser } from './model.js';
+import { ensureBotUser, migrateDb } from './model.js';
+import { initMedia, ffmpegCaps } from './media.js';
+import { readAppRelease, renderDownloadPage } from './app-release.js';
 import { initBotToken } from './auth.js';
 import { ensureCerts, localIPv4 } from './certs.js';
 import { createApiRouter } from './routes.js';
@@ -27,6 +29,10 @@ const SHARE = process.argv.includes('--share') || ['1', 'true', 'yes', 'on'].inc
 
 // ---------- данные ----------
 initDb(DATA_DIR);
+migrateDb(); // v1/v2 → v3: роли, права, профили (идемпотентно, с копией старой базы)
+initMedia(DATA_DIR);
+const downloadsDir = path.join(DATA_DIR, 'downloads');
+fs.mkdirSync(downloadsDir, { recursive: true });
 const uploadsDir = path.join(DATA_DIR, 'uploads');
 fs.mkdirSync(uploadsDir, { recursive: true });
 initMusicLibrary(DATA_DIR);
@@ -52,6 +58,7 @@ const realtime = attachRealtime(io, { uploadsDir });
 
 app.use('/api', createApiRouter({
   uploadsDir,
+  dataDir: DATA_DIR,
   getIceServers,
   getPublicUrl: () => process.env.PUBLIC_URL || getPublicUrl(),
   turnConfigured,
@@ -59,7 +66,33 @@ app.use('/api', createApiRouter({
   isBotOnline: realtime.isBotOnline,
   onUserUpdated: realtime.emitUserUpdated,
   onSessionsRevoked: realtime.disconnectSessions,
+  onServerUpdated: realtime.emitServerUpdated,
 }));
+
+// Аватары/баннеры/иконки: имя файла содержит хэш — кэш «навсегда»
+for (const dir of ['avatars', 'banners', 'icons']) {
+  app.use(`/media/${dir}`, express.static(path.join(DATA_DIR, 'media', dir), {
+    dotfiles: 'deny', index: false, fallthrough: false, maxAge: '365d', immutable: true,
+    setHeaders(res) {
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox");
+    },
+  }));
+}
+// Приложение для ПК: файлы релиза (кладёт deploy/update.sh), всегда как скачивание
+app.use('/media/downloads', express.static(downloadsDir, {
+  dotfiles: 'deny', index: false, fallthrough: false, maxAge: '1h',
+  setHeaders(res) {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Content-Disposition', 'attachment');
+  },
+}));
+app.get(['/download', '/download/'], (_req, res) => {
+  res.set('Cache-Control', 'no-cache');
+  const page = path.join(PUBLIC_DIR, 'download.html');
+  if (fs.existsSync(page)) return res.sendFile(page);
+  res.type('html').send(renderDownloadPage(readAppRelease(DATA_DIR)));
+});
 
 const INLINE_TYPES = /^(image|audio|video)\//;
 app.use('/media/uploads', express.static(uploadsDir, {
@@ -104,6 +137,8 @@ server.listen(PORT, HOST, () => {
     console.log('\n  ⚠ HTTPS выключен (HTTPS=0): микрофон и демонстрация экрана работают только на localhost.');
   }
   console.log(`\n  Данные: ${DATA_DIR}`);
+  const ff = ffmpegCaps();
+  if (!ff.ffmpeg) console.log('  ffmpeg не найден: аватары и баннеры сохраняются как есть, без обрезки.');
   const managed = Boolean(process.env.PUBLIC_URL); // установка на VPS (deploy/install.sh): бот и ссылка уже настроены
   if (managed) console.log(`  Публичный адрес: ${process.env.PUBLIC_URL}\n`);
   else console.log(`  Музыкальный бот: в другом окне выполните «npm run bot»${hasYtDlp() ? '' : ' (yt-dlp не найден — импорт с YouTube недоступен)'}\n`);

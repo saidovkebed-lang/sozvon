@@ -1,0 +1,24 @@
+:root { color-scheme: dark; --bg: #313338; --panel: #2b2d31; --input: #1e1f22; --text: #dbdee1; --muted: #949ba4; --accent: #5865f2; --accent2: #7b5cff; --danger: #f23f43; --ok: #23a55a; --warn: #f0b232; }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 14px/1.45 "Segoe UI", system-ui, -apple-system, "Noto Sans", sans-serif; }
+body { display: flex; align-items: center; justify-content: center; padding: 24px; }
+.card { width: 100%; max-width: 480px; background: var(--panel); border-radius: 12px; padding: 28px; box-shadow: 0 8px 30px rgba(0,0,0,.35); }
+.logo { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+.logo img { width: 44px; height: 44px; }
+h1 { font-size: 20px; margin: 0; }
+p { color: var(--muted); margin: 6px 0 16px; }
+label { display: block; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .02em; color: var(--muted); margin-bottom: 6px; }
+input[type=text] { width: 100%; padding: 10px 12px; border-radius: 6px; border: 1px solid transparent; background: var(--input); color: var(--text); font-size: 15px; outline: none; }
+input[type=text]:focus { border-color: var(--accent2); }
+.row { display: flex; gap: 8px; margin-top: 18px; justify-content: flex-end; flex-wrap: wrap; }
+button { border: 0; border-radius: 6px; padding: 9px 16px; font: inherit; font-weight: 600; cursor: pointer; color: #fff; background: #4e5058; }
+button.primary { background: var(--accent2); }
+button:disabled { opacity: .55; cursor: default; }
+button.link { background: none; color: #00a8fc; padding: 0; font-weight: 400; }
+.status { margin-top: 12px; min-height: 20px; font-size: 13px; }
+.status.ok { color: var(--ok); } .status.err { color: var(--danger); } .status.warn { color: var(--warn); }
+.cert { display: none; margin-top: 12px; padding: 12px; border-radius: 8px; background: rgba(240,178,50,.1); border: 1px solid rgba(240,178,50,.4); font-size: 13px; }
+.cert.show { display: block; }
+.cert code { display: block; word-break: break-all; font-size: 11px; color: var(--muted); margin: 6px 0; }
+.cert label { text-transform: none; font-weight: 400; color: var(--text); font-size: 13px; display: flex; gap: 8px; align-items: flex-start; letter-spacing: 0; }
+.hint { font-size: 12px; color: var(--muted); margin-top: 6px; }

@@ -1,6 +1,7 @@
 // Плавающий плеер DJ Бота + модалка библиотеки
 import { $, $$, h, icon, setIcon, fmtDuration } from '../util.js';
-import { state, subscribe, musicElapsed } from '../state.js';
+import { state, subscribe, musicElapsed, getChannel, getServer } from '../state.js';
+import { can } from '../perms.js';
 import { emitAck } from '../socket.js';
 import { api } from '../api.js';
 import { music } from '../music.js';
@@ -52,6 +53,13 @@ function renderPlayer() {
   setIcon(tog.querySelector('svg'), ms.paused ? 'i-play' : 'i-pause');
   player.classList.toggle('is-paused', !!ms.paused);
   $('#btn-music-unlock').hidden = !music.blocked;
+  // v3: без USE_MUSIC_BOT кнопки управления недоступны (сервер всё равно ответит «Нет права управлять музыкой»)
+  const vch = getChannel(state.myVoice?.channelId);
+  const allowed = !vch || can(getServer(vch.serverId), 'USE_MUSIC_BOT', vch.id);
+  $$('#music-player .music-player__controls [data-music]').forEach((b) => {
+    b.disabled = !allowed;
+    if (!allowed) b.title = 'Нет права управлять музыкой';
+  });
   tickProgress();
 }
 

@@ -1,6 +1,7 @@
 // Сцена голосового канала: тайлы участников, видео камеры/экрана, speaking, фокус/fullscreen
-import { $, h, icon, avatar } from '../util.js';
-import { state, subscribe, getChannel } from '../state.js';
+import { $, h, icon, avatar, displayName } from '../util.js';
+import { state, subscribe, getChannel, getServer, findUser } from '../state.js';
+import { can } from '../perms.js';
 import { socketId } from '../socket.js';
 import { rtc } from '../voice/rtc.js';
 import { moreButton } from './context-menu.js';
@@ -55,11 +56,15 @@ function fillTile(entry, d) {
   el.classList.toggle('is-speaking', kind === 'main' && state.speaking.has(m.socketId));
   el.setAttribute('aria-label', kind === 'screen' ? `Экран: ${m.username}` : m.username);
 
-  const sig = [stream?.id || '', m.username, m.color, m.muted, m.deafened, kind, m.streaming, m.isBot].join('|');
+  const u = { ...m, ...(findUser(m.userId) || {}), id: m.userId };
+  const avatarSig = `${u.avatar}|${u.avatarAnimated}|${u.color}`;
+  const name = displayName(u);
+  const sig = [stream?.id || '', name, u.color, u.avatar, u.avatarAnimated, m.muted, m.deafened, m.serverMute, m.serverDeafen, kind, m.streaming, m.isBot].join('|');
   if (entry.sig === sig && entry.streamRef === stream) return;
   entry.sig = sig;
 
-  if (entry.streamRef !== stream || !el.firstChild) {
+  if (entry.streamRef !== stream || !el.firstChild || (!stream && entry.avatarSig !== avatarSig)) {
+    entry.avatarSig = avatarSig;
     entry.streamRef = stream;
     const media = el.querySelector('.tile__video, .avatar');
     let next;
@@ -72,7 +77,7 @@ function fillTile(entry, d) {
       next.srcObject = stream;
       next.play().catch(() => {});
     } else {
-      next = avatar({ username: m.username, color: m.color }, 'xl');
+      next = avatar(u, 'xl');
     }
     if (media) {
       if (media.tagName === 'VIDEO') media.srcObject = null;
@@ -82,10 +87,10 @@ function fillTile(entry, d) {
 
   // подписи и бейджи
   el.querySelectorAll('.tile__label, .badge, .tile__expand, .tile__more').forEach((x) => x.remove());
-  const label = h('div', { class: 'tile__label' }, h('span', null, kind === 'screen' ? `${m.username} — экран` : m.username));
+  const label = h('div', { class: 'tile__label' }, h('span', null, kind === 'screen' ? `${name} — экран` : name));
   if (kind === 'main') {
-    if (m.deafened) label.append(icon('i-headphones-off', 'icon--sm'));
-    else if (m.muted) label.append(icon('i-mic-off', 'icon--sm'));
+    if (m.deafened || m.serverDeafen) label.append(icon('i-headphones-off', 'icon--sm'));
+    else if (m.muted || m.serverMute) label.append(icon('i-mic-off', 'icon--sm'));
   }
   el.append(label);
   if (kind === 'screen') el.append(h('span', { class: 'badge badge--live' }, 'LIVE'));
@@ -96,7 +101,7 @@ function fillTile(entry, d) {
     onclick: (e) => { e.stopPropagation(); toggleFullscreen(el); },
   }, icon('i-expand', 'icon--sm')));
   if (!self) {
-    const more = moreButton(m.username);
+    const more = moreButton(name);
     more.classList.add('tile__more');
     el.append(more);
   }
@@ -165,7 +170,11 @@ function render() {
   $('#stage-controls').hidden = !inThis;
   if (!inThis) {
     const n = members.filter((m) => !m.isBot).length;
-    $('#voice-join-text').textContent = n ? `Сейчас в канале ${n} ${plural(n)}` : 'В канале пока никого нет';
+    const srv = getServer(ch.serverId);
+    const allowed = !srv || can(srv, 'CONNECT', ch.id);
+    $('#btn-voice-join').disabled = !allowed;
+    $('#voice-join-text').textContent = !allowed ? 'У вас нет права подключаться к этому каналу'
+      : (n ? `Сейчас в канале ${n} ${plural(n)}` : 'В канале пока никого нет');
   }
   view.classList.toggle('is-connected', inThis);
 }
@@ -177,7 +186,7 @@ function updateSpeaking() {
 }
 
 export function initStage() {
-  subscribe(['nav', 'voice', 'me', 'servers'], render);
+  subscribe(['nav', 'voice', 'me', 'servers', 'profile'], render);
   subscribe('speaking', updateSpeaking);
   rtc.onChange(render);
   $('#btn-voice-join').addEventListener('click', () => {

@@ -1,6 +1,10 @@
 // Доменные помощники: поиск сущностей, сериализация для клиента, онлайн-статус.
 import crypto from 'node:crypto';
+import fs from 'node:fs';
 import { db, save, newId } from './db.js';
+import {
+  migrateServer, computeChannel, computeBase, has, PERMS,
+} from './permissions.js';
 
 export const BOT_USERNAME = 'DJ Бот';
 export const MAX_MESSAGES_PER_CHANNEL = 2000;
@@ -31,6 +35,11 @@ export function removeOnlineSocket(userId, socketId) {
 export function isOnline(userId) {
   const set = userSockets.get(userId);
   return !!set && set.size > 0;
+}
+/** Онлайн для других: подключён и не «невидимый». */
+export function isVisiblyOnline(userId) {
+  if (!isOnline(userId)) return false;
+  return findUser(userId)?.status !== 'invisible';
 }
 
 // ---------- поиск ----------
@@ -70,20 +79,81 @@ export function ensureBotUser() {
 }
 
 // ---------- сериализация ----------
-export function publicUser(u) {
-  if (!u) return { id: 'deleted', username: 'Удалённый пользователь', color: '#747f8d', isBot: false, online: false };
-  return { id: u.id, username: u.username, color: u.color, isBot: !!u.isBot, online: isOnline(u.id) };
+export const USER_STATUSES = ['online', 'idle', 'dnd', 'invisible'];
+
+/** Актуальный кастомный статус (истёкший → null). */
+export function activeCustomStatus(u) {
+  const cs = u?.customStatus;
+  if (!cs || typeof cs !== 'object') return null;
+  if (Number.isFinite(cs.expiresAt) && cs.expiresAt <= Date.now()) return null;
+  return { emoji: cs.emoji ?? null, text: cs.text ?? '', expiresAt: Number.isFinite(cs.expiresAt) ? cs.expiresAt : null };
+}
+
+/**
+ * Пользователь для клиента. self=true — смотрит сам пользователь (реальный статус, даже «невидимый»);
+ * для других «невидимый» выглядит как offline.
+ */
+export function publicUser(u, { self = false } = {}) {
+  if (!u) {
+    return {
+      id: 'deleted', username: 'Удалённый пользователь', displayName: null, color: '#747f8d', isBot: false, online: false,
+      avatar: null, avatarAnimated: null, banner: null, bannerAnimated: null, bannerColor: null, about: '', pronouns: '',
+      status: 'offline', customStatus: null, profileTheme: null, createdAt: null,
+    };
+  }
+  const connected = isOnline(u.id);
+  const status = USER_STATUSES.includes(u.status) ? u.status : 'online';
+  const online = self ? connected : connected && status !== 'invisible';
+  return {
+    id: u.id, username: u.username, displayName: u.displayName ?? null, color: u.color, isBot: !!u.isBot, online,
+    avatar: u.avatar ?? null, avatarAnimated: u.avatarAnimated ?? null,
+    banner: u.banner ?? null, bannerAnimated: u.bannerAnimated ?? null, bannerColor: u.bannerColor ?? null,
+    about: u.about ?? '', pronouns: u.pronouns ?? '',
+    status: self ? status : (online ? status : 'offline'),
+    customStatus: activeCustomStatus(u),
+    profileTheme: u.profileTheme ?? null,
+    createdAt: u.createdAt ?? null,
+  };
 }
 
 export function publicChannel(c) {
   return { id: c.id, serverId: c.serverId, name: c.name, type: c.type, position: c.position };
 }
 
-export function publicServer(s) {
+function publicBans(s) {
+  const out = {};
+  for (const [uid, b] of Object.entries(s.bans || {})) {
+    const u = findUser(uid);
+    out[uid] = {
+      by: b.by ?? null, reason: b.reason ?? '', at: b.at ?? null,
+      user: u ? { id: u.id, username: u.username, displayName: u.displayName ?? null, avatar: u.avatar ?? null, color: u.color }
+        : { id: uid, username: 'Удалённый пользователь', displayName: null, avatar: null, color: '#747f8d' },
+    };
+  }
+  return out;
+}
+
+/** Видит ли пользователь канал. */
+export const canViewChannel = (server, channelId, userId) =>
+  has(computeChannel(server, channelId, userId), PERMS.VIEW_CHANNEL);
+
+/** Сервер глазами пользователя viewerId: без невидимых каналов, inviteCode/bans — по правам. */
+export function publicServer(s, viewerId) {
+  const base = computeBase(s, viewerId);
+  const channels = serverChannels(s.id).filter((c) => canViewChannel(s, c.id, viewerId));
+  const visible = new Set(channels.map((c) => c.id));
+  const overwrites = {};
+  for (const [cid, ow] of Object.entries(s.channelOverwrites || {})) if (visible.has(cid)) overwrites[cid] = ow;
   return {
-    id: s.id, name: s.name, ownerId: s.ownerId, inviteCode: s.inviteCode, icon: s.icon ?? null,
-    channels: serverChannels(s.id).map(publicChannel),
-    members: s.memberIds.map((id) => publicUser(findUser(id))),
+    id: s.id, name: s.name, ownerId: s.ownerId,
+    inviteCode: has(base, PERMS.CREATE_INVITE) ? s.inviteCode : null,
+    icon: s.icon ?? null, banner: s.banner ?? null, description: s.description ?? '',
+    channels: channels.map(publicChannel),
+    members: s.memberIds.map((id) => publicUser(findUser(id), { self: id === viewerId })),
+    roles: (s.roles || []).map((r) => ({ ...r })),
+    memberRoles: Object.fromEntries(Object.entries(s.memberRoles || {}).map(([k, v]) => [k, [...v]])),
+    channelOverwrites: overwrites,
+    bans: has(base, PERMS.BAN_MEMBERS) ? publicBans(s) : null,
   };
 }
 
@@ -93,6 +163,7 @@ export function publicMessage(m) {
     content: m.content, attachments: m.attachments || [], createdAt: m.createdAt,
   };
   if (m.system) out.system = true;
+  if (m.mentionEveryone) out.mentionEveryone = true;
   return out;
 }
 
@@ -106,12 +177,53 @@ export function generateInviteCode() {
   }
 }
 
-export function addMessage({ channelId, authorId, content, attachments = [], system = false }) {
+export function addMessage({ channelId, authorId, content, attachments = [], system = false, mentionEveryone = false }) {
   const msg = { id: newId(), channelId, authorId, content, attachments, createdAt: Date.now() };
   if (system) msg.system = true;
+  if (mentionEveryone) msg.mentionEveryone = true;
   const list = (db.data.messages[channelId] ||= []);
   list.push(msg);
   if (list.length > MAX_MESSAGES_PER_CHANNEL) list.splice(0, list.length - MAX_MESSAGES_PER_CHANNEL);
   save();
   return msg;
+}
+
+// ---------- миграция данных (v1/v2 → v3) ----------
+export const DB_VERSION = 3;
+
+/** Идемпотентная миграция пользователя. true — изменился. */
+export function migrateUser(u) {
+  let changed = false;
+  const defaults = {
+    displayName: null, avatar: null, avatarAnimated: null, banner: null, bannerAnimated: null, bannerColor: null,
+    about: '', pronouns: '', status: 'online', customStatus: null, profileTheme: null,
+  };
+  for (const [k, v] of Object.entries(defaults)) {
+    if (u[k] === undefined) { u[k] = v; changed = true; }
+  }
+  if (!USER_STATUSES.includes(u.status)) { u.status = 'online'; changed = true; }
+  if (!Number.isFinite(u.createdAt)) { u.createdAt = Date.now(); changed = true; }
+  return changed;
+}
+
+/**
+ * Миграция всей базы при старте. Перед первым изменением сохраняет копию db.json
+ * (db.json.pre-v3-<время>). Повторный запуск ничего не меняет.
+ */
+export function migrateDb() {
+  const d = db.data;
+  let changed = false;
+  for (const u of d.users) if (migrateUser(u)) changed = true;
+  for (const s of d.servers) if (migrateServer(s)) changed = true;
+  if ((d.version || 1) < DB_VERSION) changed = true;
+  if (!changed) return false;
+  if (db.file && fs.existsSync(db.file) && (d.version || 1) < DB_VERSION) {
+    const backup = `${db.file}.pre-v3-${Date.now()}`;
+    try { fs.copyFileSync(db.file, backup); console.log(`[db] Миграция к v3. Копия старой базы: ${backup}`); } catch (err) {
+      console.error('[db] Не удалось сохранить копию перед миграцией:', err.message);
+    }
+  }
+  d.version = DB_VERSION;
+  save();
+  return true;
 }

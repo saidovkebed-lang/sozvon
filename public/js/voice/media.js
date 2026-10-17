@@ -45,13 +45,11 @@ export async function getCamera() {
   } catch (e) { throw explain(e, 'камере'); }
 }
 
-export async function getScreen() {
+/** video — констрейнты качества (v3 §2.4), audio — передавать звук экрана */
+export async function getScreen({ video = { frameRate: { ideal: 30 } }, audio = true } = {}) {
   ensureApi('getDisplayMedia');
   try {
-    return await navigator.mediaDevices.getDisplayMedia({
-      video: { frameRate: { ideal: 30 } },
-      audio: true,
-    });
+    return await navigator.mediaDevices.getDisplayMedia({ video, audio });
   } catch (e) {
     if (e?.name === 'NotAllowedError' || e?.name === 'AbortError') {
       throw new MediaError('Демонстрация экрана отменена', { cancelled: true });

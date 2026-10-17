@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:">
+<title>Созвон — нет связи</title>
+<link rel="stylesheet" href="ui/app.css">
+</head>
+<body>
+<main class="card">
+  <div class="logo"><img src="assets/logo-128.png" alt=""><h1>Нет связи с сервером</h1></div>
+  <p>Не удалось открыть <b id="url"></b>. Проверьте интернет или адрес сервера. Попробуем снова через <span id="sec">15</span> с.</p>
+  <div class="status err" id="err"></div>
+  <div class="row">
+    <button type="button" id="server">Сервер…</button>
+    <button type="button" class="primary" id="retry">Повторить</button>
+  </div>
+</main>
+<script src="ui/offline.js"></script>
+</body>
+</html>
