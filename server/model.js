@@ -120,6 +120,19 @@ export function publicChannel(c) {
   return { id: c.id, serverId: c.serverId, name: c.name, type: c.type, position: c.position };
 }
 
+function publicBans(s) {
+  const out = {};
+  for (const [uid, b] of Object.entries(s.bans || {})) {
+    const u = findUser(uid);
+    out[uid] = {
+      by: b.by ?? null, reason: b.reason ?? '', at: b.at ?? null,
+      user: u ? { id: u.id, username: u.username, displayName: u.displayName ?? null, avatar: u.avatar ?? null, color: u.color }
+        : { id: uid, username: 'Удалённый пользователь', displayName: null, avatar: null, color: '#747f8d' },
+    };
+  }
+  return out;
+}
+
 /** Видит ли пользователь канал. */
 export const canViewChannel = (server, channelId, userId) =>
   has(computeChannel(server, channelId, userId), PERMS.VIEW_CHANNEL);
@@ -140,7 +153,7 @@ export function publicServer(s, viewerId) {
     roles: (s.roles || []).map((r) => ({ ...r })),
     memberRoles: Object.fromEntries(Object.entries(s.memberRoles || {}).map(([k, v]) => [k, [...v]])),
     channelOverwrites: overwrites,
-    bans: has(base, PERMS.BAN_MEMBERS) ? { ...(s.bans || {}) } : null,
+    bans: has(base, PERMS.BAN_MEMBERS) ? publicBans(s) : null,
   };
 }
 

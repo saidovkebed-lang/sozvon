@@ -4,20 +4,32 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import express from 'express';
 import multer from 'multer';
-import { register, login, requireAuth, HttpError, updateColor, changePassword } from './auth.js';
-import { publicUser } from './model.js';
+import { register, login, requireAuth, HttpError, updateProfile, changePassword } from './auth.js';
+import { publicUser, publicServer, findServer, isMember } from './model.js';
+import { db, save } from './db.js';
+import { PERMS, can } from './permissions.js';
+import { MEDIA_KINDS, processImage, removeMediaUrl, mediaTmpDir } from './media.js';
+import { readAppRelease } from './app-release.js';
 import { syncLibrary, hasYtDlp, addUploadedFile, MUSIC_MAX_BYTES, fixMulterName, sanitizeFileName, getMusicDir } from './music-library.js';
 import { importFromUrl, resolveInput, fetchPending } from './music-sources.js';
 
-export const ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024;
+const limitMb = Number(process.env.UPLOAD_LIMIT_MB);
+export const ATTACHMENT_LIMIT_MB = Number.isFinite(limitMb) && limitMb > 0 ? limitMb : 100;
+export const ATTACHMENT_MAX_BYTES = Math.floor(ATTACHMENT_LIMIT_MB * 1024 * 1024);
+
+/** Используется ли медиафайл кем-то ещё (общий файл не удаляем). */
+function mediaInUse(url) {
+  return db.data.servers.some((s) => s.icon === url || s.banner === url)
+    || db.data.users.some((u) => u.avatar === url || u.avatarAnimated === url || u.banner === url || u.bannerAnimated === url);
+}
 
 function wrap(fn) {
   return (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 }
 
 export function createApiRouter({
-  uploadsDir, getIceServers, getPublicUrl, turnConfigured, forceRelay, isBotOnline,
-  onUserUpdated = () => {}, onSessionsRevoked = () => {},
+  uploadsDir, dataDir, getIceServers, getPublicUrl, turnConfigured, forceRelay, isBotOnline,
+  onUserUpdated = () => {}, onSessionsRevoked = () => {}, onServerUpdated = () => {},
 }) {
   const router = express.Router();
   router.use(express.json({ limit: '100kb' }));
@@ -48,6 +60,99 @@ export function createApiRouter({
     },
   });
 
+  // аватары/баннеры/иконки: во временный каталог, дальше — media.js
+  const imageUpload = (kind) => multer({
+    storage: multer.diskStorage({
+      destination: (_req, _file, cb) => cb(null, mediaTmpDir()),
+      filename: (_req, _file, cb) => cb(null, `.upload-${crypto.randomBytes(8).toString('hex')}`),
+    }),
+    limits: { fileSize: MEDIA_KINDS[kind].maxBytes, files: 1, fields: 10 },
+  }).single('file');
+  const cropOf = (body) => {
+    const out = {};
+    for (const k of ['x', 'y', 'size', 'width', 'height']) {
+      if (body?.[k] !== undefined && body[k] !== '') {
+        const n = Number(body[k]);
+        if (!Number.isFinite(n) || n < 0) throw new HttpError(400, 'Кадрирование: x, y, size — неотрицательные числа');
+        out[k] = n;
+      }
+    }
+    return Object.keys(out).length ? out : null;
+  };
+  const cleanupUpload = (req) => { if (req.file?.path) fs.rmSync(req.file.path, { force: true }); };
+  const notBot = (req) => { if (req.isBot) throw new HttpError(403, 'Недоступно для бота'); };
+
+  // профиль: kind avatar|banner → поля пользователя
+  const USER_MEDIA = { avatar: ['avatar', 'avatarAnimated'], banner: ['banner', 'bannerAnimated'] };
+  function setUserMedia(user, kind, url, animatedUrl) {
+    const [k1, k2] = USER_MEDIA[kind];
+    const old = [user[k1], user[k2]];
+    user[k1] = url; user[k2] = animatedUrl;
+    save();
+    for (const u of old) if (u && u !== user[k1] && u !== user[k2]) removeMediaUrl(u, mediaInUse);
+  }
+  for (const kind of ['avatar', 'banner']) {
+    router.post(`/me/${kind}`, requireAuth, (req, res, next) => { try { notBot(req); next(); } catch (e) { next(e); } },
+      imageUpload(kind), wrap(async (req, res) => {
+        try {
+          if (!req.file) throw new HttpError(400, 'Файл не получен (поле «file»)');
+          const r = await processImage(req.file, { kind, prefix: req.user.id, crop: cropOf(req.body) });
+          setUserMedia(req.user, kind, r.url, r.animatedUrl);
+          onUserUpdated(req.user);
+          res.json({ user: publicUser(req.user, { self: true }), processed: r.processed });
+        } finally { cleanupUpload(req); }
+      }));
+    router.delete(`/me/${kind}`, requireAuth, (req, res) => {
+      notBot(req);
+      setUserMedia(req.user, kind, null, null);
+      onUserUpdated(req.user);
+      res.json({ user: publicUser(req.user, { self: true }) });
+    });
+  }
+
+  // иконка/баннер сервера (MANAGE_SERVER)
+  function requireManageServer(req) {
+    notBot(req);
+    const server = findServer(req.params.id);
+    if (!server || !isMember(server, req.user.id)) throw new HttpError(404, 'Сервер не найден');
+    if (!can(server, req.user.id, PERMS.MANAGE_SERVER)) throw new HttpError(403, 'Недостаточно прав');
+    return server;
+  }
+  for (const [field, kind] of [['icon', 'icon'], ['banner', 'banner']]) {
+    router.post(`/servers/:id/${field}`, requireAuth, (req, res, next) => { try { requireManageServer(req); next(); } catch (e) { next(e); } },
+      imageUpload(kind), wrap(async (req, res) => {
+        try {
+          const server = requireManageServer(req);
+          if (!req.file) throw new HttpError(400, 'Файл не получен (поле «file»)');
+          const r = await processImage(req.file, { kind, prefix: 's' + server.id, crop: cropOf(req.body) });
+          // у сервера одна версия: анимированная (если есть) — она и показывается
+          const url = r.animatedUrl || r.url;
+          const old = server[field];
+          server[field] = url;
+          save();
+          if (r.animatedUrl && r.url !== r.animatedUrl) removeMediaUrl(r.url, mediaInUse);
+          if (old && old !== url) removeMediaUrl(old, mediaInUse);
+          onServerUpdated(server);
+          res.json({ server: publicServer(server, req.user.id), processed: r.processed });
+        } finally { cleanupUpload(req); }
+      }));
+    router.delete(`/servers/:id/${field}`, requireAuth, (req, res) => {
+      const server = requireManageServer(req);
+      const old = server[field];
+      server[field] = null;
+      save();
+      if (old) removeMediaUrl(old, mediaInUse);
+      onServerUpdated(server);
+      res.json({ server: publicServer(server, req.user.id) });
+    });
+  }
+
+  // приложение для ПК (SPEC-v3 §4)
+  router.get('/app/latest', (_req, res) => {
+    res.set('Cache-Control', 'no-cache');
+    res.json(readAppRelease(dataDir));
+  });
+
   const addedByOf = (req) => (req.isBot && typeof req.body?.addedBy === 'string' ? req.body.addedBy.slice(0, 24) : req.user.username);
 
   router.post('/register', wrap(async (req, res) => {
@@ -59,13 +164,13 @@ export function createApiRouter({
   }));
 
   router.get('/me', requireAuth, (req, res) => {
-    res.json({ user: publicUser(req.user) });
+    res.json({ user: publicUser(req.user, { self: !req.isBot }) });
   });
 
   router.patch('/me', requireAuth, (req, res) => {
     if (req.isBot) throw new HttpError(403, 'Недоступно для бота');
-    const user = updateColor(req.user, req.body);
-    onUserUpdated(req.user);
+    const { user, statusChanged } = updateProfile(req.user, req.body);
+    onUserUpdated(req.user, { statusChanged });
     res.json({ user });
   });
 
@@ -125,12 +230,15 @@ export function createApiRouter({
 
   // eslint-disable-next-line no-unused-vars
   router.use((err, req, res, _next) => {
-    if (req.file?.path && fs.existsSync(req.file.path) && path.basename(req.file.path).startsWith('.upload-')) {
+    if (req.file?.path && fs.existsSync(req.file.path) && (path.basename(req.file.path).startsWith('.upload-') || req.path.startsWith('/attachments'))) {
       fs.rmSync(req.file.path, { force: true });
     }
     if (err instanceof multer.MulterError) {
       if (err.code === 'LIMIT_FILE_SIZE') {
-        const mb = req.path.startsWith('/music') ? 50 : 25;
+        let mb = ATTACHMENT_LIMIT_MB;
+        if (req.path.startsWith('/music')) mb = 50;
+        else if (/banner$/.test(req.path)) mb = MEDIA_KINDS.banner.maxBytes / 1048576;
+        else if (/(avatar|icon)$/.test(req.path)) mb = MEDIA_KINDS.avatar.maxBytes / 1048576;
         return res.status(413).json({ error: `Файл слишком большой (максимум ${mb} МБ)` });
       }
       if (err.code === 'LIMIT_UNEXPECTED_FILE') return res.status(400).json({ error: 'Файл нужно передать в поле «file»' });
