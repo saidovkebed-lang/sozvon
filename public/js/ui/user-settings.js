@@ -798,7 +798,9 @@ function buildVoice() {
             h('button', { type: 'button', class: 'icon-btn', dataset: { resetPref: 'audio.pttKey' }, 'aria-label': 'Сбросить клавишу рации', title: 'Сбросить' }, icon('i-reset', 'icon--sm')))),
         sliderField('audio.pttReleaseDelay', 'Задержка отпускания', { min: 0, max: 1000, step: 20, unit: 'ms', marks: [0, 500, 1000] }),
         h('p', { class: 'settings-note settings-note--warn' }, icon('i-info', 'icon--sm'),
-          'Рация работает, только пока вкладка Созвона активна (в фокусе) — это ограничение браузера. В свёрнутом окне клавиша не слышна.'))),
+          window.sozvonDesktop?.isDesktop
+          ? 'В приложении для ПК клавиша рации работает и в свёрнутом окне — даже в игре.'
+          : 'Рация работает, только пока вкладка Созвона активна (в фокусе) — это ограничение браузера. В приложении для ПК клавиша работает и в фоне.'))),
     section('Чувствительность ввода',
       h('div', { dataset: { when: 'voice' } },
         switchRow('audio.sensitivityAuto', 'Определять чувствительность автоматически', 'Созвон сам решит, когда вы говорите. Выключите, чтобы задать порог вручную.'),
@@ -954,7 +956,9 @@ function buildKeybinds() {
       bindRow('keybinds.toggleDeafen', 'Вкл/выкл звук', 'Выключает и звук, и микрофон.'),
       bindRow('audio.pttKey', 'Рация (push-to-talk)', 'Действует, когда в «Голос и видео» выбран режим «Рация».', true)),
     h('p', { class: 'settings-note' }, icon('i-info', 'icon--sm'),
-      'Горячие клавиши работают, только пока вкладка Созвона активна — браузер не передаёт нажатия из других окон.'),
+      window.sozvonDesktop?.isDesktop
+        ? 'В приложении для ПК сочетания работают глобально — даже когда окно свёрнуто.'
+        : 'Горячие клавиши работают, только пока вкладка Созвона активна — браузер не передаёт нажатия из других окон. В приложении для ПК — глобально.'),
     section('',
       h('button', { type: 'button', class: 'btn btn--ghost btn--sm', onclick: () => resetKeys(['keybinds.toggleMute', 'keybinds.toggleDeafen', 'audio.pttKey'], 'Сбросить горячие клавиши?') }, icon('i-reset'), 'Сбросить все сочетания')),
   ];

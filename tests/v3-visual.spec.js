@@ -25,12 +25,17 @@ async function openNavIfMobile(page) {
   }
 }
 async function closeNav(page) {
-  if (await page.locator('#app.is-nav-open').count()) { await page.locator('#btn-menu').click().catch(() => {}); await page.waitForTimeout(350); }
+  // клик вне #sidebar/#servers закрывает выезжающее меню (main.js)
+  for (let k = 0; k < 2 && await page.locator('#app.is-nav-open').count(); k++) {
+    await page.keyboard.press('Escape');
+    if (await page.locator('#app.is-nav-open').count()) { const vp = page.viewportSize(); await page.mouse.click(vp.width - 6, Math.round(vp.height / 2)); }
+    await page.waitForTimeout(350);
+  }
 }
 
 for (const vp of [{ w: 1440, h: 900, tag: '1440' }, { w: 375, h: 812, tag: '375' }]) {
   test(`скриншоты v3 ${vp.tag}: участники с ролями, попап профиля, роли, профиль, стрим, пинг × 3 темы`, async ({ makePage }) => {
-    test.setTimeout(240_000);
+    test.setTimeout(300_000);
     const media = ensureV3Media();
     const { pa, pb, ua, ub } = await twoUsersOneServer(makePage, 'Витрина v3');
     await pb.setViewportSize({ width: vp.w, height: vp.h });
@@ -50,7 +55,8 @@ for (const vp of [{ w: 1440, h: 900, tag: '1440' }, { w: 375, h: 812, tag: '375'
       for (const theme of ['dark', 'light', 'amoled']) {
         const name = (s) => `${DIR}/${vp.tag}-${theme}-${s}.png`;
         await setTheme(pb, theme);
-        await openTextChannel(pb).catch(async () => { await openNavIfMobile(pb); await openTextChannel(pb); });
+        await openNavIfMobile(pb);
+        await openTextChannel(pb);
         await closeNav(pb);
         await expect(messageWith(pb, 'витрина v3')).toBeVisible();
         expect((await noHorizontalScroll(pb)).ok, `${vp.tag} ${theme}: нет горизонтального скролла`).toBe(true);

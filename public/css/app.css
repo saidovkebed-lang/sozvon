@@ -3321,3 +3321,17 @@ body.dl-page {
 }
 .context-menu__item > .role-pill__dot { flex: none; }
 .context-menu { width: 280px; }
+.modal--perms .modal__body > *, #modal-custom-status .modal__body > *, .modal--stream .modal__body > * { flex-shrink: 0; }
+.ch-row__name { min-width: 60px; }
+.user-panel .icon-btn { width: 26px; }
+.user-panel > .icon-btn + .icon-btn { margin-left: -4px; }
+@media (max-width: 639.98px) {
+  .ch-row__meta { display: none; }
+  .modal__footer:has(.modal__footer-left) .btn { min-width: 0; }
+  .modal__footer:has(.modal__footer-left) { gap: var(--sp-1); }
+}
+@media (max-width: 639.98px) {
+  .modal--stream .modal__footer .btn, #modal-custom-status .modal__footer .btn, .modal--crop .modal__footer .btn { flex: 1 1 0; }
+  .modal__footer { flex-wrap: wrap; }
+  .modal__footer-left { flex-basis: 100% !important; order: 3; }
+}

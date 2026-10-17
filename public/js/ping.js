@@ -92,7 +92,7 @@ async function voiceStats() {
   }
   for (const id of prevIn.keys()) if (!rtc.peers.has(id)) prevIn.delete(id);
   const v = ping.voice;
-  v.rtt = rtts.length ? Math.round(rtts.reduce((a, b) => a + b, 0) / rtts.length) : null;
+  v.rtt = rtts.length ? Math.max(1, Math.round(rtts.reduce((a, b) => a + b, 0) / rtts.length)) : null;
   v.jitter = jitters.length ? Math.round(Math.max(...jitters) * 10) / 10 : null;
   v.loss = lost + recv > 0 ? Math.round((Math.max(0, lost) / (Math.max(0, lost) + recv)) * 1000) / 10 : (v.rtt != null ? 0 : null);
   v.bitrate = bits > 0 ? Math.round(bits / 1000) : null;

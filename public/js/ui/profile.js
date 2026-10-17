@@ -428,7 +428,11 @@ export function initProfile() {
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Enter' && e.key !== ' ') return;
     const member = e.target.closest?.('#members .member[data-user-id]');
-    if (member) { e.preventDefault(); openProfile(member.dataset.userId, member); }
+    if (member) { e.preventDefault(); openProfile(member.dataset.userId, member); return; }
+    const author = e.target.closest?.('.message .message__author[role="button"]');
+    if (author) { e.preventDefault(); const uid = author.closest('.message').dataset.authorId; if (uid) openProfile(uid, author); return; }
+    const info = e.target.closest?.('.user-panel__info');
+    if (info && e.target === info && state.user) { e.preventDefault(); openProfile(state.user.id, info); }
   });
   subscribe(['profile', 'servers', 'presence', 'voice'], refreshPopup);
 

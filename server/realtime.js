@@ -9,7 +9,7 @@ import {
   addOnlineSocket, removeOnlineSocket, isVisiblyOnline, canViewChannel, activeCustomStatus,
 } from './model.js';
 import {
-  PERMS, ALL_PERMS, has, computeBase, computeChannel, canActOn, canGrant, cleanPerms, findRole,
+  PERMS, has, computeBase, computeChannel, canActOn, canGrant, cleanPerms, findRole,
   highestPosition, normalizePositions, newServerFields,
 } from './permissions.js';
 import { createVoice } from './voice.js';
@@ -836,4 +836,3 @@ export function attachRealtime(io, { uploadsDir }) {
   return { isBotOnline, emitUserUpdated, disconnectSessions, emitServerUpdated };
 }
 
-export { ALL_PERMS };

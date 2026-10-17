@@ -129,8 +129,31 @@ sudo bash /opt/sozvon/deploy/update.sh
 ```
 
 Скачается свежий код, и службы перезапустятся (на 2–3 секунды все отключатся и сразу подключатся
-обратно). Если в описании обновления сказано, что поменялась установка, запустите полную установку
-ещё раз: `sudo bash /opt/sozvon/deploy/install.sh`.
+обратно). Заодно обновление:
+
+- доставит недостающее (ffmpeg — для аватаров и баннеров, yt-dlp и его таймер);
+- перерисует конфиг nginx из шаблона (домен и сертификат остаются прежними; если новый конфиг
+  не прошёл `nginx -t`, вернётся старый);
+- скачает свежее **приложение для ПК** из GitHub Releases (тег `desktop-v*`) в
+  `/var/lib/sozvon/downloads/` — друзья скачивают его с вашего сервера на странице
+  `https://ваш-адрес/download`, GitHub им не нужен. Если GitHub недоступен, обновление всё равно
+  пройдёт; повторить отдельно: `sudo bash /opt/sozvon/deploy/app-release.sh`.
+
+При первом обновлении до версии с ролями база данных обновится сама (у старых серверов появится
+роль @everyone с правами по умолчанию). Копия старой базы: `/var/lib/sozvon/db.json.pre-v3-<время>`.
+
+Если в описании обновления сказано, что поменялась установка (например, нужен новый домен), запустите
+полную установку ещё раз: `sudo bash /opt/sozvon/deploy/install.sh`.
+
+### Приложение для ПК вручную
+
+```bash
+sudo bash /opt/sozvon/deploy/app-release.sh            # последний релиз desktop-v* с GitHub
+sudo bash /opt/sozvon/deploy/app-release.sh --force    # скачать заново
+sudo bash /opt/sozvon/deploy/app-release.sh --from-dir /root/dist 1.0.0   # свои файлы, без GitHub
+```
+
+Если GitHub отвечает «rate limit», задайте токен: `GITHUB_TOKEN=… sudo -E bash …/app-release.sh`.
 
 ## Резервная копия
 
@@ -275,7 +298,7 @@ sudo bash /opt/sozvon/deploy/uninstall.sh --purge  # удалить всё, вк
 | `--ip IPv4` | публичный IP, если автоопределение ошиблось |
 | `--relay` / `--no-relay` | `FORCE_RELAY=1/0` |
 | `--no-firewall` | не трогать ufw |
-| `--no-ytdlp` | не ставить yt-dlp (по умолчанию ставится вместе с ffmpeg и таймером автообновления) |
+| `--no-ytdlp` | не ставить yt-dlp (по умолчанию ставится с таймером автообновления; ffmpeg ставится всегда — он нужен и для аватаров) |
 | `--branch ВЕТКА` | ветка git (по умолчанию `main`) |
 | `--source КАТАЛОГ` | взять код из локального каталога вместо git |
 | `--local-test` | тестовый режим для Docker: без certbot/ufw/определения IP, самоподписанный сертификат, код из `/src` |
@@ -288,11 +311,11 @@ sudo bash /opt/sozvon/deploy/uninstall.sh --purge  # удалить всё, вк
 | Путь | Что это |
 |---|---|
 | `/opt/sozvon` | код (git-клон, владелец root, службы его только читают) |
-| `/var/lib/sozvon` | данные (`DATA_DIR`): `db.json`, `uploads/`, `music/`, `bot-token.txt` |
+| `/var/lib/sozvon` | данные (`DATA_DIR`): `db.json`, `uploads/`, `music/`, `media/` (аватары, баннеры, иконки), `downloads/` + `app-release.json` (приложение для ПК), `bot-token.txt` |
 | `/etc/sozvon.env` | переменные окружения (chmod 600); `TURN_SECRET` генерируется один раз |
 | `/opt/node` | Node.js 22 LTS (если в системе не было Node ≥ 20), ссылки в `/usr/local/bin` |
 | `/etc/systemd/system/sozvon{,-bot}.service` | службы (`User=sozvon`, `ProtectSystem=strict`) |
-| `/etc/nginx/sites-available/sozvon.conf` | HTTPS-прокси на `127.0.0.1:3000`, WebSocket для `/socket.io/` |
+| `/etc/nginx/sites-available/sozvon.conf` | HTTPS-прокси на `127.0.0.1:3000`, WebSocket для `/socket.io/`, загрузка до 110 МБ (`client_max_body_size`); перерисовывается `update.sh` |
 | `/etc/turnserver.conf` | coturn: `use-auth-secret`, порты 3478/5349, relay 49160–49999/udp, запрет приватных сетей |
 | `/etc/letsencrypt/renewal-hooks/deploy/sozvon-coturn.sh` | после продления копирует сертификат для coturn и перезапускает его |
 
