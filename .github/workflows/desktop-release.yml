@@ -1,0 +1,68 @@
+# Сборка «Созвон для ПК» и публикация релиза.
+# Запуск: пуш тега вида desktop-v1.0.0 (версия берётся из desktop/package.json).
+# Сервер (deploy/update.sh → deploy/app-release.sh) сам скачает файлы релиза к себе
+# и будет раздавать их на /download — друзьям из РФ не нужен доступ к GitHub.
+name: desktop-release
+
+on:
+  push:
+    tags: ['desktop-v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            script: dist:win
+            files: |
+              desktop/dist/*.exe
+              desktop/dist/*.zip
+          - os: ubuntu-latest
+            script: dist:linux
+            files: desktop/dist/*.AppImage
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - run: npm ci
+      - run: npm run check
+      - run: npm run ${{ matrix.script }} -- --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.os }}
+          path: ${{ matrix.files }}
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+      - name: SHA256SUMS
+        run: cd out && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || format('desktop-v{0}', github.run_number) }}
+          name: Созвон для ПК ${{ github.ref_name }}
+          body_path: desktop/RELEASE_NOTES.md
+          files: out/*
+          fail_on_unmatched_files: true
