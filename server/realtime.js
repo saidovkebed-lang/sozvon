@@ -1,4 +1,4 @@
-// Socket.IO: события клиентов и бота.
+// Socket.IO: события клиентов и бота. Права — server/permissions.js (SPEC-v3 §1).
 import fs from 'node:fs';
 import path from 'node:path';
 import { db, save, newId } from './db.js';
@@ -6,15 +6,25 @@ import { userByToken, checkBotToken } from './auth.js';
 import {
   findServer, findChannel, findUser, serverChannels, userServers, isMember, getBotUser,
   publicServer, publicChannel, publicMessage, publicUser, addMessage, generateInviteCode,
-  addOnlineSocket, removeOnlineSocket,
+  addOnlineSocket, removeOnlineSocket, isVisiblyOnline, canViewChannel, activeCustomStatus,
 } from './model.js';
+import {
+  PERMS, ALL_PERMS, has, computeBase, computeChannel, canActOn, canGrant, cleanPerms, findRole,
+  highestPosition, normalizePositions, newServerFields,
+} from './permissions.js';
 import { createVoice } from './voice.js';
+import { isOwnMediaUrl, removeMediaUrl } from './media.js';
 
 const serverRoom = (id) => `server:${id}`;
 const userRoom = (id) => `user:${id}`;
 
 export const BOT_COMMANDS = ['play', 'skip', 'stop', 'pause', 'resume', 'queue', 'np', 'remove', 'shuffle', 'help', 'leave'];
 const BOT_OFFLINE_TEXT = 'Музыкальный бот не запущен. Запустите: npm run bot';
+const NO_MUSIC_PERM = 'Нет права управлять музыкой';
+const NO_PERM = 'Недостаточно прав';
+const HIERARCHY = 'Нельзя действовать на участника с ролью не ниже вашей';
+const MAX_ROLES = 50;
+const MOVE_GRANT_MS = 30_000;
 
 class WsError extends Error {}
 const fail = (msg) => { throw new WsError(msg); };
@@ -29,39 +39,98 @@ function cleanName(raw, { min = 1, max = 50, what = 'Название' } = {}) {
   return name;
 }
 
+function cleanColor(v) {
+  if (v === null || v === '') return null;
+  const c = typeof v === 'string' ? v.trim().toLowerCase() : '';
+  if (!/^#[0-9a-f]{6}$/.test(c)) fail('Цвет роли — в формате #rrggbb');
+  return c;
+}
+
+/** Медиа сервера используется ещё где-то? (чтобы не удалить общий файл) */
+function mediaInUse(url) {
+  return db.data.servers.some((s) => s.icon === url || s.banner === url)
+    || db.data.users.some((u) => u.avatar === url || u.avatarAnimated === url || u.banner === url || u.bannerAnimated === url);
+}
+
 export function attachRealtime(io, { uploadsDir }) {
   let botSocket = null;
-  const voice = createVoice(io, { getBotSocket: () => botSocket });
   const isBotOnline = () => !!botSocket?.connected;
+  const moveGrants = new Map(); // userId -> {channelId, until}: можно зайти без CONNECT (перемещён модератором)
 
-  function emitPresence(userId, online) {
-    const rooms = userServers(userId).map((s) => serverRoom(s.id));
-    if (rooms.length) io.to(rooms).emit('presence', { userId, online });
+  // ---------- рассылки с учётом прав ----------
+  /** Событие участникам сервера, которые видят канал. except — socketId отправителя. */
+  function emitToViewers(channelId, event, payload, serverIdHint, { except } = {}) {
+    const channel = findChannel(channelId);
+    const server = findServer(channel?.serverId || serverIdHint);
+    if (!server) return;
+    if (!channel) { // канал удалён — без фильтра
+      (except ? io.to(serverRoom(server.id)).except(except) : io.to(serverRoom(server.id))).emit(event, payload);
+      return;
+    }
+    const humans = server.memberIds.filter((id) => !findUser(id)?.isBot);
+    const viewers = humans.filter((id) => canViewChannel(server, channel.id, id));
+    let target = viewers.length === humans.length ? io.to(serverRoom(server.id)) : (viewers.length ? io.to(viewers.map(userRoom)) : null);
+    if (!target) return;
+    if (except) target = target.except(except);
+    target.emit(event, payload);
   }
-  const emitServerUpdated = (server) => io.to(serverRoom(server.id)).emit('server:updated', { server: publicServer(server) });
 
+  const voice = createVoice(io, { getBotSocket: () => botSocket, emitToViewers });
+
+  function emitPresence(userId) {
+    const rooms = userServers(userId).map((s) => serverRoom(s.id));
+    if (!rooms.length) return;
+    const u = findUser(userId);
+    const online = isVisiblyOnline(userId);
+    io.to(rooms).except(userRoom(userId)).emit('presence', { userId, online, status: online ? (u?.status || 'online') : 'offline' });
+    io.to(userRoom(userId)).emit('presence', { userId, online: true, status: u?.status || 'online' });
+  }
+
+  /** server:updated каждому участнику — персонально (каналы/инвайт/баны по его правам). */
+  function emitServerUpdated(server) {
+    for (const id of server.memberIds) {
+      if (findUser(id)?.isBot) continue;
+      io.to(userRoom(id)).emit('server:updated', { server: publicServer(server, id) });
+    }
+  }
+
+  // ---------- проверки ----------
   function requireServerMember(serverId, user) {
     const server = typeof serverId === 'string' ? findServer(serverId) : null;
     if (!server || !isMember(server, user.id)) fail('Сервер не найден');
     return server;
   }
-  function requireOwner(serverId, user) {
+  function requirePerm(serverId, user, bit, msg = NO_PERM) {
+    const server = requireServerMember(serverId, user);
+    if (!has(computeBase(server, user.id), bit)) fail(msg);
+    return server;
+  }
+  function requireOwnerOnly(serverId, user) {
     const server = requireServerMember(serverId, user);
     if (server.ownerId !== user.id) fail('Это может сделать только владелец сервера');
     return server;
   }
+  /** Канал, видимый пользователю; perms — права в канале. */
   function requireChannel(channelId, user, type) {
     const channel = typeof channelId === 'string' ? findChannel(channelId) : null;
     const server = channel && findServer(channel.serverId);
     if (!channel || !isMember(server, user.id)) fail('Канал не найден');
+    const perms = computeChannel(server, channel.id, user.id);
+    if (!has(perms, PERMS.VIEW_CHANNEL)) fail('Нет доступа к этому каналу');
     if (type && channel.type !== type) fail(type === 'text' ? 'Это не текстовый канал' : 'Это не голосовой канал');
-    return { channel, server };
+    return { channel, server, perms };
+  }
+  function requireTargetMember(server, userId) {
+    const target = typeof userId === 'string' ? findUser(userId) : null;
+    if (!target || !server.memberIds.includes(target.id)) fail('Участник не найден');
+    if (target.isBot) fail('С ботом так нельзя');
+    return target;
   }
 
   function sendSystem(channel, content) {
     const bot = getBotUser();
     const msg = addMessage({ channelId: channel.id, authorId: bot.id, content, system: true });
-    io.to(serverRoom(channel.serverId)).emit('message:new', { message: publicMessage(msg) });
+    emitToViewers(channel.id, 'message:new', { message: publicMessage(msg) });
   }
 
   function validateAttachments(list) {
@@ -90,6 +159,53 @@ export function attachRealtime(io, { uploadsDir }) {
     });
   }
 
+  // ---------- голос и права ----------
+  const modOf = (server, userId) => server.voiceModeration?.[userId] || { mute: false, deafen: false };
+
+  /** serverMute/serverDeafen для участника канала: модерация + принудительный mute без SPEAK. */
+  function voiceFlags(server, channelId, userId) {
+    const mod = modOf(server, userId);
+    const speak = has(computeChannel(server, channelId, userId), PERMS.SPEAK);
+    return { serverMute: !!mod.mute || !speak, serverDeafen: !!mod.deafen };
+  }
+
+  function disconnectFromVoice(socketId, channelId = null) {
+    voice.removeSocket(socketId);
+    io.to(socketId).emit('voice:moved', { channelId });
+  }
+
+  /** После изменения прав/ролей: выкинуть из невидимых голосовых каналов, обновить серверный mute. */
+  function enforceVoice(server) {
+    for (const { socketId, channelId, member } of voice.allHumans()) {
+      const ch = findChannel(channelId);
+      if (!ch || ch.serverId !== server.id) continue;
+      if (!server.memberIds.includes(member.userId) || !canViewChannel(server, channelId, member.userId)) {
+        disconnectFromVoice(socketId, null);
+        continue;
+      }
+      voice.setModeration(socketId, voiceFlags(server, channelId, member.userId));
+    }
+  }
+
+  /** Убрать участника с сервера (кик/бан). */
+  function removeMember(server, userId, reason) {
+    voice.kickUserFromServer(userId, server.id);
+    server.memberIds = server.memberIds.filter((id) => id !== userId);
+    delete server.memberRoles[userId];
+    if (server.voiceModeration) delete server.voiceModeration[userId];
+    save();
+    io.to(userRoom(userId)).emit('server:removed', reason ? { serverId: server.id, reason } : { serverId: server.id });
+    io.in(userRoom(userId)).socketsLeave(serverRoom(server.id));
+    emitServerUpdated(server);
+  }
+
+  /** Сервер изменился в части прав: всем — новая картина, голос — пересчитать. */
+  function permsChanged(server) {
+    save();
+    emitServerUpdated(server);
+    enforceVoice(server);
+  }
+
   // ---------- авторизация ----------
   io.use((socket, next) => {
     const auth = socket.handshake.auth || {};
@@ -111,7 +227,7 @@ export function attachRealtime(io, { uploadsDir }) {
 
     socket.join(userRoom(user.id));
     for (const s of userServers(user.id)) socket.join(serverRoom(s.id));
-    if (addOnlineSocket(user.id, socket.id)) emitPresence(user.id, true);
+    if (addOnlineSocket(user.id, socket.id) && user.status !== 'invisible') emitPresence(user.id);
 
     // обёртка: ack обязателен, ошибки → {ok:false,error}
     const on = (event, handler) => socket.on(event, async (payload, ack) => {
@@ -127,20 +243,32 @@ export function attachRealtime(io, { uploadsDir }) {
       }
     });
 
-    on('bootstrap', () => {
-      const servers = userServers(user.id);
-      const voiceIds = servers.flatMap((s) => serverChannels(s.id).filter((c) => c.type === 'voice').map((c) => c.id));
-      const { voice: v, music } = voice.snapshotFor(voiceIds);
-      return { user: publicUser(user), servers: servers.map(publicServer), voice: v, music };
+    // Пинг (SPEC-v3 §3): emit('ping:rtt', {t}?, ack) → {now, t?}
+    socket.on('ping:rtt', (payload, ack) => {
+      if (typeof payload === 'function') { ack = payload; payload = undefined; }
+      if (typeof ack !== 'function') return;
+      const out = { now: Date.now() };
+      if (isObj(payload) && Number.isFinite(payload.t)) out.t = payload.t;
+      ack(out);
     });
 
+    on('bootstrap', () => {
+      const servers = userServers(user.id);
+      const voiceIds = servers.flatMap((s) => serverChannels(s.id)
+        .filter((c) => c.type === 'voice' && canViewChannel(s, c.id, user.id)).map((c) => c.id));
+      const { voice: v, music } = voice.snapshotFor(voiceIds);
+      return { user: publicUser(user, { self: true }), servers: servers.map((s) => publicServer(s, user.id)), voice: v, music };
+    });
+
+    // ---------- серверы ----------
     on('server:create', ({ name }) => {
       const clean = cleanName(name, { max: 50, what: 'Название сервера' });
       if (userServers(user.id).filter((s) => s.ownerId === user.id).length >= 50) fail('Слишком много серверов');
       const bot = getBotUser();
+      const id = newId();
       const server = {
-        id: newId(), name: clean, ownerId: user.id, inviteCode: generateInviteCode(), icon: null,
-        memberIds: [user.id, bot.id], createdAt: Date.now(),
+        id, name: clean, ownerId: user.id, inviteCode: generateInviteCode(), icon: null,
+        memberIds: [user.id, bot.id], createdAt: Date.now(), ...newServerFields(id),
       };
       db.data.servers.push(server);
       db.data.channels.push(
@@ -150,7 +278,7 @@ export function attachRealtime(io, { uploadsDir }) {
       save();
       io.in(userRoom(user.id)).socketsJoin(serverRoom(server.id));
       emitServerUpdated(server);
-      return { server: publicServer(server) };
+      return { server: publicServer(server, user.id) };
     });
 
     on('server:join', ({ inviteCode }) => {
@@ -158,28 +286,24 @@ export function attachRealtime(io, { uploadsDir }) {
       if (!/^[a-z0-9]{8}$/.test(code)) fail('Инвайт-код — 8 латинских букв и цифр');
       const server = db.data.servers.find((s) => s.inviteCode === code);
       if (!server) fail('Сервер с таким кодом не найден');
+      if (server.bans?.[user.id]) fail('Вы заблокированы на этом сервере');
       if (!server.memberIds.includes(user.id)) {
         server.memberIds.push(user.id);
         save();
       }
       io.in(userRoom(user.id)).socketsJoin(serverRoom(server.id));
       emitServerUpdated(server);
-      return { server: publicServer(server) };
+      return { server: publicServer(server, user.id) };
     });
 
     on('server:leave', ({ serverId }) => {
       const server = requireServerMember(serverId, user);
       if (server.ownerId === user.id) fail('Владелец не может выйти с сервера — его можно только удалить');
-      voice.kickUserFromServer(user.id, server.id);
-      server.memberIds = server.memberIds.filter((id) => id !== user.id);
-      save();
-      io.to(userRoom(user.id)).emit('server:removed', { serverId: server.id });
-      io.in(userRoom(user.id)).socketsLeave(serverRoom(server.id));
-      emitServerUpdated(server);
+      removeMember(server, user.id, null);
     });
 
     on('server:delete', ({ serverId }) => {
-      const server = requireOwner(serverId, user);
+      const server = requireOwnerOnly(serverId, user);
       const channels = serverChannels(server.id);
       for (const c of channels) {
         if (c.type === 'voice') voice.clearChannel(c.id);
@@ -188,19 +312,56 @@ export function attachRealtime(io, { uploadsDir }) {
       db.data.channels = db.data.channels.filter((c) => c.serverId !== server.id);
       db.data.servers = db.data.servers.filter((s) => s.id !== server.id);
       save();
+      for (const url of [server.icon, server.banner]) removeMediaUrl(url, mediaInUse);
       io.to(serverRoom(server.id)).emit('server:removed', { serverId: server.id });
       io.in(serverRoom(server.id)).socketsLeave(serverRoom(server.id));
     });
 
     on('server:rename', ({ serverId, name }) => {
-      const server = requireOwner(serverId, user);
+      const server = requirePerm(serverId, user, PERMS.MANAGE_SERVER);
       server.name = cleanName(name, { max: 50, what: 'Название сервера' });
       save();
       emitServerUpdated(server);
     });
 
+    on('server:update', (p) => {
+      const server = requirePerm(p.serverId, user, PERMS.MANAGE_SERVER);
+      const patch = {};
+      if ('name' in p) patch.name = cleanName(p.name, { max: 50, what: 'Название сервера' });
+      if ('description' in p) {
+        if (p.description !== null && typeof p.description !== 'string') fail('Описание: нужен текст');
+        const d = str(p.description).replace(/\r\n/g, '\n').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '').trim();
+        if ([...d].length > 300) fail('Описание: не больше 300 символов');
+        patch.description = d;
+      }
+      for (const [key, dir] of [['icon', 'icons'], ['banner', 'banners']]) {
+        if (!(key in p)) continue;
+        if (p[key] === null) patch[key] = null;
+        else if (!isOwnMediaUrl(p[key], [dir])) fail(key === 'icon' ? 'Иконка не найдена — загрузите её заново' : 'Баннер не найден — загрузите его заново');
+        else patch[key] = p[key];
+      }
+      if (p.regenerateInvite === true) patch.inviteCode = generateInviteCode();
+      if (!Object.keys(patch).length) fail('Нет изменений');
+      const old = { icon: server.icon, banner: server.banner };
+      Object.assign(server, patch);
+      save();
+      for (const k of ['icon', 'banner']) if (k in patch && old[k] && old[k] !== server[k]) removeMediaUrl(old[k], mediaInUse);
+      emitServerUpdated(server);
+      return { server: publicServer(server, user.id) };
+    });
+
+    on('server:transfer', ({ serverId, userId }) => {
+      const server = requireOwnerOnly(serverId, user);
+      const target = requireTargetMember(server, userId);
+      if (target.id === user.id) fail('Вы уже владелец');
+      server.ownerId = target.id;
+      permsChanged(server);
+      return { server: publicServer(server, user.id) };
+    });
+
+    // ---------- каналы ----------
     on('channel:create', ({ serverId, name, type }) => {
-      const server = requireOwner(serverId, user);
+      const server = requirePerm(serverId, user, PERMS.MANAGE_CHANNELS);
       if (type !== 'text' && type !== 'voice') fail('Тип канала: text или voice');
       const channels = serverChannels(server.id);
       if (channels.length >= 50) fail('Слишком много каналов на сервере (максимум 50)');
@@ -218,17 +379,233 @@ export function attachRealtime(io, { uploadsDir }) {
     on('channel:delete', ({ channelId }) => {
       const channel = typeof channelId === 'string' ? findChannel(channelId) : null;
       if (!channel) fail('Канал не найден');
-      const server = requireOwner(channel.serverId, user);
+      const server = requirePerm(channel.serverId, user, PERMS.MANAGE_CHANNELS);
       if (channel.type === 'text' && serverChannels(server.id).filter((c) => c.type === 'text').length <= 1) {
         fail('Нельзя удалить последний текстовый канал');
       }
       if (channel.type === 'voice') voice.clearChannel(channel.id);
       delete db.data.messages[channel.id];
+      delete server.channelOverwrites[channel.id];
       db.data.channels = db.data.channels.filter((c) => c.id !== channel.id);
       save();
       emitServerUpdated(server);
     });
 
+    on('channel:update', ({ channelId, name, overwrites }) => {
+      const channel = typeof channelId === 'string' ? findChannel(channelId) : null;
+      if (!channel) fail('Канал не найден');
+      const server = requirePerm(channel.serverId, user, PERMS.MANAGE_CHANNELS);
+      let clean = null, ows = null;
+      if (name !== undefined) clean = cleanName(name, { max: 32, what: 'Название канала' });
+      if (overwrites !== undefined) {
+        if (!isObj(overwrites)) fail('Права канала: нужен объект {roleId: {allow, deny}}');
+        ows = {};
+        let granted = 0;
+        for (const [roleId, ow] of Object.entries(overwrites)) {
+          if (!findRole(server, roleId)) fail('Роль не найдена');
+          if (!isObj(ow)) fail('Права канала: нужен объект {allow, deny}');
+          const allow = cleanPerms(ow.allow), deny = cleanPerms(ow.deny) & ~cleanPerms(ow.allow);
+          granted |= allow;
+          if (allow || deny) ows[roleId] = { allow, deny };
+        }
+        if (!canGrant(server, user.id, granted)) fail('Нельзя разрешить права, которых нет у вас');
+      }
+      if (clean === null && ows === null) fail('Нет изменений');
+      if (clean !== null) channel.name = clean;
+      if (ows !== null) {
+        if (Object.keys(ows).length) server.channelOverwrites[channel.id] = ows;
+        else delete server.channelOverwrites[channel.id];
+      }
+      permsChanged(server);
+      return { channel: publicChannel(channel) };
+    });
+
+    // ---------- роли ----------
+    function requireRoleManager(serverId) {
+      const server = requirePerm(serverId, user, PERMS.MANAGE_ROLES);
+      return { server, myPos: highestPosition(server, user.id) };
+    }
+
+    on('role:create', ({ serverId, name, color, permissions }) => {
+      const { server } = requireRoleManager(serverId);
+      if (server.roles.length >= MAX_ROLES + 1) fail(`Не больше ${MAX_ROLES} ролей на сервере`);
+      const perms = permissions === undefined ? 0 : cleanPerms(permissions);
+      if (!canGrant(server, user.id, perms)) fail('Нельзя выдать роли права, которых нет у вас');
+      const role = {
+        id: newId(), name: name === undefined ? 'новая роль' : cleanName(name, { max: 32, what: 'Название роли' }),
+        color: color === undefined ? null : cleanColor(color), permissions: perms,
+        position: 0.5, hoist: false, mentionable: false,
+      };
+      server.roles.push(role); // новая роль — сразу над @everyone
+      normalizePositions(server);
+      permsChanged(server);
+      return { role: { ...role }, server: publicServer(server, user.id) };
+    });
+
+    on('role:update', (p) => {
+      const { server, myPos } = requireRoleManager(p.serverId);
+      const role = findRole(server, p.roleId);
+      if (!role) fail('Роль не найдена');
+      const isEveryone = role.id === server.id;
+      if (!isEveryone && role.position >= myPos) fail('Можно менять только роли ниже вашей высшей роли');
+      const patch = {};
+      if (p.name !== undefined) {
+        if (isEveryone) fail('@everyone нельзя переименовать');
+        patch.name = cleanName(p.name, { max: 32, what: 'Название роли' });
+      }
+      if (p.color !== undefined) { if (isEveryone) fail('У @everyone нет цвета'); patch.color = cleanColor(p.color); }
+      if (p.hoist !== undefined) { if (typeof p.hoist !== 'boolean') fail('hoist: true/false'); if (!isEveryone) patch.hoist = p.hoist; }
+      if (p.mentionable !== undefined) { if (typeof p.mentionable !== 'boolean') fail('mentionable: true/false'); if (!isEveryone) patch.mentionable = p.mentionable; }
+      if (p.permissions !== undefined) {
+        const perms = cleanPerms(p.permissions);
+        const added = perms & ~role.permissions;
+        if (!canGrant(server, user.id, added)) fail('Нельзя выдать роли права, которых нет у вас');
+        patch.permissions = perms;
+      }
+      if (!Object.keys(patch).length) fail('Нет изменений');
+      Object.assign(role, patch);
+      permsChanged(server);
+      return { role: { ...role }, server: publicServer(server, user.id) };
+    });
+
+    on('role:delete', ({ serverId, roleId }) => {
+      const { server, myPos } = requireRoleManager(serverId);
+      const role = findRole(server, roleId);
+      if (!role) fail('Роль не найдена');
+      if (role.id === server.id) fail('@everyone удалить нельзя');
+      if (role.position >= myPos) fail('Можно удалять только роли ниже вашей высшей роли');
+      server.roles = server.roles.filter((r) => r.id !== role.id);
+      for (const [uid, ids] of Object.entries(server.memberRoles)) {
+        const rest = ids.filter((id) => id !== role.id);
+        if (rest.length) server.memberRoles[uid] = rest; else delete server.memberRoles[uid];
+      }
+      for (const [cid, ows] of Object.entries(server.channelOverwrites)) {
+        delete ows[role.id];
+        if (!Object.keys(ows).length) delete server.channelOverwrites[cid];
+      }
+      normalizePositions(server);
+      permsChanged(server);
+      return { server: publicServer(server, user.id) };
+    });
+
+    on('role:reorder', ({ serverId, roleIds }) => {
+      const { server, myPos } = requireRoleManager(serverId);
+      const rest = server.roles.filter((r) => r.id !== server.id);
+      if (!Array.isArray(roleIds) || roleIds.length !== rest.length || new Set(roleIds).size !== rest.length
+        || !roleIds.every((id) => rest.some((r) => r.id === id))) fail('Нужен полный список ролей (кроме @everyone) сверху вниз');
+      const n = rest.length;
+      const newPos = new Map(roleIds.map((id, i) => [id, n - i]));
+      if (myPos !== Infinity) {
+        for (const r of rest) {
+          // роли не ниже вашей не двигаются; свои роли нельзя поднять до/выше своей
+          if (r.position >= myPos && newPos.get(r.id) !== r.position) fail('Можно переставлять только роли ниже вашей высшей роли');
+          if (r.position < myPos && newPos.get(r.id) >= myPos) fail('Нельзя поднять роль выше своей');
+        }
+      }
+      for (const r of rest) r.position = newPos.get(r.id);
+      normalizePositions(server);
+      permsChanged(server);
+      return { server: publicServer(server, user.id) };
+    });
+
+    // ---------- участники ----------
+    on('member:roles', ({ serverId, userId, roleIds }) => {
+      const { server, myPos } = requireRoleManager(serverId);
+      const target = requireTargetMember(server, userId);
+      if (target.id !== user.id && !canActOn(server, user.id, target.id)) fail(HIERARCHY);
+      if (!Array.isArray(roleIds) || roleIds.some((id) => typeof id !== 'string')) fail('roleIds: список id ролей');
+      const wanted = new Set(roleIds.filter((id) => id !== server.id));
+      for (const id of wanted) if (!findRole(server, id)) fail('Роль не найдена');
+      const current = new Set(server.memberRoles[target.id] || []);
+      for (const id of new Set([...wanted, ...current])) {
+        if (wanted.has(id) === current.has(id)) continue; // не меняется
+        if (findRole(server, id).position >= myPos) fail('Можно выдавать и снимать только роли ниже вашей высшей роли');
+      }
+      const list = server.roles.filter((r) => wanted.has(r.id)).map((r) => r.id);
+      if (list.length) server.memberRoles[target.id] = list; else delete server.memberRoles[target.id];
+      permsChanged(server);
+      return { server: publicServer(server, user.id) };
+    });
+
+    on('member:kick', ({ serverId, userId }) => {
+      const server = requirePerm(serverId, user, PERMS.KICK_MEMBERS);
+      const target = requireTargetMember(server, userId);
+      if (target.id === user.id) fail('Нельзя выгнать себя — выйдите с сервера');
+      if (!canActOn(server, user.id, target.id)) fail(HIERARCHY);
+      removeMember(server, target.id, 'kick');
+    });
+
+    on('member:ban', ({ serverId, userId, reason, deleteMessages }) => {
+      const server = requirePerm(serverId, user, PERMS.BAN_MEMBERS);
+      const target = typeof userId === 'string' ? findUser(userId) : null;
+      if (!target) fail('Пользователь не найден');
+      if (target.isBot) fail('С ботом так нельзя');
+      if (target.id === user.id) fail('Нельзя заблокировать себя');
+      if (!canActOn(server, user.id, target.id)) fail(HIERARCHY);
+      server.bans[target.id] = { by: user.id, reason: str(reason).replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, 300), at: Date.now() };
+      if (deleteMessages === true) {
+        for (const c of serverChannels(server.id)) {
+          const list = db.data.messages[c.id];
+          if (!list) continue;
+          const removed = list.filter((m) => m.authorId === target.id);
+          if (!removed.length) continue;
+          db.data.messages[c.id] = list.filter((m) => m.authorId !== target.id);
+          for (const m of removed) emitToViewers(c.id, 'message:deleted', { channelId: c.id, messageId: m.id });
+        }
+      }
+      if (server.memberIds.includes(target.id)) removeMember(server, target.id, 'ban');
+      else { save(); emitServerUpdated(server); }
+    });
+
+    on('member:unban', ({ serverId, userId }) => {
+      const server = requirePerm(serverId, user, PERMS.BAN_MEMBERS);
+      if (typeof userId !== 'string' || !server.bans[userId]) fail('Этот пользователь не заблокирован');
+      delete server.bans[userId];
+      save();
+      emitServerUpdated(server);
+    });
+
+    on('member:voice', ({ serverId, userId, serverMute, serverDeafen, moveTo }) => {
+      const server = requireServerMember(serverId, user);
+      const target = requireTargetMember(server, userId);
+      const base = computeBase(server, user.id);
+      if (serverMute !== undefined && typeof serverMute !== 'boolean') fail('serverMute: true/false');
+      if (serverDeafen !== undefined && typeof serverDeafen !== 'boolean') fail('serverDeafen: true/false');
+      if (serverMute !== undefined && !has(base, PERMS.MUTE_MEMBERS)) fail(NO_PERM);
+      if (serverDeafen !== undefined && !has(base, PERMS.DEAFEN_MEMBERS)) fail(NO_PERM);
+      if (moveTo !== undefined && !has(base, PERMS.MOVE_MEMBERS)) fail(NO_PERM);
+      if (serverMute === undefined && serverDeafen === undefined && moveTo === undefined) fail('Нет изменений');
+      if (target.id !== user.id && !canActOn(server, user.id, target.id)) fail(HIERARCHY);
+
+      const inVoice = voice.allHumans().filter((h) => h.member.userId === target.id && findChannel(h.channelId)?.serverId === server.id);
+      let dest = null;
+      if (moveTo !== undefined && moveTo !== null) {
+        dest = typeof moveTo === 'string' ? findChannel(moveTo) : null;
+        if (!dest || dest.serverId !== server.id || dest.type !== 'voice') fail('Голосовой канал не найден');
+        if (!canViewChannel(server, dest.id, user.id) || !canViewChannel(server, dest.id, target.id)) fail('Нет доступа к этому каналу');
+      }
+      if (moveTo !== undefined && !inVoice.length) fail('Участник не в голосовом канале');
+
+      if (serverMute !== undefined || serverDeafen !== undefined) {
+        server.voiceModeration ||= {};
+        const mod = { ...modOf(server, target.id) };
+        if (serverMute !== undefined) mod.mute = serverMute;
+        if (serverDeafen !== undefined) mod.deafen = serverDeafen;
+        if (mod.mute || mod.deafen) server.voiceModeration[target.id] = mod;
+        else delete server.voiceModeration[target.id];
+        save();
+        for (const h of inVoice) voice.setModeration(h.socketId, voiceFlags(server, h.channelId, target.id));
+      }
+      if (moveTo !== undefined) {
+        for (const h of inVoice) {
+          if (dest && h.channelId === dest.id) continue;
+          if (dest) moveGrants.set(target.id, { channelId: dest.id, until: Date.now() + MOVE_GRANT_MS });
+          disconnectFromVoice(h.socketId, dest ? dest.id : null);
+        }
+      }
+    });
+
+    // ---------- сообщения ----------
     on('message:history', ({ channelId, before }) => {
       const { channel } = requireChannel(channelId, user, 'text');
       let list = db.data.messages[channel.id] || [];
@@ -237,25 +614,29 @@ export function attachRealtime(io, { uploadsDir }) {
     });
 
     on('message:send', ({ channelId, content, attachments }) => {
-      const { channel, server } = requireChannel(channelId, user, 'text');
+      const { channel, server, perms } = requireChannel(channelId, user, 'text');
+      if (!has(perms, PERMS.SEND_MESSAGES)) fail('Нет права писать в этот канал');
       if (content !== undefined && content !== null && typeof content !== 'string') fail('Некорректный текст сообщения');
       const text = str(content).replace(/\r\n/g, '\n').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '').trim();
       if (text.length > 2000) fail('Сообщение слишком длинное (максимум 2000 символов)');
       const atts = validateAttachments(attachments);
+      if (atts.length && !has(perms, PERMS.ATTACH_FILES)) fail('Нет права прикреплять файлы в этом канале');
       if (!text && atts.length === 0) fail('Нельзя отправить пустое сообщение');
       const now = Date.now();
       if (now > limiter.reset) { limiter.count = 0; limiter.reset = now + 10_000; }
       if (++limiter.count > 25) fail('Слишком много сообщений подряд — подождите пару секунд');
 
-      const msg = addMessage({ channelId: channel.id, authorId: user.id, content: text, attachments: atts });
+      const mentionEveryone = /(^|[^\w@])@(everyone|here)\b/.test(text) && has(perms, PERMS.MENTION_EVERYONE);
+      const msg = addMessage({ channelId: channel.id, authorId: user.id, content: text, attachments: atts, mentionEveryone });
       const message = publicMessage(msg);
-      io.to(serverRoom(server.id)).emit('message:new', { message });
+      emitToViewers(channel.id, 'message:new', { message });
 
       const cmd = text.match(/^!([\p{L}\d]+)(?:\s+([\s\S]*))?$/u);
       if (cmd) {
         const command = cmd[1].toLowerCase();
         const args = (cmd[2] || '').trim();
-        if (isBotOnline()) forwardCommand({ command, args, user, serverId: server.id, textChannelId: channel.id });
+        if (!has(perms, PERMS.USE_MUSIC_BOT)) setTimeout(() => sendSystem(channel, NO_MUSIC_PERM), 50);
+        else if (isBotOnline()) forwardCommand({ command, args, user, serverId: server.id, textChannelId: channel.id });
         else setTimeout(() => sendSystem(channel, BOT_OFFLINE_TEXT), 50);
       }
       return { message };
@@ -269,10 +650,12 @@ export function attachRealtime(io, { uploadsDir }) {
         const channel = findChannel(channelId);
         const server = channel && findServer(channel.serverId);
         if (!isMember(server, user.id)) fail('Сообщение не найдено');
-        if (list[idx].authorId !== user.id && server.ownerId !== user.id) fail('Удалять можно только свои сообщения');
+        const perms = computeChannel(server, channelId, user.id);
+        if (!has(perms, PERMS.VIEW_CHANNEL)) fail('Сообщение не найдено');
+        if (list[idx].authorId !== user.id && !has(perms, PERMS.MANAGE_MESSAGES)) fail('Удалять можно только свои сообщения');
         list.splice(idx, 1);
         save();
-        io.to(serverRoom(server.id)).emit('message:deleted', { channelId, messageId });
+        emitToViewers(channelId, 'message:deleted', { channelId, messageId });
         return;
       }
       fail('Сообщение не найдено');
@@ -280,19 +663,32 @@ export function attachRealtime(io, { uploadsDir }) {
 
     socket.on('typing', (payload) => {
       try {
-        const { channel } = requireChannel(payload?.channelId, user, 'text');
-        socket.to(serverRoom(channel.serverId)).emit('typing', { channelId: channel.id, user: publicUser(user) });
+        const { channel, perms } = requireChannel(payload?.channelId, user, 'text');
+        if (!has(perms, PERMS.SEND_MESSAGES)) return;
+        emitToViewers(channel.id, 'typing', { channelId: channel.id, user: publicUser(user) }, null, { except: socket.id });
       } catch { /* молча игнорируем */ }
     });
 
+    // ---------- голос ----------
     on('voice:join', ({ channelId }) => {
-      const { channel } = requireChannel(channelId, user, 'voice');
-      return voice.join(socket, user, channel);
+      const { channel, server, perms } = requireChannel(channelId, user, 'voice');
+      const grant = moveGrants.get(user.id);
+      const moved = grant && grant.channelId === channel.id && grant.until > Date.now();
+      if (moved) moveGrants.delete(user.id);
+      if (!has(perms, PERMS.CONNECT) && !moved) fail('Нет права подключаться к этому каналу');
+      return voice.join(socket, user, channel, voiceFlags(server, channel.id, user.id));
     });
 
     on('voice:leave', () => { voice.leave(socket); });
 
-    socket.on('voice:state', (payload) => { if (isObj(payload)) voice.updateState(socket, payload); });
+    socket.on('voice:state', (payload) => {
+      if (!isObj(payload)) return;
+      const chId = voice.channelOf(socket.id);
+      const ch = chId && findChannel(chId);
+      const server = ch && findServer(ch.serverId);
+      const allowStream = !!server && has(computeChannel(server, ch.id, user.id), PERMS.STREAM);
+      voice.updateState(socket, payload, { allowStream });
+    });
     socket.on('voice:signal', (payload) => { if (isObj(payload)) voice.signal(socket, payload); });
     socket.on('voice:speaking', (payload) => { if (isObj(payload)) voice.speaking(socket, payload.speaking); });
 
@@ -300,16 +696,18 @@ export function attachRealtime(io, { uploadsDir }) {
       const cmd = str(command).trim().toLowerCase();
       if (!BOT_COMMANDS.includes(cmd)) fail('Неизвестная команда');
       if (args !== undefined && args !== null && typeof args !== 'string') fail('Некорректные аргументы');
-      if (!isBotOnline()) fail('Музыкальный бот не запущен');
       const vc = voice.channelOf(socket.id) || voice.userVoiceChannel(user.id);
       const channel = vc && findChannel(vc);
+      const server = channel && findServer(channel.serverId);
+      if (server && !has(computeChannel(server, channel.id, user.id), PERMS.USE_MUSIC_BOT)) fail(NO_MUSIC_PERM);
+      if (!isBotOnline()) fail('Музыкальный бот не запущен');
       if (!channel) fail('Зайди в голосовой канал');
       forwardCommand({ command: cmd, args: str(args).trim().slice(0, 500), user, serverId: channel.serverId, textChannelId: null });
     });
 
     socket.on('disconnect', () => {
       voice.leave(socket);
-      if (removeOnlineSocket(user.id, socket.id)) emitPresence(user.id, false);
+      if (removeOnlineSocket(user.id, socket.id) && findUser(user.id)?.status !== 'invisible') emitPresence(user.id);
     });
   });
 
@@ -325,7 +723,7 @@ export function attachRealtime(io, { uploadsDir }) {
     }
     botSocket = socket;
     socket.join('bot');
-    if (addOnlineSocket(bot.id, socket.id)) emitPresence(bot.id, true);
+    if (addOnlineSocket(bot.id, socket.id)) emitPresence(bot.id);
     io.emit('bot:status', { online: true });
     console.log('[bot] DJ Бот подключён');
 
@@ -351,7 +749,7 @@ export function attachRealtime(io, { uploadsDir }) {
       const text = str(content).trim().slice(0, 2000);
       if (!text) fail('Пустое сообщение');
       const msg = addMessage({ channelId: channel.id, authorId: bot.id, content: text });
-      io.to(serverRoom(channel.serverId)).emit('message:new', { message: publicMessage(msg) });
+      emitToViewers(channel.id, 'message:new', { message: publicMessage(msg) });
     });
 
     botOn('bot:voice-join', ({ channelId }) => {
@@ -393,7 +791,7 @@ export function attachRealtime(io, { uploadsDir }) {
     });
 
     socket.on('disconnect', () => {
-      if (removeOnlineSocket(bot.id, socket.id)) emitPresence(bot.id, false);
+      if (removeOnlineSocket(bot.id, socket.id)) emitPresence(bot.id);
       if (botSocket?.id !== socket.id) return; // заменён новым экземпляром
       botSocket = null;
       voice.botGone();
@@ -403,13 +801,28 @@ export function attachRealtime(io, { uploadsDir }) {
   }
 
   // ---------- профиль ----------
-  // user:updated {user} — самому пользователю (все вкладки) и всем, кто делит с ним сервер
-  function emitUserUpdated(userRec) {
-    const user = publicUser(userRec);
-    const rooms = [userRoom(userRec.id), ...userServers(userRec.id).map((s) => serverRoom(s.id))];
-    io.to(rooms).emit('user:updated', { user });
+  // user:updated {user} — самому (все вкладки, реальный статус) и всем, кто делит с ним сервер (публичный вид)
+  function emitUserUpdated(userRec, { statusChanged = false } = {}) {
+    const others = userServers(userRec.id).map((s) => serverRoom(s.id));
+    io.to(userRoom(userRec.id)).emit('user:updated', { user: publicUser(userRec, { self: true }) });
+    if (others.length) io.to(others).except(userRoom(userRec.id)).emit('user:updated', { user: publicUser(userRec) });
     voice.updateUser(userRec);
+    if (statusChanged) emitPresence(userRec.id);
   }
+
+  // Истёкшие кастомные статусы — сбросить и разослать
+  const sweep = setInterval(() => {
+    let changed = false;
+    for (const u of db.data.users) {
+      if (u.customStatus && !activeCustomStatus(u)) {
+        u.customStatus = null;
+        changed = true;
+        emitUserUpdated(u);
+      }
+    }
+    if (changed) save();
+  }, 30_000);
+  sweep.unref();
 
   // Смена пароля: сокеты удалённых сессий отключаем (при переподключении — connect_error 'unauthorized')
   function disconnectSessions(userId, tokens) {
@@ -420,5 +833,7 @@ export function attachRealtime(io, { uploadsDir }) {
     }
   }
 
-  return { isBotOnline, emitUserUpdated, disconnectSessions };
+  return { isBotOnline, emitUserUpdated, disconnectSessions, emitServerUpdated };
 }
+
+export { ALL_PERMS };

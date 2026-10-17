@@ -1,0 +1,28 @@
+{
+  "name": "sozvon-desktop",
+  "productName": "Sozvon",
+  "version": "1.0.0",
+  "description": "Созвон — приложение для ПК",
+  "author": "Sozvon",
+  "license": "UNLICENSED",
+  "private": true,
+  "main": "src/main.js",
+  "homepage": "https://89-108-81-153.sslip.io",
+  "scripts": {
+    "start": "electron .",
+    "icons": "node scripts/make-icons.mjs",
+    "pack": "electron-builder --dir",
+    "dist:win": "electron-builder --win nsis zip --x64",
+    "dist:linux": "electron-builder --linux AppImage --x64",
+    "dist": "electron-builder --win nsis zip --x64 --linux AppImage --x64",
+    "check": "node --check src/main.js && node --check src/preload.js && node --check src/setup-preload.js && node --check src/keymap.js"
+  },
+  "dependencies": {
+    "uiohook-napi": "1.5.5"
+  },
+  "devDependencies": {
+    "electron": "44.8.0",
+    "electron-builder": "26.15.3",
+    "sharp": "0.35.5"
+  }
+}

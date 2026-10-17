@@ -49,4 +49,23 @@ export const api = {
     return request('POST', '/api/music/upload', fd);
   },
   musicImport: (url) => request('POST', '/api/music/import', { url }),
+  // v3: профиль
+  patchMe: (body) => request('PATCH', '/api/me', body),
+  uploadAvatar: (file, crop) => request('POST', '/api/me/avatar', mediaForm(file, crop)),
+  deleteAvatar: () => request('DELETE', '/api/me/avatar'),
+  uploadBanner: (file, crop) => request('POST', '/api/me/banner', mediaForm(file, crop)),
+  deleteBanner: () => request('DELETE', '/api/me/banner'),
+  // v3: иконка/баннер сервера (MANAGE_SERVER)
+  uploadServerIcon: (serverId, file, crop) => request('POST', `/api/servers/${encodeURIComponent(serverId)}/icon`, mediaForm(file, crop)),
+  uploadServerBanner: (serverId, file, crop) => request('POST', `/api/servers/${encodeURIComponent(serverId)}/banner`, mediaForm(file, crop)),
+  // v3: приложение для ПК
+  appLatest: () => request('GET', '/api/app/latest', undefined, { auth: false }),
 };
+
+/** multipart: file + необязательное кадрирование {x,y,size} или {x,y,width,height} в пикселях исходника */
+function mediaForm(file, crop) {
+  const fd = new FormData();
+  if (crop) for (const [k, v] of Object.entries(crop)) if (Number.isFinite(v)) fd.append(k, String(Math.round(v)));
+  fd.append('file', file, file.name || 'image.png');
+  return fd;
+}

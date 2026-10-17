@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:">
+<title>Созвон — сервер</title>
+<link rel="stylesheet" href="ui/app.css">
+</head>
+<body>
+<main class="card">
+  <div class="logo"><img src="assets/logo-128.png" alt=""><div><h1 id="title">Добро пожаловать в Созвон</h1></div></div>
+  <p id="lead">Укажите адрес сервера. Если вас пригласили друзья — возьмите адрес у них. По умолчанию — общий сервер.</p>
+  <form id="form" autocomplete="off">
+    <label for="url">Адрес сервера</label>
+    <input id="url" type="text" spellcheck="false" placeholder="https://89-108-81-153.sslip.io">
+    <div class="hint">Например: <button type="button" class="link" id="useDefault"></button></div>
+    <div class="cert" id="cert">
+      <b>Сертификат сервера не подтверждён.</b> Обычно это самоподписанный сертификат домашнего сервера.
+      Доверяйте, только если это ваш сервер или сервер друзей и вы уверены в адресе.
+      <code id="certInfo"></code>
+      <label><input type="checkbox" id="trust"> Я доверяю этому серверу (только этому адресу и этому сертификату)</label>
+    </div>
+    <div class="status" id="status" role="status"></div>
+    <div class="row">
+      <button type="button" id="cancel">Отмена</button>
+      <button type="button" id="check">Проверить</button>
+      <button type="submit" class="primary" id="save">Подключиться</button>
+    </div>
+  </form>
+</main>
+<script src="ui/setup.js"></script>
+</body>
+</html>

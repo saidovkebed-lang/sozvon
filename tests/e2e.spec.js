@@ -1,7 +1,7 @@
 // UI-сценарии по критериям приёмки SPEC §6 (два browser context = два пользователя)
 import {
   test, expect, registerUI, loginUI, loginViaToken, createServerUI, joinServerUI, inviteCode,
-  channel, openTextChannel, joinVoiceUI, sendMessageUI, messageWith, twoUsersOneServer, noHorizontalScroll,
+  channel, openTextChannel, joinVoiceUI, sendMessageUI, messageWith, twoUsersOneServer, noHorizontalScroll, startScreenShare,
 } from './fixtures/ui.js';
 import { startBot, http, uniqueName } from './fixtures/api.js';
 import { ensureMedia } from './fixtures/media.js';
@@ -156,7 +156,7 @@ test.describe('Критерий 4–5: голос и стрим экрана', (
     await expect(vuA_onB.locator('use[href$="#i-mic-off"]')).toHaveCount(0);
 
     // стрим экрана: A → у B .tile--screen video с videoWidth>0 и LIVE в сайдбаре
-    await pa.locator('#ctrl-screen').click();
+    await startScreenShare(pa); // v3: через #modal-stream
     await expect(pa.locator('#ctrl-screen')).toHaveClass(/is-on/);
     const screenB = pb.locator('#stage-grid .tile.tile--screen video');
     await expect(screenB).toHaveCount(1, { timeout: 20000 });
@@ -359,7 +359,7 @@ test.describe('Расширенные: голос', () => {
     await expect(vuB_onA.locator('use[href$="#i-headphones-off"]')).toHaveCount(0);
 
     // A стримит, C заходит позже → у C есть экран A
-    await pa.locator('#ctrl-screen').click();
+    await startScreenShare(pa); // v3: через #modal-stream
     await expect(pb.locator('#stage-grid .tile.tile--screen video')).toHaveCount(1, { timeout: 20000 });
     const pc = await makePage({ name: 'C' });
     await loginViaToken(pc, 'uc');

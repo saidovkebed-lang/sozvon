@@ -22,6 +22,8 @@ export const state = {
   streaming: false,
   camera: false,
   connected: false,
+  serverMuted: false,      // v3: серверный mute/deafen моего голосового участника
+  serverDeafened: false,
 };
 
 const subs = new Map();
@@ -90,25 +92,77 @@ export function musicElapsed(ms) {
   return Math.max(0, el);
 }
 
+export const PROFILE_FIELDS = ['username', 'color', 'displayName', 'avatar', 'avatarAnimated', 'banner', 'bannerAnimated',
+  'bannerColor', 'about', 'pronouns', 'status', 'customStatus', 'profileTheme', 'createdAt'];
+
+function mergeProfile(target, user) {
+  for (const k of PROFILE_FIELDS) if (k in user) target[k] = user[k];
+}
+
 /** user:updated {user} — обновить пользователя везде: я, участники серверов, голос, авторы сообщений. */
 export function applyUserUpdate(user) {
   if (!user || !user.id) return false;
-  const pick = (o) => {
-    if (!o || o.id !== user.id) return;
-    if (user.color) o.color = user.color;
-    if (user.username) o.username = user.username;
-  };
+  const pick = (o) => { if (o && o.id === user.id) mergeProfile(o, user); };
   if (state.user?.id === user.id) state.user = { ...state.user, ...user };
-  for (const s of state.servers) for (const m of s.members || []) pick(m);
+  for (const s of state.servers) {
+    for (const m of s.members || []) {
+      if (m.id !== user.id) continue;
+      // свой статус (invisible) другим виден как offline — у участника его не трогаем из своего user:updated
+      const keepStatus = user.id === state.user?.id ? m.status : null;
+      mergeProfile(m, user);
+      if (keepStatus && user.status === 'invisible') m.status = keepStatus;
+      if ('online' in user) m.online = user.online;
+    }
+  }
   for (const list of Object.values(state.voice)) {
     for (const m of list || []) {
-      if (m.userId === user.id) {
-        if (user.color) m.color = user.color;
-        if (user.username) m.username = user.username;
-      }
+      if (m.userId === user.id) for (const k of ['username', 'color', 'displayName', 'avatar', 'avatarAnimated']) if (k in user) m[k] = user[k];
     }
   }
   for (const list of Object.values(state.messages)) for (const msg of list || []) pick(msg.author);
-  notify('me', 'servers', 'voice', 'presence', 'messages');
+  notify('me', 'servers', 'voice', 'presence', 'messages', 'profile');
   return true;
+}
+
+/** Самые свежие данные пользователя: участник сервера → я → автор/голос */
+export function findUser(userId, server = null) {
+  if (!userId) return null;
+  if (state.user?.id === userId) {
+    const m = (server || getServer())?.members?.find((x) => x.id === userId);
+    return { ...(m || {}), ...state.user };
+  }
+  const srvs = server ? [server, ...state.servers] : [getServer(), ...state.servers];
+  for (const s of srvs) {
+    const m = s?.members?.find((x) => x.id === userId);
+    if (m) return m;
+  }
+  for (const list of Object.values(state.voice)) {
+    const m = (list || []).find((x) => x.userId === userId);
+    if (m) return { id: userId, username: m.username, color: m.color, displayName: m.displayName, avatar: m.avatar, avatarAnimated: m.avatarAnimated, isBot: m.isBot };
+  }
+  return null;
+}
+
+/** Эффективный статус для отображения: online|idle|dnd|offline */
+export function presenceOf(u) {
+  if (!u) return 'offline';
+  if (u.isBot) return u.online ? 'online' : 'offline';
+  const st = u.status;
+  if (u.id === state.user?.id) {
+    const mine = state.user?.status || 'online';
+    return mine === 'invisible' ? 'offline' : (state.connected ? mine : 'offline');
+  }
+  if (u.online === false || st === 'offline' || st === 'invisible') return 'offline';
+  if (st === 'idle' || st === 'dnd') return st;
+  return u.online ? 'online' : 'offline';
+}
+
+export const STATUS_LABELS = { online: 'В сети', idle: 'Не активен', dnd: 'Не беспокоить', invisible: 'Невидимый', offline: 'Не в сети' };
+
+/** Кастомный статус, если он не истёк */
+export function activeCustomStatus(u) {
+  const cs = u?.customStatus;
+  if (!cs || (!cs.text && !cs.emoji)) return null;
+  if (cs.expiresAt && cs.expiresAt <= Date.now()) return null;
+  return cs;
 }

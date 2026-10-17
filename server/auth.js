@@ -4,7 +4,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import { db, save, newId } from './db.js';
-import { findUser, findUserByName, getBotUser, randomColor, publicUser, BOT_USERNAME } from './model.js';
+import { findUser, findUserByName, getBotUser, randomColor, publicUser, BOT_USERNAME, migrateUser, USER_STATUSES } from './model.js';
 
 let botToken = null;
 
@@ -68,9 +68,10 @@ export async function register(body) {
     id: newId(), username, usernameLower: username.toLowerCase(), passwordHash,
     color: randomColor(), isBot: false, createdAt: Date.now(),
   };
+  migrateUser(user);
   db.data.users.push(user);
   save();
-  return { token: createSession(user.id), user: publicUser(user) };
+  return { token: createSession(user.id), user: publicUser(user, { self: true }) };
 }
 
 export async function login(body) {
@@ -81,7 +82,7 @@ export async function login(body) {
   if (!user || user.isBot || !user.passwordHash || !(await bcrypt.compare(password, user.passwordHash))) {
     throw new HttpError(401, 'Неверное имя пользователя или пароль');
   }
-  return { token: createSession(user.id), user: publicUser(user) };
+  return { token: createSession(user.id), user: publicUser(user, { self: true }) };
 }
 
 export function userByToken(token) {
@@ -108,13 +109,89 @@ export function requireAuth(req, res, next) {
 }
 
 // ---------- профиль ----------
-export function updateColor(user, body) {
-  const color = typeof body?.color === 'string' ? body.color.trim().toLowerCase() : '';
-  if (!/^#[0-9a-f]{6}$/.test(color)) throw new HttpError(400, 'Цвет нужно указать в формате #rrggbb');
-  if (user.isBot) throw new HttpError(403, 'Боту цвет менять нельзя');
-  user.color = color;
+const HEX = /^#[0-9a-f]{6}$/;
+const CTRL = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g;
+
+function hexOrNull(v, what) {
+  if (v === null || v === '') return null;
+  const c = typeof v === 'string' ? v.trim().toLowerCase() : '';
+  if (!HEX.test(c)) throw new HttpError(400, `${what}: нужен цвет в формате #rrggbb`);
+  return c;
+}
+
+function text(v, max, what, { multiline = false } = {}) {
+  if (v === null) return '';
+  if (typeof v !== 'string') throw new HttpError(400, `${what}: нужен текст`);
+  let t = v.replace(/\r\n/g, '\n').replace(CTRL, '');
+  if (!multiline) t = t.replace(/\s+/g, ' ');
+  t = t.trim();
+  if (multiline) t = t.replace(/\n{3,}/g, '\n\n');
+  if ([...t].length > max) throw new HttpError(400, `${what}: не больше ${max} символов`);
+  return t;
+}
+
+/**
+ * PATCH /api/me: color, displayName, bannerColor, about, pronouns, status, customStatus, profileTheme.
+ * Все поля необязательны; проверяются все, применяются только если все верны. Возвращает {user, changed}.
+ */
+export function updateProfile(user, body) {
+  if (user.isBot) throw new HttpError(403, 'Боту профиль менять нельзя');
+  if (!body || typeof body !== 'object' || Array.isArray(body)) throw new HttpError(400, 'Нужен JSON-объект');
+  const patch = {};
+  if ('color' in body) {
+    const c = hexOrNull(body.color, 'Цвет');
+    if (!c) throw new HttpError(400, 'Цвет нужно указать в формате #rrggbb');
+    patch.color = c;
+  }
+  if ('displayName' in body) {
+    const n = text(body.displayName ?? '', 32, 'Отображаемое имя');
+    if (n && /[<>]/.test(n)) throw new HttpError(400, 'Отображаемое имя содержит недопустимые символы');
+    patch.displayName = n || null;
+  }
+  if ('bannerColor' in body) patch.bannerColor = hexOrNull(body.bannerColor, 'Цвет баннера');
+  if ('about' in body) patch.about = text(body.about ?? '', 190, '«Обо мне»', { multiline: true });
+  if ('pronouns' in body) patch.pronouns = text(body.pronouns ?? '', 40, 'Местоимения');
+  if ('status' in body) {
+    if (!USER_STATUSES.includes(body.status)) throw new HttpError(400, 'Статус: online, idle, dnd или invisible');
+    patch.status = body.status;
+  }
+  if ('customStatus' in body) {
+    const cs = body.customStatus;
+    if (cs === null) patch.customStatus = null;
+    else {
+      if (typeof cs !== 'object' || Array.isArray(cs)) throw new HttpError(400, 'Некорректный пользовательский статус');
+      const emoji = cs.emoji == null || cs.emoji === '' ? null : text(cs.emoji, 8, 'Эмодзи статуса');
+      const t = text(cs.text ?? '', 128, 'Текст статуса');
+      let expiresAt = null;
+      if (cs.expiresAt != null) {
+        if (!Number.isFinite(cs.expiresAt)) throw new HttpError(400, 'expiresAt: время в мс');
+        if (cs.expiresAt <= Date.now()) throw new HttpError(400, 'Время окончания статуса уже прошло');
+        expiresAt = Math.floor(cs.expiresAt);
+      }
+      patch.customStatus = !emoji && !t ? null : { emoji, text: t, expiresAt };
+    }
+  }
+  if ('profileTheme' in body) {
+    const th = body.profileTheme;
+    if (th === null) patch.profileTheme = null;
+    else {
+      if (typeof th !== 'object' || Array.isArray(th)) throw new HttpError(400, 'Некорректная тема профиля');
+      const primary = hexOrNull(th.primary, 'Тема профиля (основной)');
+      const accent = hexOrNull(th.accent, 'Тема профиля (акцент)');
+      if (!primary || !accent) throw new HttpError(400, 'Тема профиля: нужны оба цвета #rrggbb');
+      patch.profileTheme = { primary, accent };
+    }
+  }
+  if (Object.keys(patch).length === 0) throw new HttpError(400, 'Нет полей для изменения');
+  const prevStatus = user.status;
+  Object.assign(user, patch);
   save();
-  return publicUser(user);
+  return { user: publicUser(user, { self: true }), statusChanged: 'status' in patch && patch.status !== prevStatus, prevStatus };
+}
+
+// совместимость с v2
+export function updateColor(user, body) {
+  return updateProfile(user, { color: body?.color }).user;
 }
 
 /** Смена пароля: все сессии, кроме текущей (keepToken), удаляются. Возвращает удалённые токены. */

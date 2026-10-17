@@ -354,10 +354,11 @@ test.describe('Socket.IO: сообщения', () => {
     expect(empty.json.error).toBeTruthy();
   });
 
-  test('вложения: > 25 МБ → ошибка {error}', async () => {
+  // v3: лимит поднят до UPLOAD_LIMIT_MB=100 (SPEC-v3 §2.2) — было «> 25 МБ», адаптировано qa
+  test('вложения: > 100 МБ → ошибка {error}', async () => {
     const a = await registerApi();
     const fd = new FormData();
-    fd.append('file', new Blob([Buffer.alloc(26 * 1024 * 1024, 1)], { type: 'application/octet-stream' }), 'big.bin');
+    fd.append('file', new Blob([Buffer.alloc(101 * 1024 * 1024, 1)], { type: 'application/octet-stream' }), 'big.bin');
     const r = await http('POST', '/api/attachments', { token: a.token, body: fd });
     expect(r.status).toBeGreaterThanOrEqual(400);
     expect(r.status).toBeLessThan(500);

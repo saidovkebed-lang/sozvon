@@ -2,10 +2,15 @@
 import { findChannel } from './model.js';
 
 const voiceRoom = (channelId) => `voice:${channelId}`;
-const serverRoom = (serverId) => `server:${serverId}`;
 const botSocketId = (channelId) => `bot-${channelId}`;
 
-export function createVoice(io, { getBotSocket }) {
+// Поля пользователя в карточке голосового участника
+const userFields = (u) => ({
+  username: u.username, displayName: u.displayName ?? null, color: u.color,
+  avatar: u.avatar ?? null, avatarAnimated: u.avatarAnimated ?? null,
+});
+
+export function createVoice(io, { getBotSocket, emitToViewers }) {
   const rooms = new Map();        // channelId -> Map(socketId -> VoiceMember)
   const socketChannel = new Map(); // socketId -> channelId (только люди)
   const musicStates = new Map();  // channelId -> MusicState (без serverNow)
@@ -16,7 +21,7 @@ export function createVoice(io, { getBotSocket }) {
   function broadcastMembers(channelId, serverId) {
     const sid = serverId || findChannel(channelId)?.serverId;
     if (!sid) return;
-    io.to(serverRoom(sid)).emit('voice:members', { channelId, members: members(channelId) });
+    emitToViewers(channelId, 'voice:members', { channelId, members: members(channelId) });
   }
 
   function musicFor(channelId) {
@@ -75,7 +80,7 @@ export function createVoice(io, { getBotSocket }) {
     return channelId;
   }
 
-  function join(socket, user, channel) {
+  function join(socket, user, channel, { serverMute = false, serverDeafen = false } = {}) {
     removeSocket(socket.id);
     // Пользователь — только в одном голосовом канале (даже из разных вкладок)
     for (const [sid, chId] of [...socketChannel]) {
@@ -85,8 +90,9 @@ export function createVoice(io, { getBotSocket }) {
     let room = rooms.get(channel.id);
     if (!room) rooms.set(channel.id, (room = new Map()));
     const member = {
-      socketId: socket.id, userId: user.id, username: user.username, color: user.color, isBot: false,
+      socketId: socket.id, userId: user.id, ...userFields(user), isBot: false,
       muted: false, deafened: false, streaming: false, camera: false,
+      serverMute: !!serverMute, serverDeafen: !!serverDeafen,
     };
     const peers = members(channel.id);
     room.set(socket.id, member);
@@ -97,15 +103,40 @@ export function createVoice(io, { getBotSocket }) {
     return { peers, music: musicFor(channel.id) };
   }
 
-  function updateState(socket, patch) {
+  // allowStream=false — нет права STREAM: включить экран/камеру нельзя (выключить можно)
+  function updateState(socket, patch, { allowStream = true } = {}) {
     const channelId = socketChannel.get(socket.id);
     const m = channelId && rooms.get(channelId)?.get(socket.id);
     if (!m) return;
     let changed = false;
     for (const key of ['muted', 'deafened', 'streaming', 'camera']) {
-      if (typeof patch?.[key] === 'boolean' && m[key] !== patch[key]) { m[key] = patch[key]; changed = true; }
+      if (typeof patch?.[key] !== 'boolean' || m[key] === patch[key]) continue;
+      if ((key === 'streaming' || key === 'camera') && patch[key] && !allowStream) continue;
+      m[key] = patch[key]; changed = true;
     }
     if (changed) broadcastMembers(channelId);
+  }
+
+  /** Серверный mute/deafen участника (по socketId). */
+  function setModeration(socketId, { serverMute, serverDeafen }) {
+    const channelId = socketChannel.get(socketId);
+    const m = channelId && rooms.get(channelId)?.get(socketId);
+    if (!m) return false;
+    let changed = false;
+    if (typeof serverMute === 'boolean' && m.serverMute !== serverMute) { m.serverMute = serverMute; changed = true; }
+    if (typeof serverDeafen === 'boolean' && m.serverDeafen !== serverDeafen) { m.serverDeafen = serverDeafen; changed = true; }
+    if (changed) broadcastMembers(channelId);
+    return changed;
+  }
+
+  /** Все люди в голосовых каналах: [{socketId, channelId, member}]. */
+  function allHumans() {
+    const out = [];
+    for (const [sid, channelId] of socketChannel) {
+      const m = rooms.get(channelId)?.get(sid);
+      if (m) out.push({ socketId: sid, channelId, member: { ...m } });
+    }
+    return out;
   }
 
   function speaking(socket, flag) {
@@ -132,8 +163,8 @@ export function createVoice(io, { getBotSocket }) {
     const id = botSocketId(channel.id);
     if (room.has(id)) return;
     const member = {
-      socketId: id, userId: botUser.id, username: botUser.username, color: botUser.color, isBot: true,
-      muted: false, deafened: false, streaming: false, camera: false,
+      socketId: id, userId: botUser.id, ...userFields(botUser), isBot: true,
+      muted: false, deafened: false, streaming: false, camera: false, serverMute: false, serverDeafen: false,
     };
     room.set(id, member);
     io.to(voiceRoom(channel.id)).emit('voice:peer-joined', { peer: { ...member } });
@@ -152,7 +183,7 @@ export function createVoice(io, { getBotSocket }) {
 
   function setMusicState(state, serverId) {
     musicStates.set(state.channelId, state);
-    io.to(serverRoom(serverId)).emit('music:state', { ...state, serverNow: Date.now() });
+    emitToViewers(state.channelId, 'music:state', { ...state, serverNow: Date.now() }, serverId);
   }
 
   // Бот отключился: убрать его из всех каналов и остановить музыку у всех
@@ -162,9 +193,9 @@ export function createVoice(io, { getBotSocket }) {
       const ch = findChannel(channelId);
       musicStates.delete(channelId);
       if (ch && (st.track || st.queue?.length)) {
-        io.to(serverRoom(ch.serverId)).emit('music:state', {
+        emitToViewers(channelId, 'music:state', {
           channelId, track: null, queue: [], paused: false, position: 0, updatedAt: Date.now(), serverNow: Date.now(),
-        });
+        }, ch.serverId);
       }
     }
   }
@@ -193,12 +224,14 @@ export function createVoice(io, { getBotSocket }) {
     }
   }
 
-  // Пользователь сменил цвет — обновить карточки в голосовых каналах
+  // Пользователь сменил профиль (цвет, имя, аватар) — обновить карточки в голосовых каналах
   function updateUser(user) {
+    const f = userFields(user);
     for (const [channelId, room] of rooms) {
       let changed = false;
       for (const m of room.values()) {
-        if (!m.isBot && m.userId === user.id && m.color !== user.color) { m.color = user.color; changed = true; }
+        if (m.isBot || m.userId !== user.id) continue;
+        for (const [k, v] of Object.entries(f)) if (m[k] !== v) { m[k] = v; changed = true; }
       }
       if (changed) broadcastMembers(channelId);
     }
@@ -208,7 +241,7 @@ export function createVoice(io, { getBotSocket }) {
     updateUser,
     members, humans, broadcastMembers, musicFor, snapshotFor, userVoiceChannel, botChannelOnServer,
     join, leave: (socket) => removeSocket(socket.id), removeSocket, updateState, speaking, signal,
-    botJoin, botLeave, setMusicState, botGone, clearChannel, kickUserFromServer,
+    botJoin, botLeave, setMusicState, botGone, clearChannel, kickUserFromServer, setModeration, allHumans,
     channelOf: (socketId) => socketChannel.get(socketId) || null,
   };
 }
