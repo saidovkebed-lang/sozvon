@@ -97,6 +97,43 @@ function parseLink(link) {
   bad(`тип ссылки «${scheme || s.slice(0, 10)}» не поддерживается (нужны vless/vmess/trojan/ss или ссылка на подписку)`);
 }
 
+// Заглушка вместо сервера: панели (Remnawave, Marzban…) так отвечают неизвестному приложению
+const isStub = (l) => { try { const p = parseLink(l); return !p.host || p.host === '0.0.0.0' || p.host === '127.0.0.1' || p.port <= 1; } catch { return false; } };
+const toLinks = (text) => {
+  const plain = /:\/\//.test(text) ? text : b64(text);
+  return plain.split(/\r?\n/).map((l) => l.trim()).filter((l) => /^(vless|vmess|trojan|ss):\/\//i.test(l));
+};
+/** Подписку скачиваем, представляясь разными клиентами, пока не придут настоящие серверы */
+async function fetchSubscription(url) {
+  const { createHash } = await import('node:crypto');
+  const { readFileSync } = await import('node:fs');
+  const { hostname } = await import('node:os');
+  let mid = hostname();
+  try { mid = readFileSync('/etc/machine-id', 'utf8').trim(); } catch { /* нет machine-id */ }
+  const hwid = createHash('sha256').update(`astra-vpn:${mid}`).digest('hex').slice(0, 16);
+  const device = { 'x-hwid': hwid, 'x-device-os': 'Android', 'x-ver-os': '14', 'x-device-model': 'Astra server' };
+  const agents = process.env.VPN_SUB_UA ? [process.env.VPN_SUB_UA]
+    : ['v2rayNG/1.10.23', 'Happ/3.7.0', 'v2RayTun/5.13.0', 'Hiddify/2.5.7', 'v2rayN/7.13.8', 'Streisand/1.6.48'];
+  let stubs = []; let lastErr = '';
+  for (const ua of agents) {
+    let text;
+    try {
+      const res = await fetch(url, { headers: { 'user-agent': ua, accept: '*/*', ...device }, signal: AbortSignal.timeout(20000) });
+      if (!res.ok) { lastErr = `подписка ответила ${res.status}`; continue; }
+      text = await res.text();
+    } catch (e) { lastErr = `не удалось загрузить подписку: ${e.message}`; continue; }
+    const all = toLinks(text);
+    const real = all.filter((l) => !isStub(l));
+    if (real.length) { if (ua !== agents[0]) console.error(`(подписка выдана для клиента ${ua.split('/')[0]})`); return real; }
+    if (all.length) stubs = all;
+  }
+  if (stubs.length) {
+    const why = stubs.map((l) => { try { return parseLink(l).name; } catch { return ''; } }).filter(Boolean).join('; ');
+    die(`подписка выдаёт заглушку вместо серверов${why ? ` («${why}»)` : ''}. Возьмите ссылку на отдельный сервер: в v2RayNG «⋮» у сервера → «Поделиться» → «Копировать в буфер» (vless://…)`);
+  }
+  die(lastErr || 'в подписке нет поддерживаемых серверов');
+}
+
 async function readInput() {
   if (args[0]) return args[0];
   const chunks = [];
@@ -108,15 +145,7 @@ const input = (await readInput()).trim();
 if (!input) die('пустая ссылка');
 let links = [input];
 if (/^https?:\/\//i.test(input)) { // подписка
-  let text;
-  try {
-    const res = await fetch(input, { headers: { 'user-agent': 'v2rayNG/1.9' }, signal: AbortSignal.timeout(20000) });
-    if (!res.ok) die(`подписка ответила ${res.status}`);
-    text = await res.text();
-  } catch (e) { die(`не удалось загрузить подписку: ${e.message}`); }
-  const plain = /:\/\//.test(text) ? text : b64(text);
-  links = plain.split(/\r?\n/).map((l) => l.trim()).filter((l) => /^(vless|vmess|trojan|ss):\/\//i.test(l));
-  if (!links.length) die('в подписке нет поддерживаемых серверов');
+  links = await fetchSubscription(input);
 }
 const errors = [];
 const parsed = links.map((l) => { try { return parseLink(l); } catch (e) { errors.push(e.message); return null; } }).filter(Boolean);

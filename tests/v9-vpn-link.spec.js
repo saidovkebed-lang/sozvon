@@ -39,3 +39,44 @@ test('плохие ссылки — понятная ошибка, код 2, п�
     expect(r.stderr).toMatch(/Ошибка/);
   }
 });
+
+test('подписка с заглушкой «Приложение не поддерживается» для v2rayNG → пробуем другие клиенты; одни заглушки → понятная ошибка', async () => {
+  const http = await import('node:http');
+  const { spawn } = await import('node:child_process');
+  const stub = `vless://${UUID}@0.0.0.0:1?type=tcp#${encodeURIComponent('Приложение не поддерживается')}`;
+  const real = `vless://${UUID}@nl.example.com:443?type=tcp&security=reality&pbk=K&sni=a.com#NL\nvless://${UUID}@de.example.com:443?type=tcp&security=tls#DE`;
+  const seen = [];
+  const srv = http.createServer((req, res) => {
+    seen.push({ ua: req.headers['user-agent'], hwid: req.headers['x-hwid'] });
+    const ok = req.url === '/sub' && /^Happ\//.test(req.headers['user-agent']) && req.headers['x-hwid'];
+    res.end(Buffer.from(ok ? real : stub).toString('base64'));
+  });
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${srv.address().port}`;
+  const go = (input, ...args) => new Promise((resolve) => {
+    const p = spawn(process.execPath, ['deploy/vpn-link.mjs', ...args]);
+    let out = ''; let err = '';
+    p.stdout.on('data', (c) => { out += c; });
+    p.stderr.on('data', (c) => { err += c; });
+    p.on('close', (status) => resolve({ status, out, err }));
+    p.stdin.end(input);
+  });
+  try {
+    const list = await go(`${base}/sub`, '--list');
+    expect(list.status, list.err).toBe(0);
+    expect(list.err).toContain('0: NL');
+    expect(list.err).toContain('1: DE');
+    expect(list.err).not.toContain('0.0.0.0');
+    const r = await go(`${base}/sub`, '--index', '1');
+    expect(r.status, r.err).toBe(0);
+    expect(JSON.parse(r.out).outbounds[0].settings.vnext[0].address).toBe('de.example.com');
+    expect(seen[0].ua).toMatch(/^v2rayNG\//);
+    expect(seen.every((s) => /^[0-9a-f]{16}$/.test(s.hwid))).toBe(true);
+
+    const bad = await go(`${base}/only-stub`);
+    expect(bad.status).toBe(2);
+    expect(bad.out).toBe('');
+    expect(bad.err).toContain('заглушку');
+    expect(bad.err).toContain('Приложение не поддерживается');
+  } finally { srv.close(); }
+});
