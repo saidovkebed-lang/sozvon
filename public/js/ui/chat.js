@@ -278,9 +278,9 @@ function renderHeaderAndView() {
   iconEl.style.display = ch ? '' : 'none';
   $('#members').hidden = !server;
   $('#app').classList.toggle('is-home', !server);
-  title.textContent = ch ? ch.name : (server ? 'Созвон' : 'Личные сообщения');
+  title.textContent = ch ? ch.name : (server ? 'Astra' : 'Личные сообщения');
   $('#channel-topic').textContent = ch?.dm ? `@${ch.user?.username || ''}` : ch ? (server?.name || '') : '';
-  document.title = ch?.dm ? `@${ch.name} · Созвон` : ch ? `${ch.type === 'text' ? '#' : '🔊 '}${ch.name} — ${server?.name} · Созвон` : 'Созвон';
+  document.title = ch?.dm ? `@${ch.name} · Astra` : ch ? `${ch.type === 'text' ? '#' : '🔊 '}${ch.name} — ${server?.name} · Astra` : 'Astra';
   if (isText) {
     const canSend = ch.dm ? ch.canMessage : can(server, 'SEND_MESSAGES', ch.id);
     const canAttach = canSend && (ch.dm || can(server, 'ATTACH_FILES', ch.id));

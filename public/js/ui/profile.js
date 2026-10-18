@@ -61,7 +61,7 @@ export function profileCard(u, { server = null, preview = false, onAction = null
   }
   if (u.createdAt) {
     sections.append(h('section', { class: 'profile-popup__section' },
-      h('h4', null, 'В Созвоне с'),
+      h('h4', null, 'В Astra с'),
       h('div', { class: 'profile-popup__since' }, icon('i-calendar', 'icon--sm'), fmtSince(u.createdAt))));
   }
   if (server && !u.isBot && !preview && u.id) {
@@ -237,7 +237,7 @@ const STATUS_ITEMS = [
   { id: 'online', label: 'В сети' },
   { id: 'idle', label: 'Не активен' },
   { id: 'dnd', label: 'Не беспокоить', hint: 'Без звуков и системных уведомлений' },
-  { id: 'invisible', label: 'Невидимый', hint: 'Вы будете казаться не в сети, но сможете пользоваться Созвоном' },
+  { id: 'invisible', label: 'Невидимый', hint: 'Вы будете казаться не в сети, но сможете пользоваться Astra' },
 ];
 
 let statusMenu = null;

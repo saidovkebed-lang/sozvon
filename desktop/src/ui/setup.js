@@ -7,7 +7,7 @@
   url.value = st.serverUrl || st.defaultServer;
   $('useDefault').textContent = st.defaultServer;
   $('useDefault').onclick = () => { url.value = st.defaultServer; reset(); };
-  if (!st.firstRun) { $('title').textContent = 'Сервер Созвона'; $('lead').textContent = 'Сменить сервер, к которому подключается приложение.'; }
+  if (!st.firstRun) { $('title').textContent = 'Сервер Astra'; $('lead').textContent = 'Сменить сервер, к которому подключается приложение.'; }
   else $('cancel').textContent = 'Выход';
 
   let checked = null;

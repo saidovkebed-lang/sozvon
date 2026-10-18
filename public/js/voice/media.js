@@ -46,7 +46,7 @@ export async function getCamera() {
 }
 
 /** video — констрейнты качества (v3 §2.4), audio — передавать звук экрана */
-// Звук экрана БЕЗ звука самого «Созвона»: иначе в трансляцию попадают голоса звонка и зрители
+// Звук экрана БЕЗ звука самого «Astra»: иначе в трансляцию попадают голоса звонка и зрители
 // слышат себя и собеседников дважды (restrictOwnAudio — Chrome/Edge/Яндекс 138+, Electron).
 function screenAudioConstraints() {
   const sup = navigator.mediaDevices.getSupportedConstraints?.() || {};

@@ -5,14 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#12151b">
-  <meta name="description" content="Созвон — голосовые каналы, чаты, стримы экрана и музыка для друзей">
-  <meta name="application-name" content="Созвон">
+  <meta name="description" content="Astra — голосовые каналы, чаты, стримы экрана и музыка для друзей">
+  <meta name="application-name" content="Astra">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-title" content="Созвон">
+  <meta name="apple-mobile-web-app-title" content="Astra">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
   <meta name="format-detection" content="telephone=no">
-  <title>Созвон</title>
+  <title>Astra</title>
   <!-- тема/масштаб из настроек — до первой отрисовки, без мигания -->
   <script src="/js/theme-boot.js"></script>
   <link rel="manifest" href="/manifest.webmanifest">
@@ -26,9 +26,9 @@
   <!-- ===== Экран входа ===== -->
   <section id="auth-screen" class="auth" hidden>
     <div class="auth__card">
-      <img class="auth__logo" src="/assets/logo.svg" alt="Созвон" width="64" height="64">
+      <img class="auth__logo" src="/assets/logo.svg" alt="Astra" width="64" height="64">
       <h1 class="auth__title" id="auth-title">С возвращением!</h1>
-      <p class="auth__subtitle" id="auth-subtitle">Рады видеть тебя снова в Созвоне</p>
+      <p class="auth__subtitle" id="auth-subtitle">Рады видеть тебя снова в Astra</p>
       <form id="auth-form" class="form" novalidate>
         <div class="field">
           <label class="field__label" for="auth-username">Имя пользователя</label>
@@ -46,7 +46,7 @@
     </div>
     <a class="auth__download" id="btn-download-app" href="/download" data-hide-desktop hidden>
       <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-monitor"/></svg>
-      <span><strong>Созвон для ПК</strong><small id="auth-download-ver">Рация в фоне, трей, уведомления</small></span>
+      <span><strong>Astra для ПК</strong><small id="auth-download-ver">Рация в фоне, трей, уведомления</small></span>
       <svg class="icon icon--sm" aria-hidden="true"><use href="/assets/icons.svg#i-download"/></svg>
     </a>
   </section>
@@ -68,7 +68,7 @@
 
     <aside class="sidebar" id="sidebar" aria-label="Каналы">
       <header class="sidebar__header">
-        <div class="sidebar__title" id="server-name">Созвон</div>
+        <div class="sidebar__title" id="server-name">Astra</div>
         <button class="icon-btn" id="btn-server-menu" type="button" aria-label="Настройки сервера" title="Настройки сервера" hidden>
           <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-settings"/></svg>
         </button>
@@ -142,7 +142,7 @@
           <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-menu"/></svg>
         </button>
         <svg class="icon" id="channel-icon" aria-hidden="true"><use href="/assets/icons.svg#i-hash"/></svg>
-        <h2 class="main__title" id="channel-title">Созвон</h2>
+        <h2 class="main__title" id="channel-title">Astra</h2>
         <div class="main__topic" id="channel-topic"></div>
         <div class="main__actions">
           <button class="icon-btn icon-btn--badge" id="btn-inbox" type="button" aria-label="Входящие" aria-haspopup="dialog" aria-expanded="false" title="Входящие">
@@ -158,7 +158,7 @@
       <section class="home" id="home-view">
         <div class="home__card">
           <img class="home__logo" src="/assets/logo.svg" alt="" width="96" height="96">
-          <h2 class="home__title">Добро пожаловать в Созвон</h2>
+          <h2 class="home__title">Добро пожаловать в Astra</h2>
           <p class="home__text">Здесь ваши личные сообщения. Выберите чат слева, напишите кому-нибудь из своих серверов — или создайте сервер для друзей.</p>
           <div class="home__actions">
             <button class="btn btn--primary" type="button" id="btn-home-new-dm"><svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-message"/></svg> Новое сообщение</button>

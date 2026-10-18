@@ -1,5 +1,5 @@
 'use strict';
-// Созвон для ПК — главный процесс Electron.
+// Astra для ПК — главный процесс Electron.
 // Окно открывает веб-клиент сервера (по умолчанию прод), добавляет: глобальную рацию и mute/deafen (uiohook),
 // трей, автозапуск, выбор экрана для демонстрации, бейдж непрочитанных, одиночный экземпляр.
 const {
@@ -14,7 +14,7 @@ const { createUpdater } = require('./updater');
 const { createNativeCapture } = require('./native-capture');
 
 const APP_ID = 'io.sslip.sozvon.desktop';
-const DISPLAY_NAME = 'Созвон';
+const DISPLAY_NAME = 'Astra';
 const DEFAULT_SERVER = 'https://89-108-81-153.sslip.io';
 const IS_WIN = process.platform === 'win32';
 const IS_MAC = process.platform === 'darwin';
@@ -345,7 +345,7 @@ function createMainWindow() {
       mainWindow.hide();
       if (!config.notifiedTray && Notification.isSupported()) {
         config.notifiedTray = true; saveConfig();
-        new Notification({ title: DISPLAY_NAME, body: 'Созвон продолжает работать в трее. Выйти — правой кнопкой по значку → «Выход».', icon: windowIcon() }).show();
+        new Notification({ title: DISPLAY_NAME, body: 'Astra продолжает работать в трее. Выйти — правой кнопкой по значку → «Выход».', icon: windowIcon() }).show();
       }
     }
   });
@@ -493,9 +493,9 @@ async function checkServer(url, trustCert) {
     const ses = session.fromPartition(`sozvon-check-${++checkSeq}`, { cache: false });
     setupCertificates(ses);
     const res = await ses.fetch(`${origin}/api/config`, { signal: ctrl.signal, cache: 'no-store' });
-    if (!res.ok) return { ok: false, origin, error: `Сервер ответил ${res.status}. Это точно сервер Созвона?` };
+    if (!res.ok) return { ok: false, origin, error: `Сервер ответил ${res.status}. Это точно сервер Astra?` };
     const data = await res.json().catch(() => null);
-    if (!data || !Array.isArray(data.iceServers)) return { ok: false, origin, error: 'По этому адресу не Созвон (нет /api/config).' };
+    if (!data || !Array.isArray(data.iceServers)) return { ok: false, origin, error: 'По этому адресу не Astra (нет /api/config).' };
     return {
       ok: true, origin, publicUrl: data.publicUrl || null,
       insecure: origin.startsWith('http:') && !isLocalHost(host),
@@ -584,7 +584,7 @@ function updateTray() {
     const status = voiceState.inVoice ? (voiceState.deafened ? ' — звук выключен' : voiceState.muted ? ' — микрофон выключен' : ' — в голосовом') : '';
     tray.setToolTip(`${DISPLAY_NAME}${status}${badgeCount ? ` · непрочитанных: ${badgeCount}` : ''}`);
     tray.setContextMenu(Menu.buildFromTemplate([
-      { label: 'Показать Созвон', click: () => showMain() },
+      { label: 'Показать Astra', click: () => showMain() },
       { type: 'separator' },
       { label: 'Выключить микрофон', type: 'checkbox', checked: !!voiceState.muted, click: () => { sendToPage('desktop:toggle-mute'); setTimeout(updateTray, 300); } },
       { label: 'Выключить звук', type: 'checkbox', checked: !!voiceState.deafened, click: () => { sendToPage('desktop:toggle-deafen'); setTimeout(updateTray, 300); } },
@@ -597,7 +597,7 @@ function updateTray() {
         click: (mi) => {
           config.legacyCapture = mi.checked; saveConfig(true);
           dialog.showMessageBox({ type: 'info', title: 'Захват экрана', icon: windowIcon(), buttons: ['OK'],
-            message: mi.checked ? 'Включён захват Chromium.' : 'Включён собственный захват «Созвона».',
+            message: mi.checked ? 'Включён захват Chromium.' : 'Включён собственный захват «Astra».',
             detail: (mi.checked
               ? 'Используйте, только если обычная демонстрация не работает: в играх со своим курсором (Noita и др.) он может пропадать.'
               : 'Курсор в играх не пропадает.') + ' Действует со следующей демонстрации.' }).catch(() => {});
@@ -725,7 +725,7 @@ async function checkForUpdates(manual) {
       updateInfo = { version: data.version, url: `${origin}/download` };
       updateTray();
       if (fresh && Notification.isSupported()) {
-        const n = new Notification({ title: 'Доступно обновление Созвона', body: `Версия ${data.version}. Нажмите, чтобы скачать.`, icon: windowIcon() });
+        const n = new Notification({ title: 'Доступно обновление Astra', body: `Версия ${data.version}. Нажмите, чтобы скачать.`, icon: windowIcon() });
         n.on('click', () => openExternal(updateInfo.url));
         n.show();
       }
@@ -753,7 +753,7 @@ function onUpdateState(st) {
   }
   if (Notification.isSupported()) {
     const n = new Notification({
-      title: `Обновление Созвона ${st.version || ''} загружено`,
+      title: `Обновление Astra ${st.version || ''} загружено`,
       body: 'Установится при выходе из приложения. Нажмите, чтобы перезапустить сейчас.',
       icon: windowIcon(),
     });

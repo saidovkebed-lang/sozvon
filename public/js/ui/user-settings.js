@@ -300,7 +300,7 @@ async function meRequest(method, path, body) {
   } catch { throw new Error('Нет связи с сервером'); }
   let data = null;
   try { data = await res.json(); } catch { /* не JSON */ }
-  if (res.status === 404 || res.status === 405) throw new Error('Сервер пока не поддерживает эту функцию — обновите сервер Созвона');
+  if (res.status === 404 || res.status === 405) throw new Error('Сервер пока не поддерживает эту функцию — обновите сервер Astra');
   if (!res.ok) throw new Error(data?.error || `Ошибка сервера (${res.status})`);
   return data || {};
 }
@@ -801,10 +801,10 @@ function buildVoice() {
         h('p', { class: 'settings-note settings-note--warn' }, icon('i-info', 'icon--sm'),
           window.sozvonDesktop?.isDesktop
           ? 'В приложении для ПК клавиша рации работает и в свёрнутом окне — даже в игре.'
-          : 'Рация работает, только пока вкладка Созвона активна (в фокусе) — это ограничение браузера. В приложении для ПК клавиша работает и в фоне.'))),
+          : 'Рация работает, только пока вкладка Astra активна (в фокусе) — это ограничение браузера. В приложении для ПК клавиша работает и в фоне.'))),
     section('Чувствительность ввода',
       h('div', { dataset: { when: 'voice' } },
-        switchRow('audio.sensitivityAuto', 'Определять чувствительность автоматически', 'Созвон сам решит, когда вы говорите. Выключите, чтобы задать порог вручную.'),
+        switchRow('audio.sensitivityAuto', 'Определять чувствительность автоматически', 'Astra сама решит, когда вы говорите. Выключите, чтобы задать порог вручную.'),
         h('div', { class: 'sens', dataset: { when: 'manual' } },
           h('div', { class: 'slider-field__head' },
             h('span', { class: 'field__label' }, 'Порог срабатывания'),
@@ -921,7 +921,7 @@ const PUSH_TEXT = {
   desktop: 'В приложении для ПК уведомления показывает само приложение, даже когда оно свёрнуто в трей.',
   insecure: 'Push работает только по HTTPS.',
   unsupported: 'Этот браузер не поддерживает push-уведомления.',
-  'ios-install': 'На iPhone и iPad push работает только у установленного приложения: «Поделиться» → «На экран „Домой“», затем откройте Созвон с главного экрана.',
+  'ios-install': 'На iPhone и iPad push работает только у установленного приложения: «Поделиться» → «На экран „Домой“», затем откройте Astra с главного экрана.',
   'server-off': 'Push-уведомления выключены на сервере.',
   denied: 'Уведомления запрещены в браузере. Разрешите их в настройках сайта (значок замка в адресной строке) и попробуйте снова.',
   default: 'Чтобы включить, разрешите уведомления в запросе браузера.',
@@ -934,7 +934,7 @@ function renderPushState(msg) {
   sw.disabled = sup !== 'ok';
   sw.checked = sup === 'ok' && pushActive();
   $('#push-status').textContent = msg || (sup !== 'ok' ? PUSH_TEXT[sup]
-    : pushActive() ? 'Включено на этом устройстве. Push придёт, когда ни одно окно Созвона не открыто на виду.'
+    : pushActive() ? 'Включено на этом устройстве. Push придёт, когда ни одно окно Astra не открыто на виду.'
       : 'Выключено на этом устройстве.');
 }
 
@@ -957,7 +957,7 @@ function pushRow() {
   return h('div', { class: 'setting' },
     h('div', { class: 'setting__text' },
       h('label', { class: 'setting__label', for: 'push-switch' }, 'Push-уведомления на этом устройстве'),
-      h('p', { class: 'setting__desc' }, 'Личные сообщения и упоминания придут, даже если Созвон закрыт — на телефоне и на компьютере.'),
+      h('p', { class: 'setting__desc' }, 'Личные сообщения и упоминания придут, даже если Astra закрыта — на телефоне и на компьютере.'),
       h('p', { class: 'setting__desc', id: 'push-status' })),
     sw);
 }
@@ -966,7 +966,7 @@ function buildNotifications() {
   return [
     section('Push-уведомления', pushRow()),
     section('Звуки',
-      switchRow('notifications.sounds', 'Звуки интерфейса', 'Короткие сигналы Созвона. Выключите, чтобы отключить все звуки разом.'),
+      switchRow('notifications.sounds', 'Звуки интерфейса', 'Короткие сигналы Astra. Выключите, чтобы отключить все звуки разом.'),
       soundRow('notifications.soundJoinLeave', 'Вход и выход', 'Кто-то зашёл в ваш голосовой канал или вышел из него.', 'join'),
       soundRow('notifications.soundMessage', 'Новое сообщение', 'Сообщение в другом канале или пока вкладка неактивна.', 'message'),
       soundRow('notifications.soundMute', 'Микрофон и звук', 'Щелчок при выключении и включении микрофона и звука.', 'mute')),
@@ -982,7 +982,7 @@ function buildNotifications() {
             renderDesktopState();
           },
         }, 'Разрешить уведомления')),
-      switchRow('notifications.desktop', 'Показывать уведомления о сообщениях', 'Когда окно Созвона не в фокусе.'),
+      switchRow('notifications.desktop', 'Показывать уведомления о сообщениях', 'Когда окно Astra не в фокусе.'),
       switchRow('notifications.mentionsOnly', 'Только упоминания', `Уведомлять, только если в сообщении есть @${state.user?.username || 'ваш_ник'}.`)),
   ];
 }
@@ -1008,7 +1008,7 @@ function buildKeybinds() {
     h('p', { class: 'settings-note' }, icon('i-info', 'icon--sm'),
       window.sozvonDesktop?.isDesktop
         ? 'В приложении для ПК сочетания работают глобально — даже когда окно свёрнуто.'
-        : 'Горячие клавиши работают, только пока вкладка Созвона активна — браузер не передаёт нажатия из других окон. В приложении для ПК — глобально.'),
+        : 'Горячие клавиши работают, только пока вкладка Astra активна — браузер не передаёт нажатия из других окон. В приложении для ПК — глобально.'),
     section('',
       h('button', { type: 'button', class: 'btn btn--ghost btn--sm', onclick: () => resetKeys(['keybinds.toggleMute', 'keybinds.toggleDeafen', 'audio.pttKey'], 'Сбросить горячие клавиши?') }, icon('i-reset'), 'Сбросить все сочетания')),
   ];
@@ -1032,14 +1032,14 @@ function buildAbout() {
     h('div', { class: 'about-hero' },
       h('img', { src: '/assets/logo.svg', alt: '', width: '64', height: '64', class: 'about-hero__logo' }),
       h('div', null,
-        h('div', { class: 'about-hero__name' }, 'Созвон'),
+        h('div', { class: 'about-hero__name' }, 'Astra'),
         h('div', { class: 'about-hero__ver' }, `Версия ${APP_VERSION}`),
         h('a', { class: 'about-hero__link', href: GITHUB_URL, target: '_blank', rel: 'noopener noreferrer' },
           'Исходный код на GitHub', icon('i-external', 'icon--sm')))),
     window.sozvonDesktop?.isDesktop ? section('Приложение для ПК',
       h('div', { class: 'setting' },
         h('div', { class: 'setting__text' },
-          h('span', { class: 'setting__label' }, `Созвон для ПК ${window.sozvonDesktop.version || ''}`.trim()),
+          h('span', { class: 'setting__label' }, `Astra для ПК ${window.sozvonDesktop.version || ''}`.trim()),
           h('p', { class: 'setting__desc' }, 'Глобальные клавиши рации и mute работают, даже когда окно не в фокусе.')),
         window.sozvonDesktop.openServerSettings ? h('button', { type: 'button', class: 'btn btn--sm', onclick: () => { try { window.sozvonDesktop.openServerSettings(); } catch { /* ignore */ } } }, icon('i-link'), 'Сервер…') : null))
       : section('Приложение для ПК',
@@ -1091,7 +1091,7 @@ function build() {
   }
   nav.append(h('div', { class: 'settings__sep', role: 'presentation' }),
     h('button', { type: 'button', class: 'settings__tab settings__tab--danger', onclick: () => onLogout() }, icon('i-logout'), h('span', null, 'Выйти')),
-    h('div', { class: 'settings__version' }, `Созвон ${APP_VERSION}`));
+    h('div', { class: 'settings__version' }, `Astra ${APP_VERSION}`));
 
   bindControls(root);
   nav.addEventListener('click', (e) => {

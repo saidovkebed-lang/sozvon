@@ -206,7 +206,7 @@ systemctl restart sozvon-bot
 port=$(env_get PORT)
 for _ in $(seq 1 30); do
   if curl -fsS --noproxy "*" --max-time 3 -o /dev/null "http://127.0.0.1:${port:-3000}/api/config" 2>/dev/null; then
-    ok "Созвон перезапущен и отвечает"
+    ok "Astra перезапущена и отвечает"
     if [ "$ytdlp_on" = 1 ]; then
       if [ -x /usr/local/bin/yt-dlp ]; then
         ok "yt-dlp $(/usr/local/bin/yt-dlp --version 2>/dev/null || echo '?'). Проверить YouTube/SoundCloud/Spotify: sudo bash $APP_DIR/deploy/music-check.sh"

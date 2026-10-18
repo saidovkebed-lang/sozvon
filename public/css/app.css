@@ -1,4 +1,4 @@
-/* Созвон — стили приложения. Токены — в tokens.css */
+/* Astra — стили приложения. Токены — в tokens.css */
 /* Шрифт: Inter, если установлен в системе, иначе системный стек (см. --font).
    Google Fonts не подключаем: офлайн/в LAN без интернета это даёт ошибку в консоли. */
 
@@ -364,11 +364,12 @@ code { font-family: var(--font-mono); }
 .server-icon:focus-visible { outline-offset: 3px; border-radius: var(--r-squircle); }
 .server-icon img { width: 100%; height: 100%; object-fit: cover; }
 
-.servers__item--home .server-icon { background: var(--bg-3); }
+/* «Главная»: знак Astra — белая плашка с чёрной «A» на всю кнопку */
+.servers__item--home .server-icon { background: #fff; }
 .servers__item--home .server-icon:hover,
-.servers__item--home .server-icon.is-active { background: var(--accent-gradient); }
+.servers__item--home .server-icon.is-active { background: #fff; box-shadow: 0 6px 18px -6px rgba(255, 255, 255, 0.35); }
 .servers__item--home .server-icon img,
-.servers__item--home .server-icon svg:not(.icon) { width: 30px; height: 30px; }
+.servers__item--home .server-icon svg:not(.icon) { width: 100%; height: 100%; }
 
 .server-icon--add { color: var(--ok); background: var(--bg-3); }
 .server-icon--add:hover { background: var(--ok-strong); color: #fff; }

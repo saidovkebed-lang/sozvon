@@ -17,7 +17,7 @@ function lsGet(k) { try { return localStorage.getItem(k); } catch { return null;
 function lsSet(k, v) { try { localStorage.setItem(k, v); } catch { /* приватный режим */ } }
 
 function showIosHint() {
-  toast('Чтобы поставить Созвон как приложение: нажми «Поделиться» внизу Safari → «На экран „Домой“».', '', 10000);
+  toast('Чтобы поставить Astra как приложение: нажми «Поделиться» внизу Safari → «На экран „Домой“».', '', 10000);
 }
 
 function setInstallVisible(visible) {
@@ -39,7 +39,7 @@ function registerServiceWorker() {
 
   navigator.serviceWorker.addEventListener('message', (e) => {
     if (e.data?.type === 'sozvon:shell-updated') {
-      toast('Созвон обновился — перезагрузи страницу, чтобы получить новую версию.', '', 8000);
+      toast('Astra обновилась — перезагрузи страницу, чтобы получить новую версию.', '', 8000);
     }
   });
 }
@@ -55,7 +55,7 @@ export function initPwa() {
   window.addEventListener('appinstalled', () => {
     deferredPrompt = null;
     setInstallVisible(false);
-    toastOk('Созвон установлен как приложение');
+    toastOk('Astra установлена как приложение');
   });
 
   // на iOS нет beforeinstallprompt: кнопка показывает инструкцию

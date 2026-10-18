@@ -38,7 +38,7 @@ export const DEFAULTS = Object.freeze({
   'notifications.soundMute': true,       // щелчки mute/deafen
   'notifications.desktop': false,        // системные уведомления браузера
   'notifications.mentionsOnly': false,   // системные — только при упоминании @ника
-  'notifications.push': false,           // push на этом устройстве (личные сообщения и упоминания, даже когда Созвон закрыт)
+  'notifications.push': false,           // push на этом устройстве (личные сообщения и упоминания, даже когда Astra закрыта)
 
   // --- Демонстрация экрана (v3) ---
   'stream.quality': '720p30',        // '720p30' | '1080p60' | 'source'

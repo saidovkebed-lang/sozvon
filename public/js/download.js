@@ -77,7 +77,7 @@ export async function renderDownloads(box, { full = false } = {}) {
   if (!data.version || !data.files.length) {
     box.replaceChildren(h('div', { class: 'dl__empty' }, icon('i-monitor', 'icon--lg'),
       h('div', null, h('strong', null, 'Приложение для ПК скоро появится'),
-        h('p', null, 'Сборка ещё не опубликована на этом сервере. Пока можно установить Созвон как веб-приложение (кнопка в адресной строке браузера).'))));
+        h('p', null, 'Сборка ещё не опубликована на этом сервере. Пока можно установить Astra как веб-приложение (кнопка в адресной строке браузера).'))));
     return data;
   }
   const main = primaryFile(data.files, me === 'mobile' ? 'win' : me);
