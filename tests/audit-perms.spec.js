@@ -293,4 +293,30 @@ test.describe('audit: иерархия и отказы', () => {
     // сервер жив
     await ok(owner.socket, 'bootstrap');
   });
+
+  test('потеря доступа в голосе: канал стал приватным / кик → выкинут; снят CONNECT → остаётся, но перезайти нельзя', async () => {
+    const r = await guild(2, 'выкинуть'); opened.push(...r.all);
+    const { srv, owner, members: [b, c] } = r;
+    const vc = voiceChannel(srv);
+    await ok(b.socket, 'voice:join', { channelId: vc.id });
+    await ok(c.socket, 'voice:join', { channelId: vc.id });
+    const inVoice = async (u) => ((await ack(owner.socket, 'bootstrap')).voice[vc.id] || []).some((m) => m.userId === u.id);
+    // приватный канал
+    await ok(owner.socket, 'channel:update', { channelId: vc.id, overwrites: { [srv.id]: { allow: 0, deny: P.VIEW_CHANNEL } } });
+    await expect.poll(() => inVoice(b)).toBe(false);
+    await expect.poll(() => inVoice(c)).toBe(false);
+    await ok(owner.socket, 'channel:update', { channelId: vc.id, overwrites: {} });
+    // кик из голоса
+    await ok(b.socket, 'voice:join', { channelId: vc.id });
+    await ok(owner.socket, 'member:kick', { serverId: srv.id, userId: b.id });
+    await expect.poll(() => inVoice(b)).toBe(false);
+    // снят CONNECT у @everyone
+    await ok(c.socket, 'voice:join', { channelId: vc.id });
+    await setEveryone(owner, srv.id, DEFAULT_EVERYONE & ~P.CONNECT);
+    // как в Discord: снятие CONNECT не выкидывает уже подключённых, но перезайти нельзя
+    await sleep(300);
+    expect(await inVoice(c)).toBe(true);
+    await ok(c.socket, 'voice:leave');
+    await denied(c.socket, 'voice:join', { channelId: vc.id });
+  });
 });

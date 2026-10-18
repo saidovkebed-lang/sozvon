@@ -122,6 +122,31 @@ test.describe('audit: чат', () => {
   });
 });
 
+test.describe('audit: чат — быстрое переключение каналов', () => {
+  test('быстрые переключения между каналами: в ленте только сообщения активного канала', async ({ makePage }) => {
+    const p = await makePage();
+    await loginViaToken(p, 'sw');
+    await createServerUI(p, 'Каналы');
+    const emit = (ev, d) => p.evaluate(([e, x]) => new Promise((res) => window.__sozvon.socket.emit(e, x, res)), [ev, d]);
+    const sid = await p.evaluate(() => window.__sozvon.state.servers[0].id);
+    const ch2 = (await emit('channel:create', { serverId: sid, name: 'второй', type: 'text' })).channel;
+    const ch1 = await p.evaluate(() => window.__sozvon.state.servers[0].channels.find((c) => c.name === 'общий').id);
+    for (let i = 0; i < 30; i++) await emit('message:send', { channelId: ch1, content: `один-${i}` });
+    await p.waitForTimeout(10500); // антиспам 25/10с
+    for (let i = 0; i < 20; i++) await emit('message:send', { channelId: ch2.id, content: `два-${i}` });
+    for (let i = 0; i < 8; i++) {
+      await channel(p, 'text', i % 2 ? 'общий' : 'второй').click();
+    }
+    await channel(p, 'text', 'второй').click();
+    await expect(messageWith(p, 'два-19')).toHaveCount(1);
+    await p.waitForTimeout(1000);
+    const texts = await p.locator('#messages .message .message__content').allInnerTexts();
+    expect(texts.filter((t) => t.startsWith('один-')), 'чужие сообщения в ленте').toEqual([]);
+    expect(texts.filter((t) => t.startsWith('два-')).length).toBe(20);
+    expect(new Set(texts).size, 'без дублей').toBe(texts.length);
+  });
+});
+
 test.describe('audit: сессии и вкладки', () => {
   test('один пользователь в двух вкладках: сообщения в обеих; голос во второй вкладке выбивает первую из голоса', async ({ makePage, browser }) => {
     test.setTimeout(90_000);

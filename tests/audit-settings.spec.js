@@ -20,7 +20,6 @@ const CHANGES = [
   ['notifications', 'notifications.soundMessage', false],
   ['notifications', 'notifications.soundMute', false],
   ['notifications', 'notifications.sounds', false],
-  ['notifications', 'notifications.mentionsOnly', true],
 ];
 
 test.describe('audit: настройки', () => {
@@ -67,6 +66,20 @@ test.describe('audit: настройки', () => {
     }
     await openSection(p, 'voice');
     expect(await p.locator('#modal-user-settings input[type=range][data-pref="audio.inputVolume"]').inputValue()).toBe('150');
+  });
+
+  test('системные уведомления: без разрешения «Только упоминания» недоступно; с разрешением — включается', async ({ makePage }) => {
+    const p = await makePage({ context: { permissions: ['microphone', 'camera', 'notifications'] } });
+    await loginViaToken(p, 'ntf');
+    await openSection(p, 'notifications');
+    const only = p.locator('#modal-user-settings [data-pref="notifications.mentionsOnly"]');
+    await expect(only).toBeDisabled();
+    const st = await p.evaluate(() => ({ perm: window.Notification?.permission, desk: document.querySelector('[data-pref="notifications.desktop"]').disabled }));
+    test.skip(st.perm !== 'granted', 'headless: Notification.permission ≠ granted');
+    await setPrefUI(p, 'notifications.desktop', true);
+    await expect(only).toBeEnabled();
+    await setPrefUI(p, 'notifications.mentionsOnly', true);
+    await expect.poll(async () => (await readPrefs(p))['notifications.mentionsOnly']).toBe(true);
   });
 
   test('«Сбросить настройки» возвращает всё по умолчанию (с подтверждением)', async ({ makePage }) => {

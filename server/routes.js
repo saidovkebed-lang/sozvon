@@ -10,6 +10,7 @@ import { db, save } from './db.js';
 import { PERMS, can } from './permissions.js';
 import { MEDIA_KINDS, processImage, removeMediaUrl, mediaTmpDir } from './media.js';
 import { readAppRelease } from './app-release.js';
+import { Limiter, exempt, waitText } from './rate-limit.js';
 import { syncLibrary, hasYtDlp, addUploadedFile, MUSIC_MAX_BYTES, fixMulterName, sanitizeFileName, getMusicDir } from './music-library.js';
 import { importFromUrl, resolveInput, fetchPending } from './music-sources.js';
 
@@ -155,12 +156,42 @@ export function createApiRouter({
 
   const addedByOf = (req) => (req.isBot && typeof req.body?.addedBy === 'string' ? req.body.addedBy.slice(0, 24) : req.user.username);
 
+  // Защита от перебора: 10 неудачных входов в один аккаунт с одного адреса за 10 мин,
+  // 30 неудачных входов с адреса за 10 мин (любые логины), 10 регистраций с адреса за час.
+  const loginByUser = new Limiter({ limit: 10, windowMs: 10 * 60_000 });
+  const loginByIp = new Limiter({ limit: 30, windowMs: 10 * 60_000 });
+  const registerByIp = new Limiter({ limit: 10, windowMs: 60 * 60_000 });
+  const tooMany = (res, sec, what) => {
+    res.set('Retry-After', String(sec));
+    throw new HttpError(429, `${what} Подождите ${waitText(sec)} и попробуйте снова.`);
+  };
+
   router.post('/register', wrap(async (req, res) => {
-    res.json(await register(req.body));
+    const ip = req.ip;
+    if (!exempt(ip)) {
+      const wait = registerByIp.blockedFor(ip);
+      if (wait) tooMany(res, wait, 'Слишком много регистраций с вашего адреса.');
+    }
+    const out = await register(req.body);
+    if (!exempt(ip)) registerByIp.hit(ip);
+    res.json(out);
   }));
 
   router.post('/login', wrap(async (req, res) => {
-    res.json(await login(req.body));
+    const ip = req.ip;
+    const userKey = `${ip}|${String(req.body?.username || '').trim().toLowerCase().slice(0, 64)}`;
+    if (!exempt(ip)) {
+      const wait = Math.max(loginByUser.blockedFor(userKey), loginByIp.blockedFor(ip));
+      if (wait) tooMany(res, wait, 'Слишком много неудачных попыток входа.');
+    }
+    try {
+      const out = await login(req.body);
+      loginByUser.clear(userKey);
+      res.json(out);
+    } catch (e) {
+      if (e?.status === 401 && !exempt(ip)) { loginByUser.hit(userKey); loginByIp.hit(ip); }
+      throw e;
+    }
   }));
 
   router.get('/me', requireAuth, (req, res) => {

@@ -35,7 +35,9 @@ FROM_VER=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --force) FORCE=1 ;;
-    --from-dir) FROM_DIR="${2:-}"; FROM_VER="${3:-}"; shift 2 || true ;;
+    --from-dir)
+      [ $# -ge 3 ] || fail "Укажите каталог и версию: --from-dir КАТАЛОГ 1.2.3"
+      FROM_DIR=$2; FROM_VER=$3; shift 3; continue ;;
     -h|--help) sed -n '2,15p' "$0"; exit 0 ;;
     *) fail "Неизвестный параметр: $1" ;;
   esac
