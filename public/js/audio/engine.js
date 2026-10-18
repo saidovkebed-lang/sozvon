@@ -110,7 +110,7 @@ class AudioEngine {
   }
 
   onPref(key) {
-    if (key === 'audio.outputVolume' || key === 'audio.userVolumes' || key === 'audio.userMuted') {
+    if (key === 'audio.outputVolume' || key === 'audio.userVolumes' || key === 'audio.userMuted' || key === 'audio.streamVolumes') {
       this.updateGains();
       for (const t of this.tests) t.updateLoopGain?.();
     } else if (key === 'audio.outputDeviceId') {
@@ -136,6 +136,14 @@ class AudioEngine {
     const uv = userId ? prefs.getUserVolume(userId) : 100;
     const ov = Number(prefs.get('audio.outputVolume'));
     return Math.max(0, (uv * (Number.isFinite(ov) ? ov : 100)) / 10000);
+  }
+
+  /** Звук трансляции: своя громкость стримера (0..200 %) × общая громкость; deafen → 0. Голос человека не влияет. */
+  computeStreamGain(userId) {
+    if (state.deafened || state.serverDeafened) return 0;
+    const sv = userId ? prefs.getStreamVolume(userId) : 100;
+    const ov = Number(prefs.get('audio.outputVolume'));
+    return Math.max(0, (sv * (Number.isFinite(ov) ? ov : 100)) / 10000);
   }
 
   getUserGain(userId) {
@@ -221,7 +229,10 @@ class AudioEngine {
   updateGains() {
     const routed = this.webAudioOut;
     for (const r of this.remotes.values()) {
-      const g = r.kind === 'screen' && this.streamMuted.has(r.socketId) ? 0 : this.computeGain(this.userIdOf(r.socketId));
+      const uid = this.userIdOf(r.socketId);
+      const g = r.kind === 'screen'
+        ? (this.streamMuted.has(r.socketId) ? 0 : this.computeStreamGain(uid))
+        : this.computeGain(uid);
       r.target = g;
       if (routed && r.gain) {
         r.gain.gain.cancelScheduledValues(this.outCtx.currentTime);
