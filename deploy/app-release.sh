@@ -45,7 +45,16 @@ done
 install -d -m 0755 "$DL_DIR"
 if id "$APP_USER" >/dev/null 2>&1; then chown "$APP_USER:$APP_USER" "$DL_DIR" 2>/dev/null || true; fi
 
-# Файлы приложения (служебные *.yml/*.blockmap electron-builder не раздаём)
+# Служебные файлы автообновления electron-builder: latest*.yml (версия + sha512) и *.blockmap
+# (дифференциальная загрузка). Раздаём их, но на странице /download не показываем.
+is_meta_file() {
+  case "${1,,}" in
+    latest*.yml|*.blockmap) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Файлы приложения для страницы /download
 is_app_file() {
   case "${1,,}" in
     *.yml|*.yaml|*.blockmap|*.txt|*.json) return 1 ;;
@@ -93,14 +102,16 @@ prune() {
 if [ -n "$FROM_DIR" ]; then
   [ -d "$FROM_DIR" ] || fail "Нет каталога $FROM_DIR"
   [[ $FROM_VER =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]] || fail "Укажите версию: --from-dir КАТАЛОГ 1.2.3"
-  names=()
+  names=(); metas=()
   for f in "$FROM_DIR"/*; do
-    if [ ! -f "$f" ] || ! is_app_file "$(basename "$f")"; then continue; fi
+    [ -f "$f" ] || continue
+    if is_app_file "$(basename "$f")"; then names+=("$(basename "$f")")
+    elif is_meta_file "$(basename "$f")"; then metas+=("$(basename "$f")")
+    else continue; fi
     install -m 0644 "$f" "$DL_DIR/$(basename "$f")"
-    names+=("$(basename "$f")")
   done
   [ ${#names[@]} -gt 0 ] || fail "В $FROM_DIR нет файлов приложения (.exe/.zip/.AppImage/.dmg)"
-  prune "${names[@]}"
+  prune "${names[@]}" "${metas[@]}"
   write_json "$FROM_VER" "desktop-v$FROM_VER" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "" "${names[@]}"
   ok "Опубликовано приложение $FROM_VER: ${names[*]}"
   exit 0
@@ -125,7 +136,8 @@ plan=$(node -e '
     .sort((a, b) => String(b.published_at).localeCompare(String(a.published_at)))[0];
   if (!r) process.exit(3);
   const ok = /\.(exe|zip|appimage|dmg|deb|rpm)$/i;
-  const assets = (r.assets || []).filter((a) => ok.test(a.name) && !/\.(blockmap|yml)$/i.test(a.name) && /^[\w.+-]+$/.test(a.name));
+  const meta = /^latest[\w.-]*\.yml$|\.blockmap$/i;
+  const assets = (r.assets || []).filter((a) => (ok.test(a.name) || meta.test(a.name)) && /^[\w.+-]+$/.test(a.name));
   console.log(["REL", r.tag_name.replace(/^desktop-v/, ""), r.tag_name, r.published_at || "", ""].join("\t"));
   for (const a of assets) console.log(["ASSET", a.name, a.size, a.browser_download_url].join("\t"));
 ' "$work/releases.json") || {
@@ -142,7 +154,9 @@ while IFS=$'\t' read -r kind a b c _; do
     ASSET) names+=("$a"); sizes+=("$b"); urls+=("$c") ;;
   esac
 done <<<"$plan"
-[ ${#names[@]} -gt 0 ] || { warn "В релизе $tag нет файлов приложения"; exit 0; }
+napps=0
+for n in "${names[@]}"; do is_app_file "$n" && napps=$((napps + 1)); done
+[ "$napps" -gt 0 ] || { warn "В релизе $tag нет файлов приложения"; exit 0; }
 
 # уже скачан?
 if [ "$FORCE" = 0 ] && [ -f "$JSON" ]; then
@@ -162,9 +176,15 @@ for i in "${!names[@]}"; do
     || fail "Не скачался ${names[$i]} — оставляю прежнюю версию"
   [ "$(stat -c %s "$out")" = "${sizes[$i]}" ] || fail "Размер ${names[$i]} не совпал — оставляю прежнюю версию"
 done
+# сначала сами программы и blockmap, latest*.yml — последними: приложения друзей увидят новую
+# версию только когда все её файлы уже лежат на сервере
+apps=(); metas=(); ymls=()
 for n in "${names[@]}"; do
+  if is_app_file "$n"; then apps+=("$n"); elif [[ ${n,,} == *.yml ]]; then ymls+=("$n"); else metas+=("$n"); fi
+done
+for n in "${apps[@]}" "${metas[@]}" "${ymls[@]}"; do
   install -m 0644 "$work/$n" "$DL_DIR/$n"
 done
 prune "${names[@]}"
-write_json "$version" "$tag" "$published" "" "${names[@]}"
+write_json "$version" "$tag" "$published" "" "${apps[@]}"
 ok "Приложение для ПК $version: ${names[*]} → $DL_DIR (страница /download)"

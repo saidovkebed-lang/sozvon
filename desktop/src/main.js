@@ -10,6 +10,7 @@ const { pathToFileURL } = require('node:url');
 const path = require('node:path');
 const fs = require('node:fs');
 const { buildCodeMap, parseCombo } = require('./keymap');
+const { createUpdater } = require('./updater');
 
 const APP_ID = 'io.sslip.sozvon.desktop';
 const DISPLAY_NAME = 'Созвон';
@@ -18,7 +19,7 @@ const IS_WIN = process.platform === 'win32';
 const IS_MAC = process.platform === 'darwin';
 const IS_LINUX = process.platform === 'linux';
 const ASSETS = path.join(__dirname, 'assets');
-const startHidden = process.argv.includes('--hidden');
+let startHidden = process.argv.includes('--hidden');
 
 app.setName(IS_LINUX ? 'sozvon' : 'Sozvon'); // каталог userData: %APPDATA%\Sozvon, ~/.config/sozvon
 // Отдельный профиль (тесты, второй аккаунт): --user-data-dir=ПУТЬ
@@ -39,6 +40,7 @@ const DEFAULT_CONFIG = {
   notifiedTray: false,
 };
 let config = loadConfig();
+if (config.startHiddenOnce) { startHidden = true; delete config.startHiddenOnce; }
 function loadConfig() {
   try { return { ...DEFAULT_CONFIG, ...JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')) }; } catch { return { ...DEFAULT_CONFIG }; }
 }
@@ -550,7 +552,7 @@ function updateTray() {
       { label: 'Сервер…', click: () => openSetup() },
       { label: 'Запускать при входе в систему', type: 'checkbox', checked: !!config.autoStart, click: (mi) => setAutoStart(mi.checked) },
       { label: 'Сворачивать в трей при закрытии', type: 'checkbox', checked: !!config.closeToTray, click: (mi) => { config.closeToTray = mi.checked; saveConfig(); buildAppMenu(); } },
-      ...(updateInfo ? [{ label: `Скачать версию ${updateInfo.version}…`, click: () => openExternal(updateInfo.url) }] : []),
+      ...updateTrayItems(),
       { label: 'О приложении', click: () => showAbout() },
       { type: 'separator' },
       { label: 'Выход', click: () => quit() },
@@ -590,14 +592,18 @@ function showAbout() {
       `Сервер: ${serverOrigin() || 'не выбран'}`,
       `Electron ${process.versions.electron} · Chromium ${process.versions.chrome} · Node ${process.versions.node}`,
       `${process.platform} ${process.arch}`,
-      updateInfo ? `\nДоступна новая версия ${updateInfo.version}.` : '',
+      aboutUpdateLine(),
     ].join('\n'),
-    buttons: updateInfo ? ['Скачать обновление', 'OK'] : ['OK'],
+    buttons: updater.state.phase === 'ready' ? ['Перезапустить и обновить', 'OK'] : updateInfo ? ['Скачать обновление', 'OK'] : ['OK'],
     icon: windowIcon(),
     noLink: true,
   };
   const p = mainWindow && mainWindow.isVisible() ? dialog.showMessageBox(mainWindow, opts) : dialog.showMessageBox(opts);
-  p.then(({ response }) => { if (updateInfo && response === 0) openExternal(updateInfo.url); }).catch(() => {});
+  p.then(({ response }) => {
+    if (response !== 0) return;
+    if (updater.state.phase === 'ready') installUpdateNow();
+    else if (updateInfo) openExternal(updateInfo.url);
+  }).catch(() => {});
 }
 
 function buildAppMenu() {
@@ -646,6 +652,20 @@ function cmpVer(a, b) {
 async function checkForUpdates(manual) {
   const origin = serverOrigin();
   if (!origin) return;
+  if (updater.state.supported) {
+    const st = await updater.check();
+    if (st && st.phase !== 'error') {
+      if (manual) {
+        const msg = st.phase === 'ready' ? `Обновление ${st.version} загружено.`
+          : st.phase === 'downloading' ? `Загружается обновление ${st.version || ''} (${st.percent}%) — установится автоматически.`
+            : `У вас последняя версия (${app.getVersion()}).`;
+        const r = await dialog.showMessageBox({ type: 'info', title: 'Обновления', message: msg, buttons: st.phase === 'ready' ? ['Перезапустить сейчас', 'Позже'] : ['OK'], icon: windowIcon(), noLink: true }).catch(() => ({ response: 1 }));
+        if (st.phase === 'ready' && r.response === 0) installUpdateNow();
+      }
+      return;
+    }
+    // ошибка автообновления — падаем на уведомление со ссылкой на /download
+  }
   try {
     const res = await session.defaultSession.fetch(`${origin}/api/app/latest`, { cache: 'no-store' });
     const data = res.ok ? await res.json() : null;
@@ -665,6 +685,59 @@ async function checkForUpdates(manual) {
   } catch (e) {
     if (manual) dialog.showMessageBox({ type: 'warning', title: 'Обновления', message: 'Не удалось проверить обновления.', detail: String(e?.message || e), buttons: ['OK'] }).catch(() => {});
   }
+}
+
+// ---------------- Автообновление ----------------
+let readyNotified = false;
+const updater = createUpdater({ getOrigin: () => serverOrigin(), onChange: onUpdateState, log: console });
+
+function onUpdateState(st) {
+  updateTray();
+  if (st.phase !== 'ready' || readyNotified) return;
+  readyNotified = true;
+  // Свёрнуто в трей и не в голосовом — ставим сразу и тихо возвращаемся в трей
+  if (!voiceState.inVoice && !(mainWindow && mainWindow.isVisible())) {
+    installUpdateNow({ backToTray: true });
+    return;
+  }
+  if (Notification.isSupported()) {
+    const n = new Notification({
+      title: `Обновление Созвона ${st.version || ''} загружено`,
+      body: 'Установится при выходе из приложения. Нажмите, чтобы перезапустить сейчас.',
+      icon: windowIcon(),
+    });
+    n.on('click', () => {
+      if (voiceState.inVoice) {
+        dialog.showMessageBox({ type: 'question', title: 'Обновление', message: 'Перезапустить сейчас? Вы выйдете из голосового канала на несколько секунд.', buttons: ['Перезапустить', 'Позже'], icon: windowIcon(), noLink: true })
+          .then(({ response }) => { if (response === 0) installUpdateNow(); }).catch(() => {});
+      } else installUpdateNow();
+    });
+    n.show();
+  }
+}
+
+function installUpdateNow({ backToTray = false } = {}) {
+  if (updater.state.phase !== 'ready') return;
+  if (backToTray) config.startHiddenOnce = true;
+  quitting = true;
+  saveConfig(true);
+  updater.installNow();
+}
+
+function updateTrayItems() {
+  const st = updater.state;
+  if (st.phase === 'ready') return [{ label: `Перезапустить и обновить до ${st.version}`, click: () => installUpdateNow() }];
+  if (st.phase === 'downloading') return [{ label: `Загружается обновление${st.version ? ` ${st.version}` : ''}… ${st.percent}%`, enabled: false }];
+  if (updateInfo && !st.supported) return [{ label: `Скачать версию ${updateInfo.version}…`, click: () => openExternal(updateInfo.url) }];
+  return [{ label: 'Проверить обновления', click: () => checkForUpdates(true) }];
+}
+
+function aboutUpdateLine() {
+  const st = updater.state;
+  if (st.phase === 'ready') return `\nОбновление ${st.version} загружено — установится при выходе.`;
+  if (st.phase === 'downloading') return `\nЗагружается обновление ${st.version || ''}: ${st.percent}%`;
+  if (updateInfo) return `\nДоступна новая версия ${updateInfo.version}.`;
+  return st.supported ? '\nАвтообновление включено.' : '\nАвтообновление недоступно в портативной версии.';
 }
 
 function quit() {
@@ -756,7 +829,7 @@ app.whenReady().then(() => {
     createMainWindow();
     buildTray();
     setTimeout(() => checkForUpdates(false), 15000);
-    setInterval(() => checkForUpdates(false), 6 * 3600 * 1000);
+    setInterval(() => checkForUpdates(false), 2 * 3600 * 1000);
   } else {
     openSetup();
   }

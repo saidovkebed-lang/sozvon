@@ -142,6 +142,16 @@ if have_systemd; then
     systemctl daemon-reload
   fi
   install -d -o "$APP_USER" -g "$APP_USER" -m 0750 "$DATA_DIR/.cache"
+  # Ежечасная загрузка нового релиза приложения для ПК (приложения у друзей обновляются сами)
+  if [ -f "$APP_DIR/deploy/templates/sozvon-app-release.timer" ]; then
+    for u in sozvon-app-release.service sozvon-app-release.timer; do
+      render_unit "$APP_DIR/deploy/templates/$u" "/etc/systemd/system/$u" \
+        "APP_DIR=$APP_DIR" "DATA_DIR=$DATA_DIR" "APP_USER=$APP_USER" || true
+    done
+    systemctl daemon-reload
+    systemctl enable -q --now sozvon-app-release.timer
+    ok "Автообновление приложения для ПК: таймер sozvon-app-release.timer активен"
+  fi
 fi
 
 # nginx: перерисовать конфиг из шаблона (новый лимит загрузки и т.п.), домен и сертификат — прежние

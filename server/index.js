@@ -91,9 +91,11 @@ for (const dir of ['avatars', 'banners', 'icons']) {
 // Приложение для ПК: файлы релиза (кладёт deploy/update.sh), всегда как скачивание
 app.use('/media/downloads', express.static(downloadsDir, {
   dotfiles: 'deny', index: false, fallthrough: false, maxAge: '1h',
-  setHeaders(res) {
+  setHeaders(res, filePath) {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Content-Disposition', 'attachment');
+    // описание последней версии для автообновления приложения — всегда свежее
+    if (/latest[\w.-]*\.yml$/i.test(filePath)) res.setHeader('Cache-Control', 'no-cache');
   },
 }));
 app.get(['/download', '/download/'], (_req, res) => {

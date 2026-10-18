@@ -668,6 +668,18 @@ setup_nginx_and_cert() {
   fi
 }
 
+# Ежечасная загрузка нового релиза приложения для ПК на свой сервер (systemd timer)
+setup_app_release_timer() {
+  local u
+  for u in sozvon-app-release.service sozvon-app-release.timer; do
+    render "$APP_DIR/deploy/templates/$u" "/etc/systemd/system/$u" 0644 root:root \
+      "APP_DIR=$APP_DIR" "DATA_DIR=$DATA_DIR" "APP_USER=$APP_USER"
+  done
+  systemctl daemon-reload
+  systemctl enable -q --now sozvon-app-release.timer
+  ok "Автообновление приложения для ПК: sozvon-app-release.timer (раз в час)"
+}
+
 # Ежедневное обновление yt-dlp (systemd timer)
 setup_ytdlp_timer() {
   local u
@@ -693,6 +705,7 @@ setup_services() {
         "APP_DIR=$APP_DIR" "ENV_FILE=$ENV_FILE" "DATA_DIR=$DATA_DIR" "NODE_BIN=$NODE_BIN"
     done
     setup_ytdlp_timer
+    setup_app_release_timer
     systemctl daemon-reload
     systemctl enable -q coturn sozvon sozvon-bot
   else

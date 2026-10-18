@@ -1,0 +1,15 @@
+# Созвон — подтянуть новый релиз приложения для ПК с GitHub на свой сервер. Создан deploy/install.sh.
+# Запускается таймером sozvon-app-release.timer каждый час; вручную: systemctl start sozvon-app-release
+# Приложения друзей обновляются сами с /media/downloads этого сервера (electron-updater).
+[Unit]
+Description=Sozvon: fetch latest desktop app release
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Environment=DATA_DIR=@DATA_DIR@ APP_USER=@APP_USER@
+ExecStart=/bin/bash @APP_DIR@/deploy/app-release.sh
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=40min

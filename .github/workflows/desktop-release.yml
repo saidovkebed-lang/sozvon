@@ -23,9 +23,13 @@ jobs:
             files: |
               desktop/dist/*.exe
               desktop/dist/*.zip
+              desktop/dist/*.blockmap
+              desktop/dist/latest.yml
           - os: ubuntu-latest
             script: dist:linux
-            files: desktop/dist/*.AppImage
+            files: |
+              desktop/dist/*.AppImage
+              desktop/dist/latest-linux.yml
     runs-on: ${{ matrix.os }}
     defaults:
       run:
