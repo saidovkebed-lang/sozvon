@@ -29,7 +29,7 @@ have_systemd() { [ -d /run/systemd/system ] && command -v systemctl >/dev/null; 
 
 if [ -n "$RESTORE" ]; then
   [ -f "$RESTORE" ] || die "Файл не найден: $RESTORE"
-  tar -tzf "$RESTORE" | grep -q '^sozvon/' || die "Это не бэкап Созвона (нет каталога sozvon/)"
+  tar -tzf "$RESTORE" | grep -q '^sozvon/' || die "Это не бэкап Astra (нет каталога sozvon/)"
   have_systemd && systemctl stop sozvon-bot sozvon
   if [ -d "$DATA_DIR" ]; then
     mv "$DATA_DIR" "$DATA_DIR.before-restore-$(date +%Y%m%d-%H%M%S)"

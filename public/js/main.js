@@ -1,4 +1,4 @@
-// Бутстрап приложения «Созвон»
+// Бутстрап приложения «Astra»
 import { $, initAvatarHover } from './util.js';
 import { state, notify, upsertServer, setUserOnline, getServer, applyNetConfig, applyUserUpdate } from './state.js';
 import { api, getToken, setToken } from './api.js';
@@ -79,7 +79,7 @@ function initUi() {
   initPush();
   initReadTracking();
   initSocketEvents();
-  // клик по push-уведомлению, когда Созвон уже открыт: service worker просит открыть чат
+  // клик по push-уведомлению, когда Astra уже открыт: service worker просит открыть чат
   navigator.serviceWorker?.addEventListener('message', (e) => {
     if (e.data?.type === 'sozvon:open' && typeof e.data.channelId === 'string') openFromLink(e.data.channelId);
   });

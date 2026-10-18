@@ -1,4 +1,4 @@
-// Точка входа сервера «Созвон».
+// Точка входа сервера «Astra».
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
@@ -142,7 +142,7 @@ server.on('error', (err) => {
 server.listen(PORT, HOST, () => {
   const proto = USE_HTTPS ? 'https' : 'http';
   const lines = [`  ${proto}://localhost:${PORT}`, ...localIPv4().map((ip) => `  ${proto}://${ip}:${PORT}`)];
-  console.log('\n🎧 Созвон запущен! Адреса для входа:');
+  console.log('\n🎧 Astra запущена! Адреса для входа:');
   console.log(lines.join('\n'));
   if (USE_HTTPS) {
     console.log('\n  Сертификат самоподписанный: при первом входе браузер предупредит —');
@@ -174,7 +174,7 @@ server.listen(PORT, HOST, () => {
       console.error('[share] Сервер продолжает работать в локальной сети.\n');
     });
   } else if (!managed) {
-    console.log('  Друзья не в вашей сети? Разместите «Созвон» на VPS в РФ: docs/DEPLOY.md (одна команда).\n');
+    console.log('  Друзья не в вашей сети? Разместите «Astra» на VPS в РФ: docs/DEPLOY.md (одна команда).\n');
   }
   syncLibrary({ force: true })
     .then((tracks) => console.log(`[music] Треков в библиотеке: ${tracks.length}`))

@@ -6,7 +6,7 @@ let mode = 'login';
 function applyMode() {
   const login = mode === 'login';
   $('#auth-title').textContent = login ? 'С возвращением!' : 'Создать аккаунт';
-  $('#auth-subtitle').textContent = login ? 'Рады видеть тебя снова в Созвоне' : 'Придумай имя и пароль — и зови друзей';
+  $('#auth-subtitle').textContent = login ? 'Рады видеть тебя снова в Astra' : 'Придумай имя и пароль — и зови друзей';
   $('#auth-submit').textContent = login ? 'Войти' : 'Зарегистрироваться';
   $('#auth-switch-text').textContent = login ? 'Нет аккаунта?' : 'Уже есть аккаунт?';
   $('#auth-toggle').textContent = login ? 'Зарегистрироваться' : 'Войти';

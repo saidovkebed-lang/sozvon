@@ -55,7 +55,7 @@ run_ytdlp() {
 why() { grep -m1 -o 'ERROR:.*' "$1" | cut -c1-220 || tail -n 1 "$1" | cut -c1-220; }
 http_code() { curl -sS -o "${2:-/dev/null}" -w '%{http_code}' --connect-timeout 10 --max-time 20 -A 'Mozilla/5.0 (X11; Linux x86_64) Chrome/130.0' "$1" 2>/dev/null || echo 000; }
 
-printf '\n%sПроверка музыки Созвона с этого сервера%s (%s)\n\n' "$B" "$Z" "$(hostname)"
+printf '\n%sПроверка музыки Astra с этого сервера%s (%s)\n\n' "$B" "$Z" "$(hostname)"
 
 # ------------------------------------------------------------------ yt-dlp --
 printf '%sИнструменты%s\n' "$B" "$Z"

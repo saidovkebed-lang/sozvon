@@ -65,7 +65,7 @@ case "${SOZVON_TEST:-0}" in 1|true|yes) LOCAL_TEST=1 ;; esac
 
 usage() {
   cat <<'EOF'
-Установка «Созвона» на сервер.
+Установка «Astra» на сервер.
 
 Использование: sudo bash install.sh [параметры]
 
@@ -411,7 +411,7 @@ setup_user() {
 }
 
 fetch_code() {
-  step "Код Созвона → $APP_DIR"
+  step "Код Astra → $APP_DIR"
   if [ -n "$OPT_SOURCE" ]; then
     [ -f "$OPT_SOURCE/package.json" ] || die "--source: в $OPT_SOURCE нет package.json"
     mkdir -p "$APP_DIR"
@@ -465,7 +465,7 @@ write_env() {
   step "Настройки ($ENV_FILE)"
   if [ ! -f "$ENV_FILE" ]; then
     install -m 0600 -o root -g root /dev/null "$ENV_FILE"
-    printf '# Созвон: переменные окружения (создано deploy/install.sh).\n# Свои переменные можно дописывать — установщик их не трогает.\n' >"$ENV_FILE"
+    printf '# Astra: переменные окружения (создано deploy/install.sh).\n# Свои переменные можно дописывать — установщик их не трогает.\n' >"$ENV_FILE"
   fi
   chmod 600 "$ENV_FILE"
   chown root:root "$ENV_FILE"
@@ -814,7 +814,7 @@ banner() {
   printf '\n%s%s\n' "$C_G$C_B" "$line"
   printf '    %s\n' "$url"
   printf '%s%s\n\n' "$line" "$C_0"
-  printf '%sСозвон установлен!%s Откройте ссылку выше в браузере:\n' "$C_B" "$C_0"
+  printf '%sAstra установлена!%s Откройте ссылку выше в браузере:\n' "$C_B" "$C_0"
   printf '  1. Зарегистрируйтесь (первым — это вы).\n'
   printf '  2. Создайте сервер и голосовой канал.\n'
   printf '  3. Скопируйте инвайт-код сервера и отправьте друзьям вместе со ссылкой — им нужен только браузер.\n\n'

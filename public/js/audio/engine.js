@@ -1,4 +1,4 @@
-// Звуковой движок «Созвона» (docs/SPEC-v2.md §2).
+// Звуковой движок «Astra» (docs/SPEC-v2.md §2).
 //  - вывод: каждый удалённый поток → MediaStreamSource → GainNode(userVolume×outputVolume) → шина → выход;
 //    элементы <audio class="remote-audio"> остаются (muted): Chromium не «прокачивает» удалённый
 //    WebRTC-поток в WebAudio, пока поток не привязан к медиа-элементу. Если WebAudio не работает

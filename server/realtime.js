@@ -148,7 +148,7 @@ export function attachRealtime(io, { uploadsDir }) {
   const hasVisibleClient = (userId) => userSocketsOf(userId).some((s) => s.data.view?.visible);
   const nameOf = (u) => (u?.displayName || u?.username || 'Кто-то');
 
-  /** Новое уведомление во «Входящие» + push на устройства, где Созвон сейчас не открыт */
+  /** Новое уведомление во «Входящие» + push на устройства, где Astra сейчас не открыт */
   function notifyUser(userId, { type, channelId, serverId = null, message }) {
     const target = findUser(userId);
     if (!target || target.isBot) return;

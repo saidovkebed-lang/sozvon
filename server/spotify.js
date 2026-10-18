@@ -242,7 +242,7 @@ async function viaEmbed(type, id) {
   if (!r.ok) throw new HttpError(502, `Spotify ответил ошибкой ${r.status} на embed-страницу`);
   const parsed = parseEmbedHtml(r.text, type);
   if (!parsed) {
-    throw new HttpError(502, 'Не удалось разобрать страницу Spotify (похоже, Spotify изменил формат). Обновите Созвон или задайте ключи Spotify API (SPOTIFY_CLIENT_ID/SECRET, см. docs/MUSIC.md)');
+    throw new HttpError(502, 'Не удалось разобрать страницу Spotify (похоже, Spotify изменил формат). Обновите Astra или задайте ключи Spotify API (SPOTIFY_CLIENT_ID/SECRET, см. docs/MUSIC.md)');
   }
   return { ...parsed, total: parsed.tracks.length, viaEmbed: true };
 }

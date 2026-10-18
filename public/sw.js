@@ -1,13 +1,13 @@
-// Service worker «Созвон»: кэширует только оболочку приложения (HTML/CSS/JS/иконки),
+// Service worker «Astra»: кэширует только оболочку приложения (HTML/CSS/JS/иконки),
 // чтобы PWA ставилась и быстро открывалась. Всё живое (API, сокеты, медиа) — только из сети.
 //  - HTML (навигация): network-first, офлайн — последняя сохранённая оболочка;
 //  - статика (/css, /js, /assets, манифест): stale-while-revalidate;
 //  - /api/, /socket.io/, /media/ и любые не-GET запросы SW не трогает вообще.
-// Push: личные сообщения и упоминания (сервер шлёт, только когда ни одно окно Созвона не на виду);
+// Push: личные сообщения и упоминания (сервер шлёт, только когда ни одно окно Astra не на виду);
 // клик по уведомлению открывает нужный чат в уже открытом окне или в новом.
 // При изменении списка/логики — поднять VERSION: старые кэши удалятся при activate.
 
-const VERSION = 'v3-3.4.0';
+const VERSION = 'v3-3.5.0';
 const CACHE = `sozvon-shell-${VERSION}`;
 
 const SHELL = [
@@ -156,7 +156,7 @@ async function notifyUpdate() {
 self.addEventListener('push', (event) => {
   let data = {};
   try { data = event.data ? event.data.json() : {}; } catch { data = { body: event.data?.text() || '' }; }
-  const title = String(data.title || 'Созвон').slice(0, 120);
+  const title = String(data.title || 'Astra').slice(0, 120);
   const count = Number(data.count) > 1 ? ` (${data.count})` : '';
   event.waitUntil(self.registration.showNotification(title + count, {
     body: String(data.body || 'Новое сообщение').slice(0, 300),

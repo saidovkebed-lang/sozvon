@@ -1,8 +1,8 @@
 {
   "name": "sozvon-desktop",
   "productName": "Sozvon",
-  "version": "1.4.0",
-  "description": "Созвон — приложение для ПК",
+  "version": "1.5.0",
+  "description": "Astra — приложение для ПК",
   "author": "Sozvon",
   "license": "UNLICENSED",
   "private": true,
@@ -29,7 +29,7 @@
   "build": {
     "appId": "io.sslip.sozvon.desktop",
     "productName": "Sozvon",
-    "copyright": "© 2026 Созвон",
+    "copyright": "© 2026 Astra",
     "directories": {
       "output": "dist",
       "buildResources": "build"
@@ -89,8 +89,8 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Созвон",
-      "uninstallDisplayName": "Созвон ${version}",
+      "shortcutName": "Astra",
+      "uninstallDisplayName": "Astra ${version}",
       "installerLanguages": [
         "ru_RU"
       ],
@@ -110,11 +110,11 @@
       "icon": "build/icons",
       "executableName": "sozvon",
       "category": "Network",
-      "synopsis": "Созвон — голосовой чат и мессенджер",
+      "synopsis": "Astra — голосовой чат и мессенджер",
       "artifactName": "Sozvon-${version}-x86_64.${ext}",
       "desktop": {
         "entry": {
-          "Name": "Созвон",
+          "Name": "Astra",
           "StartupWMClass": "sozvon"
         }
       },

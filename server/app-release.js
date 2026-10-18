@@ -67,13 +67,13 @@ export function renderDownloadPage(rel) {
   const items = rel.files.map((f) => `<li><a href="${esc(f.url)}" download>${esc(LABELS[`${f.platform}:${f.kind}`] || f.name)}</a>
     <span>${esc(f.name)} · ${mb(f.size)}</span></li>`).join('\n');
   return `<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Созвон для ПК</title><style>
+<title>Astra для ПК</title><style>
 :root{color-scheme:dark}body{margin:0;font:16px/1.5 system-ui,sans-serif;background:#1e1f22;color:#dbdee1;display:grid;place-items:center;min-height:100vh}
 main{max-width:560px;padding:32px 16px}h1{margin:0 0 8px;color:#fff}ul{list-style:none;padding:0}li{margin:12px 0;padding:14px 16px;background:#2b2d31;border-radius:8px}
 a{color:#8ea1ff;font-weight:600}span{display:block;font-size:13px;color:#949ba4}p.small{font-size:13px;color:#949ba4}</style></head>
-<body><main><h1>Созвон для ПК</h1>
+<body><main><h1>Astra для ПК</h1>
 ${rel.version ? `<p>Версия ${esc(rel.version)}</p><ul>${items}</ul>
 <p class="small">Приложение не подписано: Windows SmartScreen может предупредить — нажмите «Подробнее» → «Выполнить в любом случае».</p>`
     : '<p>Приложение для ПК пока не опубликовано на этом сервере. Пользуйтесь браузерной версией.</p>'}
-<p><a href="/">← Вернуться в Созвон</a></p></main></body></html>`;
+<p><a href="/">← Вернуться в Astra</a></p></main></body></html>`;
 }
