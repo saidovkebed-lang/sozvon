@@ -83,4 +83,38 @@ function parseCombo(str) {
   return out.code ? out : null;
 }
 
-module.exports = { buildCodeMap, parseCombo, labelToCode };
+/** KeyboardEvent.code → клавиша для Electron accelerator (globalShortcut). null — не поддерживается. */
+function codeToAccelKey(code) {
+  if (!code) return null;
+  let m;
+  if ((m = /^Key([A-Z])$/.exec(code))) return m[1];
+  if ((m = /^Digit(\d)$/.exec(code))) return m[1];
+  if ((m = /^F(\d{1,2})$/.exec(code))) return `F${m[1]}`;
+  if ((m = /^Numpad(\d)$/.exec(code))) return `num${m[1]}`;
+  const map = {
+    Space: 'Space', Enter: 'Enter', Tab: 'Tab', Backspace: 'Backspace', Delete: 'Delete', Insert: 'Insert',
+    Home: 'Home', End: 'End', PageUp: 'PageUp', PageDown: 'PageDown',
+    ArrowUp: 'Up', ArrowDown: 'Down', ArrowLeft: 'Left', ArrowRight: 'Right',
+    Minus: '-', Equal: '=', BracketLeft: '[', BracketRight: ']', Backslash: '\\', Semicolon: ';',
+    Quote: "'", Comma: ',', Period: '.', Slash: '/', Backquote: '`',
+    NumpadAdd: 'numadd', NumpadSubtract: 'numsub', NumpadMultiply: 'nummult', NumpadDivide: 'numdiv', NumpadDecimal: 'numdec',
+    Pause: 'MediaPlayPause', ScrollLock: 'Scrolllock', PrintScreen: 'PrintScreen',
+  };
+  return map[code] || null;
+}
+
+/** Строка сочетания ('Ctrl+Shift+M') → accelerator ('Control+Shift+M') или null */
+function comboToAccelerator(str) {
+  const c = parseCombo(str);
+  if (!c) return null;
+  const key = codeToAccelKey(c.code);
+  if (!key) return null;
+  const mods = [];
+  if (c.ctrl) mods.push('Control');
+  if (c.alt) mods.push('Alt');
+  if (c.shift) mods.push('Shift');
+  if (c.meta) mods.push('Super');
+  return [...mods, key].join('+');
+}
+
+module.exports = { buildCodeMap, parseCombo, labelToCode, codeToAccelKey, comboToAccelerator };

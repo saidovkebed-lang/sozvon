@@ -1,5 +1,6 @@
 // Текстовый чат: сообщения, группировка, история, typing, вложения, composer
 import { $, h, icon, avatar, fmtDate, fmtClock, fmtSize, renderMarkdown, safeColor, displayName } from '../util.js';
+import { openLightbox } from './lightbox.js';
 import { state, subscribe, notify, getChannel, getServer, findUser } from '../state.js';
 import { can, roleColor } from '../perms.js';
 import { mentionsMe } from './notifications.js';
@@ -34,18 +35,50 @@ function isGrouped(prev, m) {
 }
 
 function attachmentEl(att) {
-  const isImg = typeof att.type === 'string' && att.type.startsWith('image/') && /^\/media\//.test(att.url);
-  if (isImg) {
+  const local = typeof att.url === 'string' && /^\/media\//.test(att.url);
+  const type = typeof att.type === 'string' ? att.type : '';
+  // Фото — открываются в просмотрщике внутри приложения (не в браузере)
+  if (local && type.startsWith('image/')) {
     const img = h('img', { class: 'message__image', src: att.url, alt: att.name || 'изображение', loading: 'lazy' });
     img.addEventListener('load', () => { if (img.dataset.stick === '1') scrollBottom(); });
-    return h('a', { href: att.url, target: '_blank', rel: 'noopener', class: 'message__image-link' }, img);
+    return h('button', {
+      type: 'button', class: 'message__image-link', title: 'Открыть', 'aria-label': `Открыть изображение ${att.name || ''}`,
+      dataset: { lbUrl: att.url, lbType: 'image', lbName: att.name || '' },
+    }, img);
   }
-  const safeUrl = /^\/media\//.test(att.url) ? att.url : '#';
-  return h('a', { class: 'file-card', href: safeUrl, target: '_blank', rel: 'noopener', download: att.name || '' },
+  // Видео — играет прямо в чате, кнопка разворачивает в просмотрщик
+  if (local && (type === 'video/mp4' || type === 'video/webm' || type === 'video/ogg' || type === 'video/quicktime')) {
+    const v = h('video', { class: 'message__video', src: att.url, controls: true, preload: 'metadata', playsInline: true });
+    v.addEventListener('loadedmetadata', () => { if (v.dataset.stick === '1') scrollBottom(); });
+    return h('div', { class: 'message__video-wrap', dataset: { lbUrl: att.url, lbType: 'video', lbName: att.name || '' } }, v,
+      h('button', { type: 'button', class: 'icon-btn message__video-expand', title: 'Во весь экран', 'aria-label': 'Открыть видео в просмотрщике', dataset: { lbOpen: '1' } }, icon('i-expand', 'icon--sm')));
+  }
+  // Аудио — встроенный плеер
+  if (local && type.startsWith('audio/')) {
+    return h('div', { class: 'message__audio' },
+      h('span', { class: 'message__audio-name' }, icon('i-music', 'icon--sm'), att.name || 'аудио'),
+      h('audio', { src: att.url, controls: true, preload: 'none' }));
+  }
+  const safeUrl = local ? att.url : '#';
+  return h('a', { class: 'file-card', href: safeUrl, rel: 'noopener', download: att.name || '' },
     icon('i-attach'),
     h('div', { class: 'file-card__info' },
       h('span', { class: 'file-card__name' }, att.name || 'файл'),
       h('span', { class: 'file-card__size' }, fmtSize(att.size))));
+}
+
+/** Клик по фото/«развернуть» у видео → просмотрщик со всеми медиа канала */
+function onMediaClick(e) {
+  const trigger = e.target.closest('.message__image-link, .message__video-expand');
+  if (!trigger) return;
+  e.preventDefault();
+  const el = trigger.closest('[data-lb-url]');
+  if (!el) return;
+  const nodes = [...box().querySelectorAll('[data-lb-url]')];
+  const list = nodes.map((n) => ({ url: n.dataset.lbUrl, type: n.dataset.lbType, name: n.dataset.lbName }));
+  const inline = el.querySelector('video');
+  if (inline) inline.pause();
+  openLightbox(list, Math.max(0, nodes.indexOf(el)));
 }
 
 function messageEl(m, prev) {
@@ -112,7 +145,7 @@ function renderAll({ keepOffset = false } = {}) {
 }
 
 function markStick(v) {
-  box().querySelectorAll('img.message__image').forEach((i) => { i.dataset.stick = v ? '1' : '0'; });
+  box().querySelectorAll('img.message__image, video.message__video').forEach((i) => { i.dataset.stick = v ? '1' : '0'; });
 }
 
 function appendMessage(m) {
@@ -263,6 +296,7 @@ function renderHeaderAndView() {
 }
 
 export function initChat(on) {
+  box().addEventListener('click', onMediaClick);
   subscribe(['nav', 'servers'], renderHeaderAndView);
   subscribe('messages', () => renderAll());
   // аватары/имена/роли поменялись — перерисовать видимые сообщения, сохранив прокрутку

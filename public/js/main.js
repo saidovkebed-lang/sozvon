@@ -105,6 +105,10 @@ function initSocketEvents() {
       rejoinChannel = resetVoice()?.channelId || null;
       if (reason !== 'io client disconnect') toast('Связь с сервером потеряна — переподключаюсь…', 'error');
     }
+    // Сервер сам закрыл соединение (например, пароль сменили в другой вкладке): socket.io в этом случае
+    // не переподключается — делаем это сами; при отозванной сессии придёт connect_error 'unauthorized'
+    // и откроется экран входа, иначе просто восстановится связь.
+    if (reason === 'io server disconnect') setTimeout(() => { if (!sock.connected) sock.connect(); }, 300);
   });
   sock.on('connect_error', (err) => {
     if (err?.message === 'unauthorized') {

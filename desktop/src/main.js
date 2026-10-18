@@ -4,12 +4,12 @@
 // трей, автозапуск, выбор экрана для демонстрации, бейдж непрочитанных, одиночный экземпляр.
 const {
   app, BrowserWindow, Tray, Menu, ipcMain, session, shell, dialog, nativeImage, desktopCapturer,
-  screen, Notification, clipboard,
+  screen, Notification, clipboard, globalShortcut,
 } = require('electron');
 const { pathToFileURL } = require('node:url');
 const path = require('node:path');
 const fs = require('node:fs');
-const { buildCodeMap, parseCombo } = require('./keymap');
+const { buildCodeMap, parseCombo, comboToAccelerator } = require('./keymap');
 const { createUpdater } = require('./updater');
 
 const APP_ID = 'io.sslip.sozvon.desktop';
@@ -41,6 +41,14 @@ const DEFAULT_CONFIG = {
 };
 let config = loadConfig();
 if (config.startHiddenOnce) { startHidden = true; delete config.startHiddenOnce; }
+// Захват ЭКРАНА на Windows: по умолчанию Desktop Duplication (DXGI) — Chromium сам дорисовывает курсор
+// в кадр и не трогает системный. У Windows Graphics Capture бывает пропадающий/мерцающий курсор в играх
+// (та же история у OBS). Вернуть WGC — пункт трея «Захват экрана: Windows Graphics Capture» (+ перезапуск).
+if (IS_WIN && !config.useWgcCapture) app.commandLine.appendSwitch('disable-features', 'WebRtcAllowWgcScreenCapturer');
+// Захват ЭКРАНА на Windows: по умолчанию Desktop Duplication (DXGI) — Chromium сам дорисовывает курсор
+// в кадр и не трогает системный. У Windows Graphics Capture бывает пропадающий/мерцающий курсор в играх
+// (та же история у OBS). Вернуть WGC — пункт трея «Захват экрана: Windows Graphics Capture» (+ перезапуск).
+if (IS_WIN && !config.useWgcCapture) app.commandLine.appendSwitch('disable-features', 'WebRtcAllowWgcScreenCapturer');
 function loadConfig() {
   try { return { ...DEFAULT_CONFIG, ...JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')) }; } catch { return { ...DEFAULT_CONFIG }; }
 }
@@ -206,16 +214,38 @@ function loadHook() {
   }
   return hook;
 }
+// Mute/deafen — через системную регистрацию сочетаний (RegisterHotKey): НИКАКИХ перехватчиков ввода.
+// Глобальный перехватчик (uiohook ставит в Windows и клавиатурный, и МЫШИНЫЙ WH_*_LL хук) нужен только
+// для рации (нажал/отпустил) — и включается лишь в режиме рации и только пока вы в голосовом канале.
+// Раньше хук работал всегда, и каждое движение мыши в играх шло через приложение: курсор пропадал/дёргался.
+let registeredAccels = [];
+function applyGlobalShortcuts() {
+  for (const a of registeredAccels) { try { globalShortcut.unregister(a); } catch { /* ignore */ } }
+  registeredAccels = [];
+  const reg = (combo, channel) => {
+    const acc = comboToAccelerator(combo);
+    if (!acc) return;
+    try {
+      if (globalShortcut.register(acc, () => sendToPage(channel))) registeredAccels.push(acc);
+      else console.warn(`[hotkeys] сочетание ${acc} занято другой программой`);
+    } catch (e) { console.warn('[hotkeys]', acc, e?.message || e); }
+  };
+  reg(hotkeys.toggleMute, 'desktop:toggle-mute');
+  reg(hotkeys.toggleDeafen, 'desktop:toggle-deafen');
+}
+
 function applyHotkeys() {
-  const h = loadHook();
+  applyGlobalShortcuts();
+  const needHook = hotkeys.pttEnabled && voiceState.inVoice;
+  const h = needHook ? loadHook() : hook;
   if (!h) return;
   pttCodes = new Set(hotkeys.pttEnabled ? (codeMap[hotkeys.pttKey] || []) : []);
-  muteCombo = parseCombo(hotkeys.toggleMute);
-  deafenCombo = parseCombo(hotkeys.toggleDeafen);
-  const need = pttCodes.size > 0 || !!muteCombo || !!deafenCombo;
+  muteCombo = null; // теперь через globalShortcut
+  deafenCombo = null;
+  const need = needHook && pttCodes.size > 0;
   try {
-    if (need && !h.running) { h.mod.uIOhook.start(); h.running = true; console.log('[hotkeys] глобальный перехват клавиш включён'); }
-    else if (!need && h.running) { h.mod.uIOhook.stop(); h.running = false; releasePtt(); }
+    if (need && !h.running) { h.mod.uIOhook.start(); h.running = true; console.log('[hotkeys] перехват клавиши рации включён (в голосовом канале)'); }
+    else if (!need && h.running) { h.mod.uIOhook.stop(); h.running = false; heldKeys.clear(); releasePtt(); console.log('[hotkeys] перехват клавиши рации выключен'); }
   } catch (e) { console.error('[hotkeys] start/stop:', e?.message || e); }
 }
 const windowFocused = () => !!mainWindow && !mainWindow.isDestroyed() && mainWindow.isFocused();
@@ -552,6 +582,24 @@ function updateTray() {
       { label: 'Сервер…', click: () => openSetup() },
       { label: 'Запускать при входе в систему', type: 'checkbox', checked: !!config.autoStart, click: (mi) => setAutoStart(mi.checked) },
       { label: 'Сворачивать в трей при закрытии', type: 'checkbox', checked: !!config.closeToTray, click: (mi) => { config.closeToTray = mi.checked; saveConfig(); buildAppMenu(); } },
+      ...(IS_WIN ? [{
+        label: 'Захват экрана: Windows Graphics Capture', type: 'checkbox', checked: !!config.useWgcCapture,
+        click: (mi) => {
+          config.useWgcCapture = mi.checked; saveConfig(true);
+          dialog.showMessageBox({ type: 'info', title: 'Захват экрана', icon: windowIcon(), buttons: ['OK'],
+            message: 'Изменение вступит в силу после перезапуска приложения.',
+            detail: 'Если в играх при трансляции пропадает или мерцает курсор — оставьте этот пункт выключенным.' }).catch(() => {});
+        },
+      }] : []),
+      ...(IS_WIN ? [{
+        label: 'Захват экрана: Windows Graphics Capture', type: 'checkbox', checked: !!config.useWgcCapture,
+        click: (mi) => {
+          config.useWgcCapture = mi.checked; saveConfig(true);
+          dialog.showMessageBox({ type: 'info', title: 'Захват экрана', icon: windowIcon(), buttons: ['OK'],
+            message: 'Изменение вступит в силу после перезапуска приложения.',
+            detail: 'Если в играх при трансляции пропадает или мерцает курсор — оставьте этот пункт выключенным.' }).catch(() => {});
+        },
+      }] : []),
       ...updateTrayItems(),
       { label: 'О приложении', click: () => showAbout() },
       { type: 'separator' },
@@ -768,7 +816,9 @@ function setupIpc() {
   });
   ipcMain.on('desktop:voice-state', (e, s) => {
     if (!fromPage(e) || !s) return;
+    const wasIn = voiceState.inVoice;
     voiceState = { inVoice: !!s.inVoice, muted: !!s.muted, deafened: !!s.deafened };
+    if (wasIn !== voiceState.inVoice) applyHotkeys(); // хук рации — только в голосовом
     updateTray();
   });
   ipcMain.on('desktop:badge', (e, n) => { if (fromPage(e)) setBadge(n); });
@@ -842,6 +892,8 @@ app.on('window-all-closed', () => {
   if (!IS_MAC && !setupWindow) app.quit();
 });
 app.on('will-quit', () => {
+  try { globalShortcut.unregisterAll(); } catch { /* ignore */ }
+  try { globalShortcut.unregisterAll(); } catch { /* ignore */ }
   try { if (hook && hook.running) hook.mod.uIOhook.stop(); } catch { /* ignore */ }
 });
 

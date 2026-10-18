@@ -255,9 +255,13 @@ function syncServerVoice() {
 }
 
 export function initVoiceSocket(on) {
-  on('voice:moved', ({ channelId } = {}) => {
+  on('voice:moved', ({ channelId, reason } = {}) => {
     if (!channelId) {
-      if (state.myVoice) { resetVoice(); emit('voice:leave'); toast('Модератор отключил вас от голосового канала', '', 4000); }
+      if (state.myVoice) {
+        resetVoice();
+        emit('voice:leave');
+        toast(reason === 'deleted' ? 'Голосовой канал удалён — вы отключены' : 'Модератор отключил вас от голосового канала', '', 4000);
+      }
       return;
     }
     const ch = getChannel(channelId);
