@@ -105,7 +105,11 @@ fi
 tmpconf=$(mktemp)
 printf '%s' "$LINK" | node "$APP_DIR/deploy/vpn-link.mjs" --index "$idx" > "$tmpconf" || { rm -f "$tmpconf"; die "Ссылка не распознана"; }
 unset LINK
-"$XRAY_BIN" run -test -c "$tmpconf" >/dev/null || { rm -f "$tmpconf"; die "Xray не принял конфиг"; }
+if ! xout=$("$XRAY_BIN" run -test -c "$tmpconf" 2>&1); then
+  rm -f "$tmpconf"
+  printf '%s\n' "$xout" | grep -iE 'fail|error' | tail -n 3 >&2
+  die "Xray не принял конфиг для этого сервера — запустите скрипт ещё раз и выберите другой номер (и пришлите строку выше разработчику)"
+fi
 install -m 600 "$tmpconf" "$XRAY_CONF"; rm -f "$tmpconf"
 ok "Конфиг сохранён в $XRAY_CONF (доступ только root)"
 

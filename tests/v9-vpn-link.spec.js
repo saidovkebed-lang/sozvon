@@ -26,6 +26,8 @@ test('vless reality / ws+tls, vmess, trojan, ss → outbound «vpn», прокс
   const t = conf('trojan://pass%40word@tr.example.com:443?sni=tr.example.com#T').outbounds[0];
   expect(t.settings.servers[0]).toMatchObject({ address: 'tr.example.com', password: 'pass@word' });
   expect(t.streamSettings.security).toBe('tls');
+  // allowInsecure в Xray 26 удалён — с ним конфиг не запускается
+  expect(JSON.stringify(conf('trojan://p@tr.example.com:443?allowInsecure=1&insecure=1#T'))).not.toContain('allowInsecure');
 
   const ss = conf(`ss://${Buffer.from('chacha20-ietf-poly1305:secret').toString('base64')}@ss.example.com:8388#S`).outbounds[0];
   expect(ss.settings.servers[0]).toMatchObject({ address: 'ss.example.com', port: 8388, method: 'chacha20-ietf-poly1305', password: 'secret' });

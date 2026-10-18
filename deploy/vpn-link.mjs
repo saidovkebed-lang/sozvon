@@ -31,7 +31,7 @@ function stream(p) {
   const st = { network: net === 'raw' ? 'tcp' : net };
   const host = p.host || '';
   const path = p.path || '/';
-  if (net === 'ws') st.wsSettings = { path, ...(host ? { host, headers: { Host: host } } : {}) };
+  if (net === 'ws') st.wsSettings = { path, ...(host ? { host } : {}) };
   else if (net === 'grpc') st.grpcSettings = { serviceName: p.serviceName || p.path || '', multiMode: p.mode === 'multi' };
   else if (net === 'xhttp' || net === 'splithttp') { st.network = 'xhttp'; st.xhttpSettings = { path, ...(host ? { host } : {}), ...(p.mode ? { mode: p.mode } : {}) }; }
   else if (net === 'httpupgrade') st.httpupgradeSettings = { path, ...(host ? { host } : {}) };
@@ -43,8 +43,8 @@ function stream(p) {
   const alpn = p.alpn ? String(p.alpn).split(',').filter(Boolean) : undefined;
   if (sec === 'tls') {
     st.security = 'tls';
-    st.tlsSettings = { serverName: p.sni || p.host || p.add || p.server, ...(p.fp ? { fingerprint: p.fp } : {}), ...(alpn ? { alpn } : {}),
-      ...(p.allowInsecure === '1' || p.insecure === '1' ? { allowInsecure: true } : {}) };
+    // allowInsecure из ссылок не переносим: в Xray 26 его убрали (конфиг с ним не запускается)
+    st.tlsSettings = { serverName: p.sni || p.host || p.add || p.server, ...(p.fp ? { fingerprint: p.fp } : {}), ...(alpn ? { alpn } : {}) };
   } else if (sec === 'reality') {
     if (!p.pbk) bad('в ссылке REALITY нет pbk (публичного ключа)');
     st.security = 'reality';
