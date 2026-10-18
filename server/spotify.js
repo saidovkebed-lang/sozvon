@@ -112,8 +112,18 @@ async function apiGet(pathOrUrl) {
   const token = await apiToken();
   const r = await httpGet(API_BASE() + rel, { headers: { authorization: `Bearer ${token}`, accept: 'application/json' } });
   if (r.status === 401) tokenCache = { token: null, exp: 0 };
-  if (!r.ok) { const e = new HttpError(r.status === 404 ? 404 : 502, `Spotify API ответил ${r.status}`); e.apiStatus = r.status; throw e; }
+  if (!r.ok) { const e = new HttpError(r.status === 404 ? 404 : 502, `Spotify API ответил ${r.status}${apiReason(r)}`); e.apiStatus = r.status; throw e; }
   return JSON.parse(r.text);
+}
+
+/** Причина отказа Web API своими словами (текст Spotify + подсказка для известных случаев) */
+function apiReason(r) {
+  let msg = '';
+  try { msg = String(JSON.parse(r.text)?.error?.message || ''); } catch { msg = String(r.text || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim(); }
+  msg = msg.slice(0, 160);
+  if (/premium/i.test(msg)) return `: «${msg}» — с 2026 г. Spotify требует Premium у владельца приложения в кабинете разработчика`;
+  if (/countr|region|territor|unavailable|not available/i.test(msg)) return `: «${msg}» — Spotify не обслуживает адрес этого сервера; нужен HTTPS-прокси вне РФ (HTTPS_PROXY, см. docs/MUSIC.md)`;
+  return msg ? `: «${msg}»` : '';
 }
 
 async function viaApi(type, id, limit) {
