@@ -96,6 +96,10 @@ export function profileCard(u, { server = null, preview = false, onAction = null
       actions.append(h('button', { type: 'button', class: 'btn btn--sm btn--block-soft', onclick: () => { onAction?.(); import('./user-settings.js').then((m) => m.openUserSettings('profile')); } },
         icon('i-pencil'), 'Редактировать профиль'));
     }
+    if (!caps.self && !u.isBot) {
+      actions.append(h('button', { type: 'button', class: 'btn btn--sm btn--primary btn--block', dataset: { action: 'message' }, onclick: () => { onAction?.(); import('./dms.js').then((m) => m.openDmWith(u.id)); } },
+        icon('i-message'), 'Написать сообщение'));
+    }
     if (caps.mute) {
       const on = !!caps.inVoice.member.serverMute;
       actions.append(h('button', { type: 'button', class: 'btn btn--sm', dataset: { action: 'server-mute' }, onclick: () => { onAction?.(); setServerMute(server, u.id, !on); } },

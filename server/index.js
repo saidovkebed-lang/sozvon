@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import express from 'express';
 import { Server as IOServer } from 'socket.io';
 import { initDb, flushSync } from './db.js';
+import { initPush } from './push.js';
 import { ensureBotUser, migrateDb } from './model.js';
 import { initMedia, ffmpegCaps } from './media.js';
 import { readAppRelease, renderDownloadPage } from './app-release.js';
@@ -29,6 +30,8 @@ const SHARE = process.argv.includes('--share') || ['1', 'true', 'yes', 'on'].inc
 
 // ---------- данные ----------
 initDb(DATA_DIR);
+// контакт для push-сервисов (VAPID): PUSH_SUBJECT или публичный https-адрес сервера (Apple требует настоящий)
+initPush(DATA_DIR, { subject: process.env.PUSH_SUBJECT || (/^https:\/\//.test(process.env.PUBLIC_URL || '') ? process.env.PUBLIC_URL : undefined) });
 migrateDb(); // v1/v2 → v3: роли, права, профили (идемпотентно, с копией старой базы)
 initMedia(DATA_DIR);
 const downloadsDir = path.join(DATA_DIR, 'downloads');

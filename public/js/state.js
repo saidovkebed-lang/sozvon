@@ -24,6 +24,10 @@ export const state = {
   connected: false,
   serverMuted: false,      // v3: серверный mute/deafen моего голосового участника
   serverDeafened: false,
+  dms: [],                 // личные сообщения: [{id, user, lastMessage, lastAt, unread, canMessage}]
+  lastDm: null,            // последний открытый ЛС (кнопка «Главная»)
+  notifications: [],       // «Входящие»: [{id, type, channelId, serverId, author, preview, count, createdAt, read}]
+  pushKey: null,           // публичный ключ VAPID сервера (null — push выключен)
 };
 
 const subs = new Map();
@@ -65,12 +69,40 @@ export function applyNetConfig(cfg) {
 export const getServer = (id = state.currentServerId) => state.servers.find((s) => s.id === id) || null;
 
 export function getChannel(id = state.currentChannelId) {
+  if (!id) return null;
   for (const s of state.servers) {
     const c = s.channels.find((ch) => ch.id === id);
     if (c) return c;
   }
-  return null;
+  const dm = getDm(id);
+  return dm ? dmChannel(dm) : null;
 }
+
+/* ---------- личные сообщения ---------- */
+export const getDm = (id) => state.dms.find((d) => d.id === id) || null;
+export const dmWithUser = (userId) => state.dms.find((d) => d.user?.id === userId) || null;
+
+/** ЛС в виде «канала» для чата: type 'text', dm: true, без сервера */
+export function dmChannel(dm) {
+  const u = findUser(dm.user?.id) || dm.user || {};
+  return { id: dm.id, type: 'text', dm: true, serverId: null, name: u.displayName || u.username || 'Личные сообщения', user: { ...dm.user, ...u }, canMessage: dmCanMessage(dm) };
+}
+
+/** Писать можно, пока есть общий сервер (сервер проверяет то же самое) */
+export function dmCanMessage(dm) {
+  const id = dm.user?.id;
+  if (!id || dm.user.isBot) return false;
+  return state.servers.some((s) => s.members?.some((m) => m.id === id));
+}
+
+export function upsertDm(dm) {
+  const i = state.dms.findIndex((d) => d.id === dm.id);
+  if (i >= 0) state.dms[i] = { ...state.dms[i], ...dm }; else state.dms.push(dm);
+  state.dms.sort((a, b) => (b.lastAt || 0) - (a.lastAt || 0));
+}
+
+export const dmUnreadTotal = () => state.dms.reduce((n, d) => n + (d.unread || 0), 0);
+export const inboxUnread = () => state.notifications.filter((n) => !n.read).length;
 
 export const isOwner = (server = getServer()) => !!server && !!state.user && server.ownerId === state.user.id;
 

@@ -65,7 +65,8 @@ export default defineConfig({
     timeout: 30_000,
     stdout: 'pipe',
     stderr: 'pipe',
-    env: { PORT: String(PORT), HTTPS: '1', DATA_DIR },
+    // SOZVON_PUSH_ALLOW_HTTP: тестовый приёмник push на http://127.0.0.1 (в бою только https)
+    env: { PORT: String(PORT), HTTPS: '1', DATA_DIR, SOZVON_PUSH_ALLOW_HTTP: '1' },
   }, {
     // v2: музыкальный стенд — фейковые yt-dlp и Spotify embed (tests/start-server-music.js)
     command: 'node tests/start-server-music.js',

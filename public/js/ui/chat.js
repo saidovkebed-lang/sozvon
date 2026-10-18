@@ -84,11 +84,11 @@ function onMediaClick(e) {
 function messageEl(m, prev) {
   const grouped = isGrouped(prev, m);
   const author = m.author || { username: '?', color: '#888' };
-  const server = getServer(getChannel(m.channelId)?.serverId);
+  const server = getServer(getChannel(m.channelId)?.serverId) || null;
   // свежие данные профиля участника (аватар/имя меняются без перезагрузки истории)
   const fresh = author.id ? findUser(author.id, server) : null;
   const who = fresh ? { ...author, ...fresh } : author;
-  const rc = !m.system && author.id ? roleColor(server, author.id) : null;
+  const rc = !m.system && author.id && server ? roleColor(server, author.id) : null;
   const meta = h('div', { class: 'message__meta' },
     h('span', {
       class: 'message__author' + (rc ? ' has-role-color' : ''), style: { color: rc || safeColor(who.color) },
@@ -105,7 +105,7 @@ function messageEl(m, prev) {
     class: 'message' + (grouped ? ' message--grouped' : '') + (m.system ? ' message--system' : '') + (mentioned ? ' message--mention' : ''),
     dataset: { messageId: m.id, authorId: author.id || '' },
   }, avatar(who), body);
-  const canDelete = !m.system && state.user && (author.id === state.user.id || can(server, 'MANAGE_MESSAGES', m.channelId));
+  const canDelete = !m.system && state.user && (author.id === state.user.id || (!!server && can(server, 'MANAGE_MESSAGES', m.channelId)));
   if (canDelete) {
     el.append(h('button', {
       type: 'button', class: 'icon-btn message__delete',
@@ -117,6 +117,13 @@ function messageEl(m, prev) {
 }
 
 function emptyEl(ch) {
+  if (ch.dm) {
+    const u = ch.user || {};
+    return h('div', { class: 'chat__empty chat__empty--dm' },
+      avatar(u, 'xl'),
+      h('h3', null, displayName(u)),
+      h('p', null, `Это начало вашей личной переписки с @${u.username || ''}. Здесь можно писать и отправлять фото и видео — их видите только вы двое.`));
+  }
   return h('div', { class: 'chat__empty' },
     icon('i-hash', 'icon--lg'),
     h('h3', null, `Добро пожаловать в #${ch.name}!`),
@@ -263,26 +270,28 @@ function renderHeaderAndView() {
   const server = getServer();
   const isText = ch?.type === 'text';
   $('#chat-view').hidden = !isText;
-  $('#home-view').hidden = !!server;
+  $('#home-view').hidden = !!server || !!ch?.dm;
   $('#voice-view').hidden = !(ch?.type === 'voice');
   const title = $('#channel-title');
   const iconEl = $('#channel-icon');
-  iconEl.querySelector('use').setAttribute('href', `/assets/icons.svg#${ch?.type === 'voice' ? 'i-volume' : 'i-hash'}`);
+  iconEl.querySelector('use').setAttribute('href', `/assets/icons.svg#${ch?.dm ? 'i-at' : ch?.type === 'voice' ? 'i-volume' : 'i-hash'}`);
   iconEl.style.display = ch ? '' : 'none';
   $('#members').hidden = !server;
   $('#app').classList.toggle('is-home', !server);
-  title.textContent = ch ? ch.name : 'Созвон';
-  $('#channel-topic').textContent = ch ? (server?.name || '') : '';
-  document.title = ch ? `${ch.type === 'text' ? '#' : '🔊 '}${ch.name} — ${server?.name} · Созвон` : 'Созвон';
+  title.textContent = ch ? ch.name : (server ? 'Созвон' : 'Личные сообщения');
+  $('#channel-topic').textContent = ch?.dm ? `@${ch.user?.username || ''}` : ch ? (server?.name || '') : '';
+  document.title = ch?.dm ? `@${ch.name} · Созвон` : ch ? `${ch.type === 'text' ? '#' : '🔊 '}${ch.name} — ${server?.name} · Созвон` : 'Созвон';
   if (isText) {
-    const canSend = can(server, 'SEND_MESSAGES', ch.id);
-    const canAttach = canSend && can(server, 'ATTACH_FILES', ch.id);
+    const canSend = ch.dm ? ch.canMessage : can(server, 'SEND_MESSAGES', ch.id);
+    const canAttach = canSend && (ch.dm || can(server, 'ATTACH_FILES', ch.id));
     const input = $('#composer-input');
     input.disabled = !canSend;
     $('#btn-send').disabled = !canSend;
     $('#btn-attach').hidden = !canAttach;
     $('#composer').classList.toggle('is-readonly', !canSend);
-    input.placeholder = canSend ? `Написать в #${ch.name}` : 'У вас нет прав писать в этом канале';
+    input.placeholder = ch.dm
+      ? (canSend ? `Написать @${ch.name}` : 'Написать нельзя: у вас больше нет общих серверов')
+      : (canSend ? `Написать в #${ch.name}` : 'У вас нет прав писать в этом канале');
     if (renderedChannel !== ch.id) {
       pending = [];
       renderPending();
@@ -297,7 +306,7 @@ function renderHeaderAndView() {
 
 export function initChat(on) {
   box().addEventListener('click', onMediaClick);
-  subscribe(['nav', 'servers'], renderHeaderAndView);
+  subscribe(['nav', 'servers', 'dms'], renderHeaderAndView);
   subscribe('messages', () => renderAll());
   // аватары/имена/роли поменялись — перерисовать видимые сообщения, сохранив прокрутку
   let lookSig = '';
