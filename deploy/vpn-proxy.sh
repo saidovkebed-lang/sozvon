@@ -102,7 +102,7 @@ if [[ "$LINK" =~ ^https?:// ]]; then
   printf '%s' "$LINK" | node "$APP_DIR/deploy/vpn-link.mjs" --list || die "Подписка не читается"
   read -rp "Номер сервера (лучше страна, где работает Spotify; Enter — 0): " idx; idx=${idx:-0}
 fi
-tmpconf=$(mktemp)
+tmpconf=$(mktemp --suffix=.json)
 printf '%s' "$LINK" | node "$APP_DIR/deploy/vpn-link.mjs" --index "$idx" > "$tmpconf" || { rm -f "$tmpconf"; die "Ссылка не распознана"; }
 unset LINK
 if ! xout=$("$XRAY_BIN" run -test -c "$tmpconf" 2>&1); then
