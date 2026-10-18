@@ -45,10 +45,6 @@ if (config.startHiddenOnce) { startHidden = true; delete config.startHiddenOnce;
 // в кадр и не трогает системный. У Windows Graphics Capture бывает пропадающий/мерцающий курсор в играх
 // (та же история у OBS). Вернуть WGC — пункт трея «Захват экрана: Windows Graphics Capture» (+ перезапуск).
 if (IS_WIN && !config.useWgcCapture) app.commandLine.appendSwitch('disable-features', 'WebRtcAllowWgcScreenCapturer');
-// Захват ЭКРАНА на Windows: по умолчанию Desktop Duplication (DXGI) — Chromium сам дорисовывает курсор
-// в кадр и не трогает системный. У Windows Graphics Capture бывает пропадающий/мерцающий курсор в играх
-// (та же история у OBS). Вернуть WGC — пункт трея «Захват экрана: Windows Graphics Capture» (+ перезапуск).
-if (IS_WIN && !config.useWgcCapture) app.commandLine.appendSwitch('disable-features', 'WebRtcAllowWgcScreenCapturer');
 function loadConfig() {
   try { return { ...DEFAULT_CONFIG, ...JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')) }; } catch { return { ...DEFAULT_CONFIG }; }
 }
@@ -582,15 +578,6 @@ function updateTray() {
       { label: 'Сервер…', click: () => openSetup() },
       { label: 'Запускать при входе в систему', type: 'checkbox', checked: !!config.autoStart, click: (mi) => setAutoStart(mi.checked) },
       { label: 'Сворачивать в трей при закрытии', type: 'checkbox', checked: !!config.closeToTray, click: (mi) => { config.closeToTray = mi.checked; saveConfig(); buildAppMenu(); } },
-      ...(IS_WIN ? [{
-        label: 'Захват экрана: Windows Graphics Capture', type: 'checkbox', checked: !!config.useWgcCapture,
-        click: (mi) => {
-          config.useWgcCapture = mi.checked; saveConfig(true);
-          dialog.showMessageBox({ type: 'info', title: 'Захват экрана', icon: windowIcon(), buttons: ['OK'],
-            message: 'Изменение вступит в силу после перезапуска приложения.',
-            detail: 'Если в играх при трансляции пропадает или мерцает курсор — оставьте этот пункт выключенным.' }).catch(() => {});
-        },
-      }] : []),
       ...(IS_WIN ? [{
         label: 'Захват экрана: Windows Graphics Capture', type: 'checkbox', checked: !!config.useWgcCapture,
         click: (mi) => {
