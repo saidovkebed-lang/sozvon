@@ -3,6 +3,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import express from 'express';
+import { pushPublicKey, validSubscription } from './push.js';
+import { addPushSub, removePushSub } from './inbox.js';
 import multer from 'multer';
 import { register, login, requireAuth, HttpError, updateProfile, changePassword } from './auth.js';
 import { publicUser, publicServer, findServer, isMember } from './model.js';
@@ -222,6 +224,26 @@ export function createApiRouter({
       botOnline: isBotOnline(),
     });
   }));
+
+  // ---------- Web Push ----------
+  router.get('/push/key', (_req, res) => {
+    const key = pushPublicKey();
+    if (!key) throw new HttpError(404, 'Push-уведомления выключены на сервере');
+    res.json({ key });
+  });
+
+  router.post('/push/subscribe', requireAuth, (req, res) => {
+    if (req.isBot) throw new HttpError(403, 'Недоступно для бота');
+    const sub = req.body?.subscription;
+    if (!validSubscription(sub)) throw new HttpError(400, 'Некорректная подписка на уведомления');
+    addPushSub(req.user.id, sub, req.get('user-agent') || '', req.token);
+    res.json({ ok: true });
+  });
+
+  router.post('/push/unsubscribe', requireAuth, (req, res) => {
+    const endpoint = String(req.body?.endpoint || '');
+    res.json({ ok: true, removed: removePushSub(req.user.id, endpoint) });
+  });
 
   router.post('/attachments', requireAuth, attachmentUpload.single('file'), (req, res) => {
     const f = req.file;

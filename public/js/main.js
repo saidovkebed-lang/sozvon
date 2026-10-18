@@ -12,7 +12,10 @@ import { initMembers } from './ui/members.js';
 import { initStage } from './ui/voice-stage.js';
 import { initMusicPlayer } from './ui/music-player.js';
 import { toast } from './ui/toasts.js';
-import { selectServer, selectChannel, restoreLast, revalidateSelection } from './nav.js';
+import { selectServer, selectChannel, restoreLast, revalidateSelection, reportView, initReadTracking } from './nav.js';
+import { initDms } from './ui/dms.js';
+import { initInbox } from './ui/inbox.js';
+import { initPush, syncPushSubscription, disablePush } from './push.js';
 import { openServerModal } from './ui/servers.js';
 import { initVoiceSocket, resetVoice, joinVoice, leaveVoice } from './voice/voice.js';
 import { rtc } from './voice/rtc.js';
@@ -71,7 +74,15 @@ function initUi() {
   initAvatarHover();
   setDndCheck(() => state.user?.status === 'dnd');
   initDesktop({ toggleMute, toggleDeafen, setPttPressed: (p) => audioEngine.setPttPressed(p) });
+  initDms(sock.on);
+  initInbox(sock.on);
+  initPush();
+  initReadTracking();
   initSocketEvents();
+  // клик по push-уведомлению, когда Созвон уже открыт: service worker просит открыть чат
+  navigator.serviceWorker?.addEventListener('message', (e) => {
+    if (e.data?.type === 'sozvon:open' && typeof e.data.channelId === 'string') openFromLink(e.data.channelId);
+  });
 
   $('#btn-logout').addEventListener('click', logout);
   const app = $('#app');
@@ -94,6 +105,15 @@ function initUi() {
     }
   });
   window.addEventListener('beforeunload', () => { if (state.myVoice) rtc.stop(); });
+}
+
+/** Открыть канал/ЛС по ссылке из уведомления (?c=…), если он доступен */
+function openFromLink(channelId) {
+  if (!channelId) return false;
+  const known = state.servers.some((s) => s.channels.some((c) => c.id === channelId)) || state.dms.some((d) => d.id === channelId);
+  if (!known) return false;
+  selectChannel(channelId);
+  return true;
 }
 
 function initSocketEvents() {
@@ -165,6 +185,9 @@ async function onConnect() {
   rejoinChannel = null;
   state.user = res.user;
   state.servers = res.servers || [];
+  state.dms = res.dms || [];
+  state.notifications = res.notifications || [];
+  state.pushKey = res.pushKey || null;
   state.voice = res.voice || {};
   state.music = {};
   for (const ms of Object.values(res.music || {})) music.setState(ms);
@@ -176,9 +199,12 @@ async function onConnect() {
   if (firstBootstrap) {
     firstBootstrap = false;
     const last = restoreLast();
-    const invite = new URLSearchParams(location.search).get('invite');
+    const params = new URLSearchParams(location.search);
+    const invite = params.get('invite');
+    const link = params.get('c');
+    if (link) history.replaceState(null, '', location.pathname);
     if (!invite) maybeShowInstallHint();
-    selectServer(getServer(last) ? last : state.servers[0]?.id || null);
+    if (!openFromLink(link)) selectServer(getServer(last) ? last : (last === null && state.lastDm ? null : state.servers[0]?.id || null), { auto: true });
     if (invite) {
       history.replaceState(null, '', location.pathname);
       openServerModal('join');
@@ -188,9 +214,11 @@ async function onConnect() {
     revalidateSelection();
     // перечитать текущий канал
     const ch = state.currentChannelId;
-    if (ch) selectChannel(ch);
+    if (ch) selectChannel(ch, { auto: true });
   }
-  notify('servers', 'nav', 'voice', 'me', 'presence', 'music', 'messages');
+  reportView();
+  syncPushSubscription();
+  notify('servers', 'nav', 'voice', 'me', 'presence', 'music', 'messages', 'dms', 'inbox');
   if (rejoin) joinVoice(rejoin);
 }
 
@@ -206,7 +234,8 @@ function start(token) {
   sock.connect(token);
 }
 
-function logout() {
+async function logout() {
+  await disablePush({ silent: true }).catch(() => {}); // уведомления этого аккаунта на устройство больше не нужны
   closeMenu(false);
   closeProfile(false);
   closeUserSettings();

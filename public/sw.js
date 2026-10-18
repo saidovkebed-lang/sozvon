@@ -3,9 +3,11 @@
 //  - HTML (навигация): network-first, офлайн — последняя сохранённая оболочка;
 //  - статика (/css, /js, /assets, манифест): stale-while-revalidate;
 //  - /api/, /socket.io/, /media/ и любые не-GET запросы SW не трогает вообще.
+// Push: личные сообщения и упоминания (сервер шлёт, только когда ни одно окно Созвона не на виду);
+// клик по уведомлению открывает нужный чат в уже открытом окне или в новом.
 // При изменении списка/логики — поднять VERSION: старые кэши удалятся при activate.
 
-const VERSION = 'v3-3.3.0';
+const VERSION = 'v3-3.4.0';
 const CACHE = `sozvon-shell-${VERSION}`;
 
 const SHELL = [
@@ -27,7 +29,7 @@ const SHELL = [
   '/js/desktop.js',
   '/js/download.js',
   '/js/ui/auth.js',
-  '/js/ui/chat.js', '/js/ui/lightbox.js',
+  '/js/ui/chat.js', '/js/ui/lightbox.js', '/js/ui/dms.js', '/js/ui/inbox.js', '/js/push.js',
   '/js/ui/members.js',
   '/js/ui/modals.js',
   '/js/ui/music-player.js',
@@ -149,3 +151,34 @@ async function notifyUpdate() {
   const clients = await self.clients.matchAll({ type: 'window' });
   for (const c of clients) c.postMessage({ type: 'sozvon:shell-updated' });
 }
+
+// ---------- push-уведомления ----------
+self.addEventListener('push', (event) => {
+  let data = {};
+  try { data = event.data ? event.data.json() : {}; } catch { data = { body: event.data?.text() || '' }; }
+  const title = String(data.title || 'Созвон').slice(0, 120);
+  const count = Number(data.count) > 1 ? ` (${data.count})` : '';
+  event.waitUntil(self.registration.showNotification(title + count, {
+    body: String(data.body || 'Новое сообщение').slice(0, 300),
+    tag: String(data.tag || 'sozvon'),
+    renotify: true,
+    icon: '/assets/icons/icon-192.png',
+    badge: '/assets/icons/icon-192.png',
+    data: { url: typeof data.url === 'string' && data.url.startsWith('/') ? data.url : '/', channelId: data.channelId || null },
+  }));
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const { url = '/', channelId = null } = event.notification.data || {};
+  event.waitUntil((async () => {
+    const wins = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    const win = wins.find((w) => new URL(w.url).origin === self.location.origin);
+    if (win) {
+      await win.focus().catch(() => {});
+      win.postMessage({ type: 'sozvon:open', channelId });
+      return;
+    }
+    await self.clients.openWindow(url);
+  })());
+});

@@ -14,6 +14,12 @@ import {
 } from './permissions.js';
 import { createVoice } from './voice.js';
 import { isOwnMediaUrl, removeMediaUrl } from './media.js';
+import {
+  findDm, isDmMember, dmOther, getOrCreateDm, userDms, publicDm, listDms, sharesServer, setRead,
+  addNotification, listNotifications, markNotificationsRead, dropNotifications,
+  livePushSubs, removePushSub, forgetMessage, dropPushSubsForSessions,
+} from './inbox.js';
+import { sendPush, pushPublicKey } from './push.js';
 
 const serverRoom = (id) => `server:${id}`;
 const userRoom = (id) => `user:${id}`;
@@ -133,6 +139,74 @@ export function attachRealtime(io, { uploadsDir }) {
     emitToViewers(channel.id, 'message:new', { message: publicMessage(msg) });
   }
 
+  // ---------- уведомления: «Входящие» и push ----------
+  const userSocketsOf = (userId) => [...(io.sockets.adapter.rooms.get(userRoom(userId)) || [])]
+    .map((id) => io.sockets.sockets.get(id)).filter(Boolean);
+  /** Пользователь сейчас смотрит этот канал/ЛС (вкладка видима) */
+  const isViewing = (userId, channelId) => userSocketsOf(userId).some((s) => s.data.view?.visible && s.data.view.channelId === channelId);
+  /** Хоть одна вкладка/окно на виду — push не нужен, хватит уведомления внутри приложения */
+  const hasVisibleClient = (userId) => userSocketsOf(userId).some((s) => s.data.view?.visible);
+  const nameOf = (u) => (u?.displayName || u?.username || 'Кто-то');
+
+  /** Новое уведомление во «Входящие» + push на устройства, где Созвон сейчас не открыт */
+  function notifyUser(userId, { type, channelId, serverId = null, message }) {
+    const target = findUser(userId);
+    if (!target || target.isBot) return;
+    const n = addNotification(userId, { type, channelId, serverId, message });
+    io.to(userRoom(userId)).emit('notification:new', { notification: n });
+    if (target.status === 'dnd' || hasVisibleClient(userId)) return;
+    const subs = livePushSubs(userId);
+    if (!subs.length) return;
+    const author = findUser(message.authorId);
+    const title = type === 'dm' ? nameOf(author)
+      : `${nameOf(author)} · #${n.channelName || 'канал'}${n.serverName ? ` (${n.serverName})` : ''}`;
+    const payload = {
+      title, body: n.preview || 'Новое сообщение', tag: `sozvon-${channelId}`, channelId,
+      url: `/?c=${encodeURIComponent(channelId)}`, count: n.count, type,
+    };
+    for (const sub of subs) {
+      sendPush(sub, payload).then((r) => { if (r.gone) removePushSub(userId, sub.endpoint); }).catch((e) => console.warn('[push]', e?.message || e));
+    }
+  }
+
+  /** Упоминания в канале сервера: @ник, @everyone/@here (если у автора есть право) */
+  function notifyMentions(server, channel, msg) {
+    const text = msg.content || '';
+    for (const id of server.memberIds) {
+      if (id === msg.authorId) continue;
+      const u = findUser(id);
+      if (!u || u.isBot || !canViewChannel(server, channel.id, id) || isViewing(id, channel.id)) continue;
+      let type = null;
+      if (msg.mentionEveryone) type = 'everyone';
+      else {
+        const esc = u.username.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        if (new RegExp(`(^|[^\\p{L}\\p{N}_@])@${esc}(?![\\p{L}\\p{N}_])`, 'iu').test(text)) type = 'mention';
+      }
+      if (type) notifyUser(id, { type, channelId: channel.id, serverId: server.id, message: msg });
+    }
+  }
+
+  /** Уведомление всё ещё про доступный канал/ЛС */
+  function canSeeNotification(n, userId) {
+    if (n.type === 'dm') return isDmMember(findDm(n.channelId), userId);
+    const server = findServer(n.serverId);
+    return !!server && isMember(server, userId) && !!findChannel(n.channelId) && canViewChannel(server, n.channelId, userId);
+  }
+
+  /** ЛС, доступный пользователю */
+  function requireDm(dmId, user) {
+    const dm = findDm(dmId);
+    if (!dm || !isDmMember(dm, user.id)) fail('Чат не найден');
+    return dm;
+  }
+
+  /** Сообщение удалено — «Входящие» у всех, кого касалось */
+  function forgetNotifications(messageId) {
+    const { removed, updated } = forgetMessage(messageId);
+    for (const r of removed) io.to(userRoom(r.userId)).emit('notification:removed', { id: r.id, messageId });
+    for (const u of updated) io.to(userRoom(u.userId)).emit('notification:new', { notification: u.notification });
+  }
+
   function validateAttachments(list) {
     if (list === undefined || list === null) return [];
     if (!Array.isArray(list)) fail('Некорректные вложения');
@@ -227,6 +301,7 @@ export function attachRealtime(io, { uploadsDir }) {
 
     socket.join(userRoom(user.id));
     for (const s of userServers(user.id)) socket.join(serverRoom(s.id));
+    socket.data.view = { channelId: null, visible: false };
     if (addOnlineSocket(user.id, socket.id) && user.status !== 'invisible') emitPresence(user.id);
 
     // обёртка: ack обязателен, ошибки → {ok:false,error}
@@ -257,7 +332,12 @@ export function attachRealtime(io, { uploadsDir }) {
       const voiceIds = servers.flatMap((s) => serverChannels(s.id)
         .filter((c) => c.type === 'voice' && canViewChannel(s, c.id, user.id)).map((c) => c.id));
       const { voice: v, music } = voice.snapshotFor(voiceIds);
-      return { user: publicUser(user, { self: true }), servers: servers.map((s) => publicServer(s, user.id)), voice: v, music };
+      return {
+        user: publicUser(user, { self: true }), servers: servers.map((s) => publicServer(s, user.id)), voice: v, music,
+        dms: listDms(user.id),
+        notifications: listNotifications(user.id).filter((n) => canSeeNotification(n, user.id)),
+        pushKey: pushPublicKey(),
+      };
     });
 
     // ---------- серверы ----------
@@ -311,6 +391,7 @@ export function attachRealtime(io, { uploadsDir }) {
       }
       db.data.channels = db.data.channels.filter((c) => c.serverId !== server.id);
       db.data.servers = db.data.servers.filter((s) => s.id !== server.id);
+      dropNotifications((n) => n.serverId === server.id);
       save();
       for (const url of [server.icon, server.banner]) removeMediaUrl(url, mediaInUse);
       io.to(serverRoom(server.id)).emit('server:removed', { serverId: server.id });
@@ -386,6 +467,7 @@ export function attachRealtime(io, { uploadsDir }) {
       if (channel.type === 'voice') voice.clearChannel(channel.id);
       delete db.data.messages[channel.id];
       delete server.channelOverwrites[channel.id];
+      dropNotifications((n) => n.channelId === channel.id);
       db.data.channels = db.data.channels.filter((c) => c.id !== channel.id);
       save();
       emitServerUpdated(server);
@@ -550,7 +632,10 @@ export function attachRealtime(io, { uploadsDir }) {
           const removed = list.filter((m) => m.authorId === target.id);
           if (!removed.length) continue;
           db.data.messages[c.id] = list.filter((m) => m.authorId !== target.id);
-          for (const m of removed) emitToViewers(c.id, 'message:deleted', { channelId: c.id, messageId: m.id });
+          for (const m of removed) {
+            emitToViewers(c.id, 'message:deleted', { channelId: c.id, messageId: m.id });
+            forgetNotifications(m.id);
+          }
         }
       }
       if (server.memberIds.includes(target.id)) removeMember(server, target.id, 'ban');
@@ -607,29 +692,66 @@ export function attachRealtime(io, { uploadsDir }) {
 
     // ---------- сообщения ----------
     on('message:history', ({ channelId, before }) => {
-      const { channel } = requireChannel(channelId, user, 'text');
+      const dm = findDm(channelId);
+      const { channel } = dm ? { channel: requireDm(channelId, user) } : requireChannel(channelId, user, 'text');
       let list = db.data.messages[channel.id] || [];
       if (Number.isFinite(before)) list = list.filter((m) => m.createdAt < before);
       return { messages: list.slice(-50).map(publicMessage) };
     });
 
-    on('message:send', ({ channelId, content, attachments }) => {
-      const { channel, server, perms } = requireChannel(channelId, user, 'text');
-      if (!has(perms, PERMS.SEND_MESSAGES)) fail('Нет права писать в этот канал');
+    const cleanText = (content) => {
       if (content !== undefined && content !== null && typeof content !== 'string') fail('Некорректный текст сообщения');
       const text = str(content).replace(/\r\n/g, '\n').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '').trim();
       if (text.length > 2000) fail('Сообщение слишком длинное (максимум 2000 символов)');
-      const atts = validateAttachments(attachments);
-      if (atts.length && !has(perms, PERMS.ATTACH_FILES)) fail('Нет права прикреплять файлы в этом канале');
-      if (!text && atts.length === 0) fail('Нельзя отправить пустое сообщение');
+      return text;
+    };
+    const rateLimit = () => {
       const now = Date.now();
       if (now > limiter.reset) { limiter.count = 0; limiter.reset = now + 10_000; }
       if (++limiter.count > 25) fail('Слишком много сообщений подряд — подождите пару секунд');
+    };
+
+    /** Сообщение в ЛС: только текст и вложения; писать можно, пока есть общий сервер */
+    function sendDm(dm, content, attachments) {
+      const other = findUser(dmOther(dm, user.id));
+      if (!other || other.isBot) fail('Собеседник недоступен');
+      if (!sharesServer(user.id, other.id)) fail('Писать можно только тем, с кем у вас есть общий сервер');
+      const text = cleanText(content);
+      const atts = validateAttachments(attachments);
+      if (!text && atts.length === 0) fail('Нельзя отправить пустое сообщение');
+      rateLimit();
+      const msg = addMessage({ channelId: dm.id, authorId: user.id, content: text, attachments: atts });
+      dm.lastAt = msg.createdAt;
+      if (dm.hidden) dm.hidden = {}; // новое сообщение возвращает чат в список у обоих
+      setRead(user.id, dm.id, msg.createdAt);
+      save();
+      const message = publicMessage(msg);
+      for (const uid of dm.userIds) {
+        io.to(userRoom(uid)).emit('dm:updated', { dm: publicDm(dm, uid) });
+        io.to(userRoom(uid)).emit('message:new', { message });
+      }
+      if (isViewing(other.id, dm.id)) setRead(other.id, dm.id, msg.createdAt);
+      else notifyUser(other.id, { type: 'dm', channelId: dm.id, message: msg });
+      return { message };
+    }
+
+    on('message:send', ({ channelId, content, attachments }) => {
+      const dm = findDm(channelId);
+      if (dm) return sendDm(requireDm(channelId, user), content, attachments);
+      const { channel, server, perms } = requireChannel(channelId, user, 'text');
+      if (!has(perms, PERMS.SEND_MESSAGES)) fail('Нет права писать в этот канал');
+      const text = cleanText(content);
+      const atts = validateAttachments(attachments);
+      if (atts.length && !has(perms, PERMS.ATTACH_FILES)) fail('Нет права прикреплять файлы в этом канале');
+      if (!text && atts.length === 0) fail('Нельзя отправить пустое сообщение');
+      rateLimit();
 
       const mentionEveryone = /(^|[^\p{L}\p{N}_@])@(everyone|here)(?![\p{L}\p{N}_])/u.test(text) && has(perms, PERMS.MENTION_EVERYONE);
       const msg = addMessage({ channelId: channel.id, authorId: user.id, content: text, attachments: atts, mentionEveryone });
       const message = publicMessage(msg);
       emitToViewers(channel.id, 'message:new', { message });
+      setRead(user.id, channel.id, msg.createdAt);
+      notifyMentions(server, channel, msg);
 
       const cmd = text.match(/^!([\p{L}\d]+)(?:\s+([\s\S]*))?$/u);
       if (cmd) {
@@ -647,6 +769,19 @@ export function attachRealtime(io, { uploadsDir }) {
       for (const [channelId, list] of Object.entries(db.data.messages)) {
         const idx = list.findIndex((m) => m.id === messageId);
         if (idx === -1) continue;
+        const dm = findDm(channelId);
+        if (dm) {
+          if (!isDmMember(dm, user.id)) fail('Сообщение не найдено');
+          if (list[idx].authorId !== user.id) fail('Удалять можно только свои сообщения');
+          list.splice(idx, 1);
+          save();
+          forgetNotifications(messageId);
+          for (const uid of dm.userIds) {
+            io.to(userRoom(uid)).emit('message:deleted', { channelId, messageId });
+            io.to(userRoom(uid)).emit('dm:updated', { dm: publicDm(dm, uid) });
+          }
+          return;
+        }
         const channel = findChannel(channelId);
         const server = channel && findServer(channel.serverId);
         if (!isMember(server, user.id)) fail('Сообщение не найдено');
@@ -656,6 +791,7 @@ export function attachRealtime(io, { uploadsDir }) {
         list.splice(idx, 1);
         save();
         emitToViewers(channelId, 'message:deleted', { channelId, messageId });
+        forgetNotifications(messageId);
         return;
       }
       fail('Сообщение не найдено');
@@ -663,10 +799,62 @@ export function attachRealtime(io, { uploadsDir }) {
 
     socket.on('typing', (payload) => {
       try {
+        const dm = findDm(payload?.channelId);
+        if (dm) {
+          if (!isDmMember(dm, user.id) || !sharesServer(user.id, dmOther(dm, user.id))) return;
+          io.to(userRoom(dmOther(dm, user.id))).emit('typing', { channelId: dm.id, user: publicUser(user) });
+          return;
+        }
         const { channel, perms } = requireChannel(payload?.channelId, user, 'text');
         if (!has(perms, PERMS.SEND_MESSAGES)) return;
         emitToViewers(channel.id, 'typing', { channelId: channel.id, user: publicUser(user) }, null, { except: socket.id });
       } catch { /* молча игнорируем */ }
+    });
+
+    // ---------- ЛС, «Входящие», прочитанное ----------
+    on('dm:open', ({ userId }) => {
+      const other = typeof userId === 'string' ? findUser(userId) : null;
+      if (!other || other.id === user.id) fail('Пользователь не найден');
+      if (other.isBot) fail('Боту нельзя писать в личку');
+      // уже существующую переписку можно открыть и без общего сервера (только чтение — писать запретит sendDm)
+      const existing = userDms(user.id).find((d) => d.userIds.includes(other.id));
+      if (!existing && !sharesServer(user.id, other.id)) fail('Писать можно только тем, с кем у вас есть общий сервер');
+      const dm = existing || getOrCreateDm(user.id, other.id);
+      if (dm.hidden?.[user.id]) { delete dm.hidden[user.id]; save(); }
+      const pub = publicDm(dm, user.id);
+      io.to(userRoom(user.id)).emit('dm:updated', { dm: pub });
+      return { dm: pub };
+    });
+
+    on('dm:close', ({ dmId }) => {
+      const dm = requireDm(dmId, user);
+      (dm.hidden ||= {})[user.id] = true;
+      setRead(user.id, dm.id);
+      markNotificationsRead(user.id, { channelId: dm.id });
+      save();
+      io.to(userRoom(user.id)).emit('dm:closed', { dmId: dm.id });
+    });
+
+    /** Канал/ЛС прочитан: метка + уведомления о нём — прочитаны (все вкладки узнают) */
+    on('channel:read', ({ channelId }) => {
+      const dm = findDm(channelId);
+      if (dm) requireDm(channelId, user); else requireChannel(channelId, user, 'text');
+      const at = Date.now();
+      setRead(user.id, channelId, at);
+      const ids = markNotificationsRead(user.id, { channelId });
+      io.to(userRoom(user.id)).emit('read:state', { channelId, at, notificationIds: ids });
+    });
+
+    on('notification:read', ({ ids, all }) => {
+      const changed = markNotificationsRead(user.id, all === true ? { all: true } : { ids: Array.isArray(ids) ? ids.slice(0, 200) : [] });
+      if (changed.length) io.to(userRoom(user.id)).emit('read:state', { notificationIds: changed });
+      return { ids: changed };
+    });
+
+    /** Что открыто в этой вкладке и видна ли она — чтобы не слать push/уведомления о том, что человек и так видит */
+    socket.on('client:view', (payload) => {
+      if (!isObj(payload)) return;
+      socket.data.view = { channelId: typeof payload.channelId === 'string' ? payload.channelId.slice(0, 64) : null, visible: payload.visible === true };
     });
 
     // ---------- голос ----------
@@ -827,6 +1015,7 @@ export function attachRealtime(io, { uploadsDir }) {
   // Смена пароля: сокеты удалённых сессий отключаем (при переподключении — connect_error 'unauthorized')
   function disconnectSessions(userId, tokens) {
     if (!tokens?.length) return;
+    dropPushSubsForSessions(userId, tokens); // push на устройства с отозванными сессиями больше не идёт
     const set = new Set(tokens);
     for (const s of io.sockets.sockets.values()) {
       if (!s.data.isBot && s.data.user?.id === userId && set.has(s.data.token)) s.disconnect(true);

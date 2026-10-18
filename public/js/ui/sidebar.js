@@ -11,6 +11,7 @@ import { toast, toastOk, toastError } from './toasts.js';
 import { joinVoice, leaveVoice, toggleMute, toggleDeafen, toggleScreen, toggleCamera } from '../voice/voice.js';
 import { prefs } from '../prefs.js';
 import { moreButton, volumeBadge } from './context-menu.js';
+import { renderDmSidebar } from './dms.js';
 
 export function voiceUserEl(m) {
   const badges = h('div', { class: 'voice-user__badges' });
@@ -78,10 +79,7 @@ function channelEl(ch, owner) {
 function renderChannels() {
   const box = $('#channels');
   const server = getServer();
-  if (!server) {
-    box.replaceChildren(h('p', { class: 'sidebar__empty' }, 'Выбери сервер слева или создай новый'));
-    return;
-  }
+  if (!server) { renderDmSidebar(box); return; }
   const owner = can(server, 'MANAGE_CHANNELS');
   const groups = [
     { type: 'text', title: 'Текстовые каналы' },
@@ -113,7 +111,7 @@ function renderChannels() {
 
 function renderHeader() {
   const server = getServer();
-  $('#server-name').textContent = server ? server.name : 'Созвон';
+  $('#server-name').textContent = server ? server.name : 'Личные сообщения';
   $('#btn-server-menu').hidden = !server;
   const banner = safeMediaUrl(server?.banner);
   const head = $('.sidebar__header');
@@ -238,7 +236,7 @@ async function copyInvite() {
 }
 
 export function initSidebar() {
-  subscribe(['servers', 'nav', 'voice', 'profile'], renderChannels);
+  subscribe(['servers', 'nav', 'voice', 'profile', 'dms', 'presence'], renderChannels);
   subscribe(['servers', 'nav'], renderHeader);
   subscribe(['me', 'voice', 'servers', 'presence', 'profile'], renderUserPanel);
   subscribe('speaking', updateSpeaking);

@@ -3,6 +3,7 @@
 // и иерархии (SPEC-v3 §1). Для бота — громкость музыки.
 // Открывается: правый клик / долгий тап (500 мс) / кнопка «⋯» на .voice-user, .tile, .member, нике в чате.
 import { h, icon, avatar, displayName } from '../util.js';
+import { openDmWith } from './dms.js';
 import { state, getServer, findUser as findUserData } from '../state.js';
 import { prefs } from '../prefs.js';
 import { openUserSettings } from './user-settings.js';
@@ -102,6 +103,9 @@ function buildMenu(u) {
     closeMenu(false);
     openProfile(u.userId, anchor, { at });
   }));
+  if (!u.self && !u.isBot) {
+    items.push(item('message', 'i-message', 'Написать сообщение', () => { closeMenu(false); openDmWith(u.userId); }));
+  }
   if (u.self) {
     items.push(item('voice-settings', 'i-settings', 'Настройки голоса', () => { closeMenu(false); openUserSettings('voice'); }));
   } else if (u.isBot) {

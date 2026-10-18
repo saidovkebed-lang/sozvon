@@ -60,6 +60,9 @@ export const api = {
   uploadServerBanner: (serverId, file, crop) => request('POST', `/api/servers/${encodeURIComponent(serverId)}/banner`, mediaForm(file, crop)),
   // v3: приложение для ПК
   appLatest: () => request('GET', '/api/app/latest', undefined, { auth: false }),
+  // push-уведомления (Web Push)
+  pushSubscribe: (subscription) => request('POST', '/api/push/subscribe', { subscription }),
+  pushUnsubscribe: (endpoint) => request('POST', '/api/push/unsubscribe', { endpoint }),
 };
 
 /** multipart: file + необязательное кадрирование {x,y,size} или {x,y,width,height} в пикселях исходника */

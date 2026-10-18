@@ -10,6 +10,7 @@ import { toast, toastOk, toastError } from './toasts.js';
 import { previewSound } from './sounds.js';
 import { codeLabel, comboFromEvent, isModifierCode, setCapturing } from './keybinds.js';
 import { canNotify, requestDesktopPermission } from './notifications.js';
+import { pushSupport, pushActive, enablePush, disablePush } from '../push.js';
 import { api } from '../api.js';
 import { profileCard } from './profile.js';
 import { openCropper } from './cropper.js';
@@ -916,8 +917,54 @@ function renderDesktopState() {
   $('[data-pref="notifications.mentionsOnly"]', dlg()).disabled = p !== 'granted' || !prefs.get('notifications.desktop');
 }
 
+const PUSH_TEXT = {
+  desktop: 'В приложении для ПК уведомления показывает само приложение, даже когда оно свёрнуто в трей.',
+  insecure: 'Push работает только по HTTPS.',
+  unsupported: 'Этот браузер не поддерживает push-уведомления.',
+  'ios-install': 'На iPhone и iPad push работает только у установленного приложения: «Поделиться» → «На экран „Домой“», затем откройте Созвон с главного экрана.',
+  'server-off': 'Push-уведомления выключены на сервере.',
+  denied: 'Уведомления запрещены в браузере. Разрешите их в настройках сайта (значок замка в адресной строке) и попробуйте снова.',
+  default: 'Чтобы включить, разрешите уведомления в запросе браузера.',
+};
+
+function renderPushState(msg) {
+  const sw = $('#push-switch');
+  if (!sw) return;
+  const sup = pushSupport();
+  sw.disabled = sup !== 'ok';
+  sw.checked = sup === 'ok' && pushActive();
+  $('#push-status').textContent = msg || (sup !== 'ok' ? PUSH_TEXT[sup]
+    : pushActive() ? 'Включено на этом устройстве. Push придёт, когда ни одно окно Созвона не открыто на виду.'
+      : 'Выключено на этом устройстве.');
+}
+
+function pushRow() {
+  const sw = h('input', { type: 'checkbox', class: 'switch', id: 'push-switch', role: 'switch', 'aria-describedby': 'push-status' });
+  sw.addEventListener('change', async () => {
+    sw.disabled = true;
+    try {
+      if (sw.checked) {
+        const res = await enablePush();
+        renderPushState(res === 'granted' ? null : PUSH_TEXT[res] || null);
+      } else {
+        await disablePush();
+        renderPushState();
+      }
+    } catch (e) {
+      renderPushState(`Не получилось: ${e?.message || e}`);
+    }
+  });
+  return h('div', { class: 'setting' },
+    h('div', { class: 'setting__text' },
+      h('label', { class: 'setting__label', for: 'push-switch' }, 'Push-уведомления на этом устройстве'),
+      h('p', { class: 'setting__desc' }, 'Личные сообщения и упоминания придут, даже если Созвон закрыт — на телефоне и на компьютере.'),
+      h('p', { class: 'setting__desc', id: 'push-status' })),
+    sw);
+}
+
 function buildNotifications() {
   return [
+    section('Push-уведомления', pushRow()),
     section('Звуки',
       switchRow('notifications.sounds', 'Звуки интерфейса', 'Короткие сигналы Созвона. Выключите, чтобы отключить все звуки разом.'),
       soundRow('notifications.soundJoinLeave', 'Вход и выход', 'Кто-то зашёл в ваш голосовой канал или вышел из него.', 'join'),
@@ -1115,7 +1162,7 @@ function showSection(id, { focusPanel = false } = {}) {
   if (id === 'profile') fillProfileForm();
   if (id === 'about') { const dl = $('#about-download'); if (dl && !dl.dataset.loaded) { dl.dataset.loaded = '1'; renderDownloads(dl); } }
   if (id === 'about') $('#about-features')?.refresh?.();
-  if (id === 'notifications') renderDesktopState();
+  if (id === 'notifications') { renderDesktopState(); renderPushState(); }
   if (focusPanel) $('.settings__back', root).focus();
 }
 
@@ -1175,4 +1222,5 @@ export function initUserSettings({ logout } = {}) {
   if (logout) onLogout = logout;
   $('#btn-user-settings')?.addEventListener('click', () => openUserSettings());
   window.addEventListener('pagehide', stopMicTest);
+  subscribe('push', () => renderPushState());
 }

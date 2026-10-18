@@ -55,7 +55,7 @@
   <div id="app" class="app" hidden>
     <nav class="servers" id="servers" aria-label="Серверы">
       <div class="servers__item servers__item--home">
-        <button class="server-icon" id="btn-home" type="button" aria-label="Главная" title="Главная">
+        <button class="server-icon" id="btn-home" type="button" aria-label="Главная: личные сообщения" title="Личные сообщения">
           <img src="/assets/logo.svg" alt="" width="28" height="28">
         </button>
       </div>
@@ -145,6 +145,9 @@
         <h2 class="main__title" id="channel-title">Созвон</h2>
         <div class="main__topic" id="channel-topic"></div>
         <div class="main__actions">
+          <button class="icon-btn icon-btn--badge" id="btn-inbox" type="button" aria-label="Входящие" aria-haspopup="dialog" aria-expanded="false" title="Входящие">
+            <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-inbox"/></svg>
+          </button>
           <button class="icon-btn" id="btn-open-music" type="button" aria-label="Музыкальная библиотека" title="Музыкальная библиотека">
             <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-music"/></svg>
           </button>
@@ -156,9 +159,10 @@
         <div class="home__card">
           <img class="home__logo" src="/assets/logo.svg" alt="" width="96" height="96">
           <h2 class="home__title">Добро пожаловать в Созвон</h2>
-          <p class="home__text">Создай свой сервер для друзей или войди по инвайт-коду.</p>
+          <p class="home__text">Здесь ваши личные сообщения. Выберите чат слева, напишите кому-нибудь из своих серверов — или создайте сервер для друзей.</p>
           <div class="home__actions">
-            <button class="btn btn--primary" type="button" data-open-server="create">Создать сервер</button>
+            <button class="btn btn--primary" type="button" id="btn-home-new-dm"><svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-message"/></svg> Новое сообщение</button>
+            <button class="btn btn--ghost" type="button" data-open-server="create">Создать сервер</button>
             <button class="btn btn--ghost" type="button" data-open-server="join">Войти по коду</button>
           </div>
         </div>
