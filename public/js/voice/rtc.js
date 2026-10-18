@@ -27,6 +27,8 @@ class Peer {
       iceServers: mgr.iceServers,
       // FORCE_RELAY на сервере: только TURN (прячет IP, обходит строгие NAT/блокировки P2P)
       iceTransportPolicy: state.forceRelay ? 'relay' : 'all',
+      // Один сертификат DTLS на весь звонок: по его отпечатку считается код конфиденциальности
+      ...(mgr.cert ? { certificates: [mgr.cert] } : {}),
     });
     this.pc = pc;
 
@@ -225,6 +227,49 @@ class RtcManager {
   /** Вызывать синхронно в обработчике клика (разблокирует AudioContext) */
   prepareAudio() {
     audio.unlock();
+  }
+
+  /** Сертификат DTLS (ECDSA P-256) — один на сессию; ждём его перед первым соединением */
+  async ensureCert() {
+    if (this.cert && this.cert.expires > Date.now() + 3600e3) return this.cert;
+    try {
+      this.cert = await RTCPeerConnection.generateCertificate({ name: 'ECDSA', namedCurve: 'P-256' });
+    } catch (e) {
+      console.warn('[rtc] сертификат', e);
+      this.cert = null;
+    }
+    return this.cert;
+  }
+
+  /**
+   * Код конфиденциальности звонка (как «Voice Privacy Code» в Discord).
+   * Голос шифруется DTLS-SRTP сквозным образом: ключи согласуют сами браузеры, сервер и TURN
+   * видят только шифротекст. Подменить ключи мог бы лишь сигнальный сервер, подставив свои
+   * отпечатки сертификатов — тогда коды у участников разойдутся. Совпали у всех → подмены нет.
+   * Возвращает { code: '12345 67890 …', peers } или null, пока не все соединения установлены.
+   */
+  async privacyCode() {
+    if (!this.cert) return null;
+    const fps = new Set();
+    const own = this.cert.getFingerprints?.().find((f) => f.algorithm === 'sha-256')?.value;
+    if (!own) return null;
+    fps.add(own.toUpperCase());
+    let peers = 0;
+    for (const p of this.peers.values()) {
+      const sdp = p.pc.remoteDescription?.sdp || '';
+      const m = sdp.match(/a=fingerprint:sha-256 ([0-9A-F:]+)/i);
+      if (!m || !p.connected) return null;
+      fps.add(m[1].toUpperCase());
+      peers += 1;
+    }
+    const key = [...fps].sort().join('|');
+    if (this.codeCache?.key === key) return this.codeCache.value;
+    const hash = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(key)));
+    const groups = [];
+    for (let i = 0; i < 12; i += 2) groups.push(String(((hash[i] << 8) | hash[i + 1]) % 100000).padStart(5, '0'));
+    const value = { code: groups.join(' '), peers };
+    this.codeCache = { key, value };
+    return value;
   }
 
   start({ iceServers, mic }) {

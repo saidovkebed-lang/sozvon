@@ -5,6 +5,7 @@ import { can } from '../perms.js';
 import { socketId } from '../socket.js';
 import { rtc } from '../voice/rtc.js';
 import { moreButton } from './context-menu.js';
+import { audioEngine } from '../audio/engine.js';
 import { joinVoice, leaveVoice, toggleMute, toggleDeafen, toggleScreen, toggleCamera } from '../voice/voice.js';
 
 const tiles = new Map();   // key -> { el, stream, sig }
@@ -59,7 +60,7 @@ function fillTile(entry, d) {
   const u = { ...m, ...(findUser(m.userId) || {}), id: m.userId };
   const avatarSig = `${u.avatar}|${u.avatarAnimated}|${u.color}`;
   const name = displayName(u);
-  const sig = [stream?.id || '', name, u.color, u.avatar, u.avatarAnimated, m.muted, m.deafened, m.serverMute, m.serverDeafen, kind, m.streaming, m.isBot].join('|');
+  const sig = [stream?.id || '', stream?.getAudioTracks().length || 0, name, u.color, u.avatar, u.avatarAnimated, m.muted, m.deafened, m.serverMute, m.serverDeafen, kind, m.streaming, m.isBot].join('|');
   if (entry.sig === sig && entry.streamRef === stream) return;
   entry.sig = sig;
 
@@ -86,7 +87,7 @@ function fillTile(entry, d) {
   }
 
   // подписи и бейджи
-  el.querySelectorAll('.tile__label, .badge, .tile__expand, .tile__more').forEach((x) => x.remove());
+  el.querySelectorAll('.tile__label, .badge, .tile__expand, .tile__more, .tile__sound').forEach((x) => x.remove());
   const label = h('div', { class: 'tile__label' }, h('span', null, kind === 'screen' ? `${name} — экран` : name));
   if (kind === 'main') {
     if (m.deafened || m.serverDeafen) label.append(icon('i-headphones-off', 'icon--sm'));
@@ -94,6 +95,23 @@ function fillTile(entry, d) {
   }
   el.append(label);
   if (kind === 'screen') el.append(h('span', { class: 'badge badge--live' }, 'LIVE'));
+  if (kind === 'screen' && !self && stream?.getAudioTracks().length) {
+    const btn = h('button', { type: 'button', class: 'icon-btn tile__sound' });
+    const paint = () => {
+      const off = audioEngine.isStreamAudioMuted(m.socketId);
+      btn.replaceChildren(icon(off ? 'i-volume-x' : 'i-volume', 'icon--sm'));
+      btn.title = off ? 'Включить звук трансляции' : 'Выключить звук трансляции (если слышите эхо)';
+      btn.setAttribute('aria-label', btn.title);
+      btn.setAttribute('aria-pressed', String(off));
+    };
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      audioEngine.setStreamAudioMuted(m.socketId, !audioEngine.isStreamAudioMuted(m.socketId));
+      paint();
+    });
+    paint();
+    el.append(btn);
+  }
   if (m.isBot) el.append(h('span', { class: 'badge badge--bot' }, 'БОТ'));
   el.append(h('button', {
     type: 'button', class: 'icon-btn tile__expand',

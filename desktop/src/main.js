@@ -159,8 +159,8 @@ async function handleDisplayMedia(request, callback) {
   try {
     const frameUrl = request.frame?.url || request.securityOrigin || '';
     if (!isOurOrigin(frameUrl)) return callback({});
+    // Выбор не сбрасываем сразу: если системный звук недоступен, страница повторит запрос без звука
     const sel = pendingSource && Date.now() - pendingSource.at < 15000 ? pendingSource : null;
-    pendingSource = null;
     const sources = await desktopCapturer.getSources({ types: ['screen', 'window'], thumbnailSize: { width: 0, height: 0 } });
     let src = sel ? sources.find((s) => s.id === sel.id) : null;
     if (sel && !src) return callback({}); // окно закрыли между выбором и запуском

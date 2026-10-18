@@ -3340,3 +3340,12 @@ body.dl-page {
   .modal--stream .modal__footer .btn--primary { flex: 1 1 auto; min-width: 0; }
   .modal--stream .modal__footer .btn--primary .icon { display: none; }
 }
+
+/* Шифрование в попапе «Подключение» */
+.ping-popup__sec { margin-top: var(--space-3, 12px); padding-top: var(--space-3, 12px); border-top: 1px solid var(--border, rgba(255,255,255,.08)); }
+.ping-popup__subtitle { display: flex; align-items: center; gap: 6px; font-weight: 700; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted); margin-bottom: 6px; }
+.ping-popup__privacy { margin-top: 8px; display: grid; gap: 4px; font-size: 12px; color: var(--text-muted); }
+.ping-popup__code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 15px; letter-spacing: .06em; color: var(--text); background: var(--bg-3, rgba(255,255,255,.05)); border-radius: 8px; padding: 6px 8px; text-align: center; user-select: all; }
+.tile__sound { position: absolute; bottom: var(--sp-2); right: var(--sp-2); z-index: 2; width: 32px; height: 32px; background: rgba(8, 9, 12, 0.62); color: #fff; }
+.tile__sound:hover:not(:disabled) { background: rgba(8, 9, 12, 0.85); }
+.tile__sound[aria-pressed="true"] { color: var(--danger, #f2555f); }

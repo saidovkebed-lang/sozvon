@@ -63,6 +63,7 @@ export async function joinVoice(channelId) {
       const cfg = await api.config();
       applyNetConfig(cfg);
     } catch { /* остаёмся на прежнем списке ICE */ }
+    await rtc.ensureCert();
     state.myVoice = { channelId, serverId: ch.serverId };
     state.streaming = false;
     state.camera = false;
@@ -171,6 +172,7 @@ export async function startScreen({ quality = prefs.get('stream.quality'), audio
     }
     const stream = await getScreen({ video: Q.video, audio: !!withAudio });
     if (!state.myVoice) { stopStream(stream); return false; }
+    if (stream.audioFallback) toast('Звук экрана недоступен на этом компьютере — трансляция идёт без звука. Совет: показывайте отдельное окно или вкладку браузера со звуком.', '', 7000);
     const vt = stream.getVideoTracks()[0];
     if (vt) {
       try { vt.contentHint = Q.hint; } catch { /* ignore */ }

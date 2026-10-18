@@ -168,6 +168,26 @@ function row(label, value, cls = '') {
   return h('div', { class: 'ping-popup__row' }, h('span', null, label), h('strong', { class: cls }, value));
 }
 
+function encryptionSection(inVoice) {
+  const tls = location.protocol === 'https:';
+  const code = h('div', { class: 'ping-popup__code', id: 'privacy-code', 'aria-live': 'polite' }, 'вычисляется…');
+  const sec = h('div', { class: 'ping-popup__sec' },
+    h('div', { class: 'ping-popup__subtitle' }, icon(tls ? 'i-lock' : 'i-shield-off', 'icon--sm'), 'Шифрование'),
+    h('div', { class: 'ping-popup__rows' },
+      row('Соединение с сервером', tls ? 'TLS (HTTPS)' : 'не зашифровано', tls ? '' : 'is-bad'),
+      inVoice ? row('Голос и видео', 'сквозное · DTLS-SRTP') : null),
+    inVoice ? h('div', { class: 'ping-popup__privacy' },
+      h('span', null, 'Код конфиденциальности'), code,
+      h('p', { class: 'ping-popup__hint' }, 'Сравните код с собеседниками (голосом или в чате). Совпадает у всех — звонок зашифрован напрямую между вами, и его не может прослушать даже сервер.')) : null);
+  if (inVoice) {
+    rtc.privacyCode().then((v) => {
+      const el = document.getElementById('privacy-code');
+      if (el) el.textContent = v ? v.code : 'появится, когда все подключатся';
+    }).catch(() => {});
+  }
+  return sec;
+}
+
 function fillPopup() {
   const inVoice = !!state.myVoice;
   const v = ping.voice;
@@ -200,6 +220,7 @@ function fillPopup() {
       h('div', { class: 'ping-popup__big' }, main != null ? String(main) : '—', h('small', null, ' мс'))),
     h('div', { class: 'ping-popup__chart' }, chart(hist), h('div', { class: 'ping-popup__axis' }, h('span', null, `${KEEP * INTERVAL / 1000} с назад`), h('span', null, 'сейчас'))),
     h('div', { class: 'ping-popup__rows' }, ...rows),
+    encryptionSection(inVoice),
     h('p', { class: 'ping-popup__hint' }, inVoice ? 'Голос идёт напрямую между участниками или через TURN-сервер — поэтому его пинг может отличаться от пинга до сервера.' : 'Зайдите в голосовой канал, чтобы видеть качество звонка.'));
 }
 

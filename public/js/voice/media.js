@@ -46,13 +46,44 @@ export async function getCamera() {
 }
 
 /** video — констрейнты качества (v3 §2.4), audio — передавать звук экрана */
+// Звук экрана БЕЗ звука самого «Созвона»: иначе в трансляцию попадают голоса звонка и зрители
+// слышат себя и собеседников дважды (restrictOwnAudio — Chrome/Edge/Яндекс 138+, Electron).
+function screenAudioConstraints() {
+  const sup = navigator.mediaDevices.getSupportedConstraints?.() || {};
+  const a = { echoCancellation: false, noiseSuppression: false, autoGainControl: false };
+  if (sup.restrictOwnAudio) a.restrictOwnAudio = true;
+  if (sup.suppressLocalAudioPlayback) a.suppressLocalAudioPlayback = false;
+  return a;
+}
+
+export const screenAudioIsolated = () => !!navigator.mediaDevices?.getSupportedConstraints?.().restrictOwnAudio;
+
 export async function getScreen({ video = { frameRate: { ideal: 30 } }, audio = true } = {}) {
   ensureApi('getDisplayMedia');
+  const opts = (withAudio) => ({
+    video,
+    audio: withAudio ? screenAudioConstraints() : false,
+    systemAudio: withAudio ? 'include' : 'exclude',
+    selfBrowserSurface: 'exclude',
+    surfaceSwitching: 'include',
+  });
   try {
-    return await navigator.mediaDevices.getDisplayMedia({ video, audio });
+    return await navigator.mediaDevices.getDisplayMedia(opts(audio));
   } catch (e) {
-    if (e?.name === 'NotAllowedError' || e?.name === 'AbortError') {
+    if (e?.name === 'NotAllowedError' || (e?.name === 'AbortError' && !audio)) {
       throw new MediaError('Демонстрация экрана отменена', { cancelled: true });
+    }
+    // «Устройство занято» (NotReadableError) почти всегда — системный звук: на части компьютеров
+    // Windows не отдаёт его. Повторяем без звука, чтобы трансляция всё равно запустилась.
+    if (audio && (e?.name === 'NotReadableError' || e?.name === 'AbortError' || e?.name === 'OverconstrainedError' || e?.name === 'TypeError')) {
+      try {
+        const s = await navigator.mediaDevices.getDisplayMedia(opts(false));
+        s.audioFallback = true;
+        return s;
+      } catch (e2) {
+        if (e2?.name === 'NotAllowedError' || e2?.name === 'AbortError') throw new MediaError('Демонстрация экрана отменена', { cancelled: true });
+        throw explain(e2, 'экрану');
+      }
     }
     throw explain(e, 'экрану');
   }

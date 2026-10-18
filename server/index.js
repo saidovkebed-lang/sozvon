@@ -42,6 +42,15 @@ initBotToken(DATA_DIR);
 // ---------- HTTP(S) ----------
 const app = express();
 app.disable('x-powered-by');
+// Заголовки безопасности: HTTPS навсегда (HSTS), запрет встраивания чужими сайтами, без утечки адресов
+app.use((req, res, next) => {
+  if (req.secure || req.get('x-forwarded-proto') === 'https') res.setHeader('Strict-Transport-Security', 'max-age=31536000');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('Referrer-Policy', 'same-origin');
+  res.setHeader('Permissions-Policy', 'microphone=(self), camera=(self), display-capture=(self), geolocation=()');
+  next();
+});
 // За nginx (deploy/install.sh) — доверяем одному прокси, чтобы видеть реальные IP
 app.set('trust proxy', ['1', 'true'].includes(String(process.env.TRUST_PROXY)) ? 1 : false);
 

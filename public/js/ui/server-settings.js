@@ -953,6 +953,12 @@ function build() {
   });
 }
 
+function isTypingIn(box) {
+  const a = document.activeElement;
+  if (!box || !a || !box.contains(a)) return false;
+  return a.tagName === 'TEXTAREA' || (a.tagName === 'INPUT' && !['checkbox', 'radio', 'button', 'color', 'range'].includes(a.type));
+}
+
 function render() {
   const s = srv();
   if (!s) { closeModal(dlg()); return; }
@@ -967,7 +973,11 @@ function render() {
   $('#ss-nav-delete').hidden = !owner;
   if (!SECTIONS.find((x) => x.id === current)?.show(s)) current = 'overview';
   fillOverview();
-  if (current === 'roles') { renderRoleList(); renderRoleEditor(); }
+  if (current === 'roles') {
+    renderRoleList();
+    // Пока пользователь печатает в редакторе роли — не пересоздаём поля, иначе теряется фокус после каждой буквы
+    if (!isTypingIn($('#role-editor'))) renderRoleEditor();
+  }
   if (current === 'members') renderMembers();
   if (current === 'bans') renderBans();
   if (current === 'channels') renderChannelsList();

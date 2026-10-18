@@ -36,6 +36,7 @@ class AudioEngine {
     this.outBus = null;          // общая шина вывода → destination | элемент с setSinkId
     this.sinkEl = null;
     this.sinkDest = null;
+    this.streamMuted = new Set(); // socketId: звук трансляции этого участника выключен у меня
     this.remotes = new Map();    // `${socketId}|${kind}` → { el, stream, socketId, kind, src, gain, target }
     this.voiceChain = null;
     this.voiceMuted = false;
@@ -220,7 +221,7 @@ class AudioEngine {
   updateGains() {
     const routed = this.webAudioOut;
     for (const r of this.remotes.values()) {
-      const g = this.computeGain(this.userIdOf(r.socketId));
+      const g = r.kind === 'screen' && this.streamMuted.has(r.socketId) ? 0 : this.computeGain(this.userIdOf(r.socketId));
       r.target = g;
       if (routed && r.gain) {
         r.gain.gain.cancelScheduledValues(this.outCtx.currentTime);
@@ -496,6 +497,12 @@ export const audioEngine = {
   // дополнительно
   onDevicesChange: (fn) => engine.onDevicesChange(fn),
   getNoiseMode: () => engine.getNoiseMode(),
+  /** Звук демонстрации экрана участника: выключить/включить только у себя */
+  setStreamAudioMuted: (socketId, muted) => {
+    if (muted) engine.streamMuted.add(socketId); else engine.streamMuted.delete(socketId);
+    engine.updateGains();
+  },
+  isStreamAudioMuted: (socketId) => engine.streamMuted.has(socketId),
 };
 
 /** Отладка для QA: window.__sozvon.audio */
