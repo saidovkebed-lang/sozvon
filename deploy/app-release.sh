@@ -45,6 +45,17 @@ done
 install -d -m 0755 "$DL_DIR"
 if id "$APP_USER" >/dev/null 2>&1; then chown "$APP_USER:$APP_USER" "$DL_DIR" 2>/dev/null || true; fi
 
+# Одна копия за раз: таймер sozvon-app-release и update.sh могут запуститься одновременно
+exec 9>"$DATA_DIR/.app-release.lock"
+if ! flock -w 1800 9; then fail "Другая загрузка приложения для ПК не закончилась за 30 мин"; fi
+
+# Атомарная замена файла: копия рядом + переименование (раздача не видит «полуфайла»)
+put() {
+  local src=$1 dst=$2 tmp
+  tmp=$(mktemp "$(dirname "$dst")/.put.XXXXXX")
+  cp -f "$src" "$tmp" && chmod 0644 "$tmp" && mv -f "$tmp" "$dst"
+}
+
 # Служебные файлы автообновления electron-builder: latest*.yml (версия + sha512) и *.blockmap
 # (дифференциальная загрузка). Раздаём их, но на странице /download не показываем.
 is_meta_file() {
@@ -94,6 +105,7 @@ prune() {
   local keep=" $* " f
   for f in "$DL_DIR"/*; do
     [ -f "$f" ] || continue
+    case "$(basename "$f")" in .*) continue ;; esac
     [[ $keep == *" $(basename "$f") "* ]] || rm -f "$f"
   done
 }
@@ -108,7 +120,7 @@ if [ -n "$FROM_DIR" ]; then
     if is_app_file "$(basename "$f")"; then names+=("$(basename "$f")")
     elif is_meta_file "$(basename "$f")"; then metas+=("$(basename "$f")")
     else continue; fi
-    install -m 0644 "$f" "$DL_DIR/$(basename "$f")"
+    put "$f" "$DL_DIR/$(basename "$f")"
   done
   [ ${#names[@]} -gt 0 ] || fail "В $FROM_DIR нет файлов приложения (.exe/.zip/.AppImage/.dmg)"
   prune "${names[@]}" "${metas[@]}"
@@ -183,7 +195,7 @@ for n in "${names[@]}"; do
   if is_app_file "$n"; then apps+=("$n"); elif [[ ${n,,} == *.yml ]]; then ymls+=("$n"); else metas+=("$n"); fi
 done
 for n in "${apps[@]}" "${metas[@]}" "${ymls[@]}"; do
-  install -m 0644 "$work/$n" "$DL_DIR/$n"
+  put "$work/$n" "$DL_DIR/$n"
 done
 prune "${names[@]}"
 write_json "$version" "$tag" "$published" "" "${apps[@]}"
