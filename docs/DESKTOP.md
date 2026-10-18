@@ -95,6 +95,17 @@
 Нажмите «Демонстрация экрана», выберите качество, затем экран или окно в списке с превью.
 Звук компьютера передаётся на Windows, если включить «Звук экрана». На Linux звук экрана не передаётся.
 
+На Windows экран снимает своя программа захвата `sozvon-capture.exe` (DXGI Desktop Duplication, как
+«Захват экрана» в OBS). Встроенный захват Chromium на Windows 11 работает через Windows Graphics Capture,
+и из-за него в играх со своим курсором (Noita и др.) курсор пропадает. Своя программа курсор не трогает и
+дорисовывает его в трансляцию сама. Пока трансляцию никто не смотрит, захват стоит на паузе.
+
+Если демонстрация не запускается, в трее есть пункт «Совместимый захват экрана»: он возвращает захват
+Chromium (курсор в таких играх снова может пропадать). При выборе окна снимается его область на экране:
+окна, перекрывающие игру, тоже попадут в трансляцию.
+
+В браузере (не в приложении) захват делает сам браузер — для игр показывайте экран из приложения для ПК.
+
 ## Обновление
 
 Приложение само раз в несколько часов спрашивает у сервера, не вышла ли новая версия. Если вышла,
@@ -209,6 +220,10 @@ xvfb-run -a node scripts/smoke.mjs dist/linux-unpacked/sozvon --server=http://lo
 | `focusWindow()` | показать окно (например из `Notification.onclick`) |
 | `getScreenSources({types?, thumbnailWidth?, thumbnailHeight?}) → Promise<[{id, name, type:'screen'\|'window', thumbnail:dataURL, appIcon:dataURL\|null, displayId}]>` | источники для окна выбора |
 | `selectScreenSource(id, {audio}) → Promise<boolean>` | выбрать источник, затем сразу вызвать `getDisplayMedia()`; выбор действует 15 с. Без выбора отдаётся основной экран |
+| `nativeCapture: boolean` | есть своя программа захвата (Windows) |
+| `startNativeCapture({sourceId, maxWidth, maxHeight, fps}) → Promise<{ok, token, url}>` | запустить свой захват; кадры I420 (заголовок 24 байта `SZC1`, см. `desktop/native/capture/capture.cpp`) читать `fetch(url)` |
+| `nativeCaptureControl(token, 'pause'\|'resume'\|'update'\|'stop', params?) → Promise<{ok, url?}>` | управление; после `update` — новый `url` |
+| `onNativeCaptureEnded(cb) → off()` | захват завершился сам: `{token, reason:'window-closed'\|'exit'}` |
 | `openServerSettings()` | открыть окно «Сервер…» |
 
 Приложение добавляет к User-Agent строку `SozvonDesktop/<версия>`.

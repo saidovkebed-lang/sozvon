@@ -11,6 +11,7 @@ const path = require('node:path');
 const fs = require('node:fs');
 const { buildCodeMap, parseCombo, comboToAccelerator } = require('./keymap');
 const { createUpdater } = require('./updater');
+const { createNativeCapture } = require('./native-capture');
 
 const APP_ID = 'io.sslip.sozvon.desktop';
 const DISPLAY_NAME = 'Созвон';
@@ -41,10 +42,13 @@ const DEFAULT_CONFIG = {
 };
 let config = loadConfig();
 if (config.startHiddenOnce) { startHidden = true; delete config.startHiddenOnce; }
-// Захват ЭКРАНА на Windows: по умолчанию Desktop Duplication (DXGI) — Chromium сам дорисовывает курсор
-// в кадр и не трогает системный. У Windows Graphics Capture бывает пропадающий/мерцающий курсор в играх
-// (та же история у OBS). Вернуть WGC — пункт трея «Захват экрана: Windows Graphics Capture» (+ перезапуск).
-if (IS_WIN && !config.useWgcCapture) app.commandLine.appendSwitch('disable-features', 'WebRtcAllowWgcScreenCapturer');
+// Демонстрация на Windows — свой захват (native-capture.js, DXGI Desktop Duplication): захват Chromium
+// (Windows Graphics Capture) прячет курсор в играх. Пункт трея «Совместимый захват экрана» возвращает Chromium.
+const nativeCapture = createNativeCapture({ log: (m) => console.log(m) });
+const nativeCaptureOn = () => !config.legacyCapture && nativeCapture.isAvailable();
+// Страница читает кадры своего захвата с http://127.0.0.1 — проверки «доступа к локальной сети» Chromium
+// это запрещают (окно открывает только наш сервер, остальные ссылки — в системном браузере)
+app.commandLine.appendSwitch('disable-features', 'LocalNetworkAccessChecks,PrivateNetworkAccessSendPreflights');
 function loadConfig() {
   try { return { ...DEFAULT_CONFIG, ...JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')) }; } catch { return { ...DEFAULT_CONFIG }; }
 }
@@ -141,6 +145,7 @@ function setupCertificates(ses) {
 const ALLOWED_PERMS = new Set([
   'media', 'display-capture', 'notifications', 'fullscreen', 'clipboard-sanitized-write', 'clipboard-read',
   'speaker-selection', 'pointerLock', 'keyboardLock', 'window-management', 'idle-detection',
+  'local-network-access', 'local-network', 'loopback-network', // кадры своего захвата экрана с 127.0.0.1
 ]);
 function setupPermissions(ses) {
   ses.setPermissionRequestHandler((wc, permission, cb, details) => {
@@ -179,6 +184,12 @@ async function handleDisplayMedia(request, callback) {
     const res = { video: src };
     // Системный звук: loopback поддерживается Chromium только на Windows (и macOS 13+ — здесь не собираем)
     if (request.audioRequested && (sel ? sel.audio : true) && IS_WIN) res.audio = 'loopback';
+    // Только звук (картинку снимает свой захват): видео — кадр самой страницы (без захвата экрана ОС),
+    // страница сразу останавливает эту дорожку
+    if (sel?.audioOnly) {
+      if (!res.audio || !request.frame) return callback({});
+      res.video = request.frame;
+    }
     callback(res);
   } catch (e) {
     console.error('[display-media]', e);
@@ -358,7 +369,10 @@ function createMainWindow() {
     if (!isMainFrame || code === -3 /* ABORTED */) return;
     showOffline(url, `${desc} (${code})`);
   });
+  // захват экрана принадлежит странице: перезагрузка/уход/падение — остановить помощники
+  wc.on('did-start-navigation', (d) => { if (d?.isMainFrame && !d.isSameDocument) nativeCapture.stopAll(); });
   wc.on('render-process-gone', (_e, d) => {
+    nativeCapture.stopAll();
     console.error('[renderer gone]', d.reason);
     if (d.reason !== 'clean-exit') setTimeout(() => loadServer(), 1000);
   });
@@ -578,13 +592,15 @@ function updateTray() {
       { label: 'Сервер…', click: () => openSetup() },
       { label: 'Запускать при входе в систему', type: 'checkbox', checked: !!config.autoStart, click: (mi) => setAutoStart(mi.checked) },
       { label: 'Сворачивать в трей при закрытии', type: 'checkbox', checked: !!config.closeToTray, click: (mi) => { config.closeToTray = mi.checked; saveConfig(); buildAppMenu(); } },
-      ...(IS_WIN ? [{
-        label: 'Захват экрана: Windows Graphics Capture', type: 'checkbox', checked: !!config.useWgcCapture,
+      ...(IS_WIN && nativeCapture.isAvailable() ? [{
+        label: 'Совместимый захват экрана (может прятать курсор в играх)', type: 'checkbox', checked: !!config.legacyCapture,
         click: (mi) => {
-          config.useWgcCapture = mi.checked; saveConfig(true);
+          config.legacyCapture = mi.checked; saveConfig(true);
           dialog.showMessageBox({ type: 'info', title: 'Захват экрана', icon: windowIcon(), buttons: ['OK'],
-            message: 'Изменение вступит в силу после перезапуска приложения.',
-            detail: 'Если в играх при трансляции пропадает или мерцает курсор — оставьте этот пункт выключенным.' }).catch(() => {});
+            message: mi.checked ? 'Включён захват Chromium.' : 'Включён собственный захват «Созвона».',
+            detail: (mi.checked
+              ? 'Используйте, только если обычная демонстрация не работает: в играх со своим курсором (Noita и др.) он может пропадать.'
+              : 'Курсор в играх не пропадает.') + ' Действует со следующей демонстрации.' }).catch(() => {});
         },
       }] : []),
       ...updateTrayItems(),
@@ -791,7 +807,7 @@ function fromAppWindow(e) {
 
 function setupIpc() {
   ipcMain.on('desktop:info', (e) => {
-    e.returnValue = { version: app.getVersion(), platform: process.platform, serverOrigin: serverOrigin() };
+    e.returnValue = { version: app.getVersion(), platform: process.platform, serverOrigin: serverOrigin(), nativeCapture: nativeCaptureOn() };
   });
   ipcMain.on('desktop:settings', (e, s) => {
     if (!fromPage(e) || !s || typeof s !== 'object') return;
@@ -822,12 +838,18 @@ function setupIpc() {
       appIcon: s.appIcon && !s.appIcon.isEmpty() ? s.appIcon.toDataURL() : null,
     }));
   });
-  ipcMain.handle('desktop:select-source', async (e, { id, audio } = {}) => {
+  ipcMain.handle('desktop:native-capture-start', async (e, opts) => {
+    if (!fromPage(e)) return { ok: false, error: 'forbidden' };
+    if (!nativeCaptureOn()) return { ok: false, error: 'unavailable' };
+    try { return await nativeCapture.start(e.sender, opts || {}); } catch (err) { return { ok: false, error: err?.message || String(err) }; }
+  });
+  ipcMain.handle('desktop:native-capture-ctl', (e, { token, cmd, params } = {}) => (fromPage(e) ? nativeCapture.control(token, cmd, params) : { ok: false }));
+  ipcMain.handle('desktop:select-source', async (e, { id, audio, audioOnly } = {}) => {
     if (!fromPage(e)) return false;
     if (!id) { pendingSource = null; return true; }
     const sources = await desktopCapturer.getSources({ types: ['screen', 'window'], thumbnailSize: { width: 0, height: 0 } });
     if (!sources.some((s) => s.id === id)) { pendingSource = null; return false; }
-    pendingSource = { id, audio: !!audio, at: Date.now() };
+    pendingSource = { id, audio: !!audio || !!audioOnly, audioOnly: !!audioOnly, at: Date.now() };
     return true;
   });
   ipcMain.on('desktop:open-server-settings', (e) => { if (fromPage(e) || fromAppWindow(e)) openSetup(); });
@@ -880,7 +902,7 @@ app.on('window-all-closed', () => {
 });
 app.on('will-quit', () => {
   try { globalShortcut.unregisterAll(); } catch { /* ignore */ }
-  try { globalShortcut.unregisterAll(); } catch { /* ignore */ }
+  nativeCapture.stopAll();
   try { if (hook && hook.running) hook.mod.uIOhook.stop(); } catch { /* ignore */ }
 });
 

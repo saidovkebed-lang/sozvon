@@ -134,6 +134,7 @@ class Peer {
       s.replaceTrack(on ? this.screenTracks[i] || null : null).catch((e) => console.warn('[rtc] replaceTrack', e));
     });
     if (on) this.applyEncodings();
+    this.mgr.screenViewersChanged();
   }
 
   /** v3 §2.4: битрейт/частота кадров демонстрации (RTCRtpSender.setParameters) */
@@ -250,6 +251,8 @@ class RtcManager {
     this.listeners = new Set();
     this.localSpeaking = false;
     this.screenParams = null;   // { maxBitrate, maxFramerate, degradation } — качество демонстрации
+    this.lastViewers = 0;
+    this.onScreenViewers = null; // (n) => void — число зрителей моей трансляции изменилось
     // смена отправляемого трека (пересборка цепочки микрофона) → replaceTrack у всех пиров, без перезахода
     audio.onOutgoingTrack((track) => this.replaceMicTrack(track));
     audio.onGateChange(() => this.updateSpeaking());
@@ -387,12 +390,27 @@ class RtcManager {
 
   isWatching(socketId) { return this.watching.has(socketId); }
 
+  /** Сколько собеседников смотрит мою трансляцию */
+  screenViewers() {
+    let n = 0;
+    for (const p of this.peers.values()) if (p.screenWatched && !p.closed) n++;
+    return n;
+  }
+
+  screenViewersChanged() {
+    const n = this.screenViewers();
+    if (n === this.lastViewers) return;
+    this.lastViewers = n;
+    try { this.onScreenViewers?.(n); } catch (e) { console.error(e); }
+  }
+
   removePeer(socketId) {
     this.watching.delete(socketId);
     const p = this.peers.get(socketId);
     if (!p) return;
     p.close();
     this.peers.delete(socketId);
+    this.screenViewersChanged();
     this.changed();
   }
 

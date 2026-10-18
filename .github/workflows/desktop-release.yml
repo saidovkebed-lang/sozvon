@@ -43,6 +43,19 @@ jobs:
           cache-dependency-path: desktop/package-lock.json
       - run: npm ci
       - run: npm run check
+      # Помощник захвата экрана (DXGI Desktop Duplication — не прячет курсор в играх). Статический CRT (/MT):
+      # не нужен Visual C++ Redistributable. Проверка — тут же, на настоящей Windows раннера.
+      - name: sozvon-capture.exe
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          New-Item -ItemType Directory -Force native\capture\build | Out-Null
+          cmd /c "`"$vs\VC\Auxiliary\Build\vcvars64.bat`" && cl /nologo /O2 /MT /EHsc /std:c++17 /utf-8 /W3 native\capture\capture.cpp /Fonative\capture\build\ /Fenative\capture\build\sozvon-capture.exe /link /SUBSYSTEM:CONSOLE"
+          if (!(Test-Path native\capture\build\sozvon-capture.exe)) { throw 'sozvon-capture.exe не собрался' }
+      - name: Проверка sozvon-capture.exe
+        if: runner.os == 'Windows'
+        run: node scripts/capture-smoke.cjs
       - run: npm run ${{ matrix.script }} -- --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'

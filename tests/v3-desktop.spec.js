@@ -33,7 +33,11 @@ test.beforeAll(async () => {
     await sleep(800);
   }
 });
-test.afterAll(() => { if (xvfb) process.kill(xvfb.pid, 'SIGTERM'); });
+test.afterAll(() => {
+  if (!xvfb) return;
+  process.kill(xvfb.pid, 'SIGTERM');
+  delete process.env.DISPLAY; // дисплей был наш — следующим файлам тестов он не достаётся
+});
 
 test('desktop: окно открывается, грузит страницу сервера, мост window.sozvonDesktop.isDesktop === true', async () => {
   const exe = findExe();
