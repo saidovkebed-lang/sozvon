@@ -42,10 +42,11 @@ const DEFAULT_CONFIG = {
 };
 let config = loadConfig();
 if (config.startHiddenOnce) { startHidden = true; delete config.startHiddenOnce; }
-// Демонстрация на Windows — свой захват (native-capture.js, DXGI Desktop Duplication): захват Chromium
-// (Windows Graphics Capture) прячет курсор в играх. Пункт трея «Совместимый захват экрана» возвращает Chromium.
+// Демонстрация на Windows по умолчанию — штатный захват Chromium (Windows Graphics Capture от Microsoft).
+// Свой захват (native-capture.js, DXGI Desktop Duplication) — по галочке в трее: рисует курсор в играх
+// со своим курсором (Noita и др.), где захват Windows его прячет. Старый ключ legacyCapture больше не читается.
 const nativeCapture = createNativeCapture({ log: (m) => console.log(m) });
-const nativeCaptureOn = () => !config.legacyCapture && nativeCapture.isAvailable();
+const nativeCaptureOn = () => !!config.ownCapture && nativeCapture.isAvailable();
 // Страница читает кадры своего захвата с http://127.0.0.1 — проверки «доступа к локальной сети» Chromium
 // это запрещают (окно открывает только наш сервер, остальные ссылки — в системном браузере)
 app.commandLine.appendSwitch('disable-features', 'LocalNetworkAccessChecks,PrivateNetworkAccessSendPreflights');
@@ -609,14 +610,15 @@ function updateTray() {
       { label: 'Запускать при входе в систему', type: 'checkbox', checked: !!config.autoStart, click: (mi) => setAutoStart(mi.checked) },
       { label: 'Сворачивать в трей при закрытии', type: 'checkbox', checked: !!config.closeToTray, click: (mi) => { config.closeToTray = mi.checked; saveConfig(); buildAppMenu(); } },
       ...(IS_WIN && nativeCapture.isAvailable() ? [{
-        label: 'Совместимый захват экрана (может прятать курсор в играх)', type: 'checkbox', checked: !!config.legacyCapture,
+        label: 'Свой захват экрана (курсор в играх вроде Noita)', type: 'checkbox', checked: !!config.ownCapture,
         click: (mi) => {
-          config.legacyCapture = mi.checked; saveConfig(true);
+          config.ownCapture = mi.checked; saveConfig(true);
           dialog.showMessageBox({ type: 'info', title: 'Захват экрана', icon: windowIcon(), buttons: ['OK'],
-            message: mi.checked ? 'Включён захват Chromium.' : 'Включён собственный захват «Astra».',
+            message: mi.checked ? 'Включён собственный захват «Astra».' : 'Включён стандартный захват Windows.',
             detail: (mi.checked
-              ? 'Используйте, только если обычная демонстрация не работает: в играх со своим курсором (Noita и др.) он может пропадать.'
-              : 'Курсор в играх не пропадает.') + ' Действует со следующей демонстрации.' }).catch(() => {});
+              ? 'Курсор в играх со своим курсором (Noita и др.) не пропадает. Если картинка хуже или подтормаживает — снимите галочку.'
+              : 'Обычный захват Windows (как раньше). В играх со своим курсором (Noita и др.) курсор может не попадать в трансляцию.') +
+              ' Действует со следующей демонстрации.' }).catch(() => {});
         },
       }] : []),
       ...updateTrayItems(),

@@ -30,8 +30,10 @@ test.afterAll(() => {
   delete process.env.DISPLAY; // дисплей был наш — следующим файлам тестов он не достаётся
 });
 
-async function launch(env = {}) {
+// По умолчанию демонстрация идёт штатным захватом Chromium/Windows; свой захват — галочка в трее (ownCapture)
+async function launch(env = {}, cfg = { ownCapture: true }) {
   const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'sozvon-nc-'));
+  if (cfg) fs.writeFileSync(path.join(userData, 'config.json'), JSON.stringify(cfg));
   const logFile = path.join(userData, 'fake.log');
   const app = await electron.launch({
     executablePath: ELECTRON,
@@ -57,8 +59,8 @@ async function launch(env = {}) {
 }
 
 /** Электрон-стример A + браузер-зритель B в одном голосовом канале */
-async function setup(makePage, env) {
-  const A = await launch(env);
+async function setup(makePage, env, cfg) {
+  const A = await launch(env, cfg);
   await createServerUI(A.win, 'Свой захват');
   const code = await inviteCode(A.win);
   const pb = await makePage({ name: 'B' });
@@ -157,6 +159,20 @@ test.describe('v6: свой захват экрана (приложение дл
       await expect(win.locator('.toast', { hasText: 'Окно закрыто' })).toBeVisible({ timeout: 15000 });
       await expect(win.locator('#ctrl-screen')).not.toHaveClass(/is-on/);
       await expect(pb.locator('.tile--screen')).toHaveCount(0, { timeout: 20000 });
+    } finally {
+      await app.close().catch(() => {});
+    }
+  });
+
+  test('по умолчанию — штатный захват Windows/Chromium: помощник не запускается, трансляция идёт', async ({ makePage }) => {
+    const { app, win, readLog, pb } = await setup(makePage, {}, null);
+    try {
+      expect(await win.evaluate(() => window.sozvonDesktop.nativeCapture)).toBe(false);
+      await startShare(win);
+      await expect.poll(() => kindOfMyScreen(win), { timeout: 20000 }).toBe('MediaStreamTrack');
+      await watchScreen(pb);
+      await expect.poll(() => pb.locator('.tile--screen video').evaluate((v) => v.videoWidth), { timeout: 20000 }).toBeGreaterThan(0);
+      expect(readLog()).toBe(''); // sozvon-capture не запускался
     } finally {
       await app.close().catch(() => {});
     }
