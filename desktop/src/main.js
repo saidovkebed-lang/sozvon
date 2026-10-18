@@ -86,8 +86,8 @@ const isLocalHost = (h) => h === 'localhost' || h === '127.0.0.1' || h === '[::1
 }
 // Медиа-ключи/фоновые вкладки: голос не должен «засыпать», когда окно свёрнуто
 app.commandLine.appendSwitch('disable-background-timer-throttling');
-app.commandLine.appendSwitch('disable-renderer-backgrounding');
-app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
+// Окно свёрнуто или перекрыто — Chromium перестаёт его рисовать (видео, анимации): заметно меньше нагрузка.
+// Таймеры не замедляем — индикаторы речи и пинг работают и в фоне; звук и WebRTC от этого не зависят.
 
 // ---------------- Одиночный экземпляр ----------------
 if (!app.requestSingleInstanceLock()) {
@@ -291,7 +291,7 @@ function createMainWindow() {
       nodeIntegration: false,
       webSecurity: true,
       spellcheck: true,
-      backgroundThrottling: false,
+      backgroundThrottling: true,
     },
   });
   if (config.windowBounds?.maximized) mainWindow.maximize();

@@ -42,6 +42,8 @@ export const DEFAULTS = Object.freeze({
   // --- Демонстрация экрана (v3) ---
   'stream.quality': '720p30',        // '720p30' | '1080p60' | 'source'
   'stream.audio': true,              // передавать звук экрана
+  'stream.autoWatch': false,         // сразу смотреть чужие трансляции (иначе — по кнопке «Смотреть»)
+  'stream.selfPreview': false,       // показывать себе превью своего экрана (тратит процессор)
 
   // --- Горячие клавиши (строка вида 'Ctrl+Shift+M'; '' = не назначено) ---
   'keybinds.toggleMute': 'Ctrl+Shift+M',

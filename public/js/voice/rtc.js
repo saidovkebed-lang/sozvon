@@ -5,6 +5,7 @@ import { emit } from '../socket.js';
 import { state } from '../state.js';
 import { toast } from '../ui/toasts.js';
 import { engine as audio } from '../audio/engine.js';
+import { prefs } from '../prefs.js';
 // Обработка микрофона, шумовой гейт («говорит»), громкость собеседников — в js/audio/engine.js.
 
 class Peer {
@@ -22,6 +23,9 @@ class Peer {
     this.closed = false;
     this.iceRestarts = 0;
     this.warned = false;
+    // Трансляция по запросу: стример шлёт видео/звук экрана только тем, кто нажал «Смотреть»
+    this.screenWatched = false; // этот собеседник смотрит МОЮ трансляцию
+    this.screenTracks = [];
 
     const pc = new RTCPeerConnection({
       iceServers: mgr.iceServers,
@@ -64,6 +68,8 @@ class Peer {
         this.applyEncodings();
         // сервер только ретранслирует voice:speaking — новичок не знает, что мы уже говорим
         if (mgr.localSpeaking && state.myVoice) emit('voice:speaking', { speaking: true });
+        // после переподключения напоминаем стримеру, что смотрим его трансляцию
+        if (mgr.watching.has(this.id)) this.send({ watch: true });
       }
       mgr.changed();
     };
@@ -92,7 +98,21 @@ class Peer {
     if (this.pendingLocal) return; // добавится вместе с остальными после первого offer
     this.send({ trackInfo: { streamId: stream.id, kind } });
     this.senders[kind] = stream.getTracks().map((t) => this.pc.addTrack(t, stream));
-    if (kind === 'screen') this.applyEncodings();
+    if (kind === 'screen') {
+      this.screenTracks = stream.getTracks();
+      // не смотрит — ничего не кодируем и не отправляем (без пересогласования соединения)
+      if (!this.screenWatched) for (const s of this.senders.screen) s.replaceTrack(null).catch(() => {});
+      this.applyEncodings();
+    }
+  }
+
+  /** Собеседник начал/перестал смотреть мою трансляцию */
+  setScreenWatched(on) {
+    this.screenWatched = !!on;
+    this.senders.screen.forEach((s, i) => {
+      s.replaceTrack(on ? this.screenTracks[i] || null : null).catch((e) => console.warn('[rtc] replaceTrack', e));
+    });
+    if (on) this.applyEncodings();
   }
 
   /** v3 §2.4: битрейт/частота кадров демонстрации (RTCRtpSender.setParameters) */
@@ -131,6 +151,7 @@ class Peer {
     let kind = this.trackInfo.get(stream.id);
     if (!kind) kind = track.kind === 'audio' ? 'mic' : 'camera';
     this.remote[kind] = stream;
+    if (kind === 'screen' && prefs.get('stream.autoWatch') && !this.mgr.watching.has(this.id)) this.mgr.setWatching(this.id, true);
     const cleanup = () => {
       if (this.remote[kind] === stream && !stream.getTracks().some((t) => t.readyState === 'live')) {
         this.remote[kind] = null;
@@ -151,9 +172,13 @@ class Peer {
     this.queue = this.queue.then(() => this.processSignal(data)).catch((e) => console.warn('[rtc] signal', e));
   }
 
-  async processSignal({ description, candidate, trackInfo }) {
+  async processSignal({ description, candidate, trackInfo, watch }) {
     const pc = this.pc;
     if (this.closed) return;
+    if (typeof watch === 'boolean') {
+      this.setScreenWatched(watch);
+      return;
+    }
     if (trackInfo) {
       this.trackInfo.set(trackInfo.streamId, trackInfo.kind);
       return;
@@ -197,6 +222,7 @@ class Peer {
 
 class RtcManager {
   constructor() {
+    this.watching = new Set(); // socketId стримеров, чью трансляцию я смотрю
     this.peers = new Map();
     this.local = { mic: null, screen: null, camera: null };
     this.iceServers = [];
@@ -281,6 +307,7 @@ class RtcManager {
       this.local[k] = null;
     }
     this.iceServers = iceServers || [];
+    this.watching.clear();
     this.local.mic = mic || null;
     this.applyMute();
     this.changed();
@@ -289,6 +316,7 @@ class RtcManager {
   stop() {
     for (const p of this.peers.values()) p.close();
     this.peers.clear();
+    this.watching.clear();
     audio.releaseVoiceMic();
     this.local.mic = null;
     this.setLocalSpeaking(false);
@@ -329,7 +357,17 @@ class RtcManager {
     return members.find((m) => m.socketId === socketId)?.username || 'участником';
   }
 
+  /** Зритель: смотреть / выйти из трансляции участника */
+  setWatching(socketId, on) {
+    if (on) this.watching.add(socketId); else this.watching.delete(socketId);
+    this.peers.get(socketId)?.send({ watch: !!on });
+    this.changed();
+  }
+
+  isWatching(socketId) { return this.watching.has(socketId); }
+
   removePeer(socketId) {
+    this.watching.delete(socketId);
     const p = this.peers.get(socketId);
     if (!p) return;
     p.close();

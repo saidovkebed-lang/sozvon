@@ -1,6 +1,6 @@
 // v3 UI: роли (настройки сервера, контекстное меню, цвет ника, hoist), профиль (аватар/попап/статус),
 // пинг, качество стрима 1080p60. Селекторы — согласованы с frontend (см. docs/QA_REPORT.md, раздел v3). owner: qa
-import { test, expect, twoUsersOneServer, loginViaToken, createServerUI, inviteCode, joinServerUI, openTextChannel, sendMessageUI, joinVoiceUI, messageWith, startScreenShare } from './fixtures/ui.js';
+import { test, expect, twoUsersOneServer, loginViaToken, createServerUI, inviteCode, joinServerUI, openTextChannel, sendMessageUI, joinVoiceUI, messageWith, startScreenShare, watchScreen } from './fixtures/ui.js';
 import { connectUser, ack, http, sleep } from './fixtures/api.js';
 import { BASE_URL } from './fixtures/env.js';
 import { P, DEFAULT_EVERYONE, ok, ensureV3Media, upload } from './fixtures/v3.js';
@@ -288,6 +288,7 @@ test.describe('v3 UI: пинг и стрим', () => {
       return out;
     });
     await startScreenShare(pa, '1080p60');
+    await watchScreen(pb);
     await expect(pb.locator('#stage-grid .tile.tile--screen video')).toHaveCount(1, { timeout: 20000 });
     await expect.poll(async () => (await screenEnc()).some((e) => e.maxBitrate === 6_000_000 && e.maxFramerate === 60),
       { timeout: 15000, message: 'sender экрана: maxBitrate 6e6, maxFramerate 60' }).toBe(true);

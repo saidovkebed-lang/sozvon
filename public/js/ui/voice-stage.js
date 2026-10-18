@@ -6,6 +6,7 @@ import { socketId } from '../socket.js';
 import { rtc } from '../voice/rtc.js';
 import { moreButton } from './context-menu.js';
 import { audioEngine } from '../audio/engine.js';
+import { prefs } from '../prefs.js';
 import { joinVoice, leaveVoice, toggleMute, toggleDeafen, toggleScreen, toggleCamera } from '../voice/voice.js';
 
 const tiles = new Map();   // key -> { el, stream, sig }
@@ -43,7 +44,7 @@ function toggleFullscreen(el) {
 
 function fillTile(entry, d) {
   const { el } = entry;
-  const { member: m, kind, stream, self, peer } = d;
+  const { member: m, kind, stream, self, peer, watching, hasStream } = d;
   el.dataset.socketId = m.socketId;
   if (m.userId) el.dataset.userId = m.userId;
   el.dataset.kind = kind;
@@ -60,14 +61,14 @@ function fillTile(entry, d) {
   const u = { ...m, ...(findUser(m.userId) || {}), id: m.userId };
   const avatarSig = `${u.avatar}|${u.avatarAnimated}|${u.color}`;
   const name = displayName(u);
-  const sig = [stream?.id || '', stream?.getAudioTracks().length || 0, name, u.color, u.avatar, u.avatarAnimated, m.muted, m.deafened, m.serverMute, m.serverDeafen, kind, m.streaming, m.isBot].join('|');
+  const sig = [stream?.id || '', hasStream?.id || '', watching ? 1 : 0, stream?.getAudioTracks().length || 0, name, u.color, u.avatar, u.avatarAnimated, m.muted, m.deafened, m.serverMute, m.serverDeafen, kind, m.streaming, m.isBot].join('|');
   if (entry.sig === sig && entry.streamRef === stream) return;
   entry.sig = sig;
 
   if (entry.streamRef !== stream || !el.firstChild || (!stream && entry.avatarSig !== avatarSig)) {
     entry.avatarSig = avatarSig;
     entry.streamRef = stream;
-    const media = el.querySelector('.tile__video, .avatar');
+    const media = el.querySelector(':scope > .tile__video, :scope > .tile__cover, :scope > .avatar');
     let next;
     if (stream) {
       next = h('video', {
@@ -77,6 +78,9 @@ function fillTile(entry, d) {
       next.muted = true;
       next.srcObject = stream;
       next.play().catch(() => {});
+    } else if (kind === 'screen') {
+      next = h('div', { class: 'tile__cover' }, avatar(u, 'xl'),
+        h('div', { class: 'tile__cover-text' }, self ? 'Вы показываете экран' : `${name} показывает экран`));
     } else {
       next = avatar(u, 'xl');
     }
@@ -87,7 +91,7 @@ function fillTile(entry, d) {
   }
 
   // подписи и бейджи
-  el.querySelectorAll('.tile__label, .badge, .tile__expand, .tile__more, .tile__sound').forEach((x) => x.remove());
+  el.querySelectorAll('.tile__label, .badge, .tile__expand, .tile__more, .tile__sound, .tile__action').forEach((x) => x.remove());
   const label = h('div', { class: 'tile__label' }, h('span', null, kind === 'screen' ? `${name} — экран` : name));
   if (kind === 'main') {
     if (m.deafened || m.serverDeafen) label.append(icon('i-headphones-off', 'icon--sm'));
@@ -95,6 +99,23 @@ function fillTile(entry, d) {
   }
   el.append(label);
   if (kind === 'screen') el.append(h('span', { class: 'badge badge--live' }, 'LIVE'));
+  if (kind === 'screen') {
+    const act = (cls, ic, text, title, fn) => h('button', {
+      type: 'button', class: `btn btn--sm tile__action ${cls}`, title,
+      onclick: (e) => { e.stopPropagation(); fn(); },
+    }, icon(ic, 'icon--sm'), text);
+    if (self) {
+      el.append(act('btn--danger tile__stopshare', 'i-close', 'Остановить демонстрацию', 'Остановить демонстрацию экрана', () => toggleScreen()));
+    } else if (!watching) {
+      el.append(act('btn--primary tile__watch', 'i-play', 'Смотреть трансляцию', 'Начать смотреть — видео пойдёт только после нажатия', () => rtc.setWatching(m.socketId, true)));
+    } else {
+      el.append(act('btn--ghost tile__unwatch', 'i-close', 'Выйти из трансляции', 'Перестать смотреть (экономит интернет и процессор)', () => {
+        if (focusedKey === el.dataset.key) focusedKey = null;
+        if (document.fullscreenElement === el) document.exitFullscreen().catch(() => {});
+        rtc.setWatching(m.socketId, false);
+      }));
+    }
+  }
   if (kind === 'screen' && !self && stream?.getAudioTracks().length) {
     const btn = h('button', { type: 'button', class: 'icon-btn tile__sound' });
     const paint = () => {
@@ -160,7 +181,11 @@ function render() {
       scr = liveVideo(peer.remote.screen) && m.streaming !== false ? peer.remote.screen : null;
     }
     wanted.push({ key: `${m.socketId}:main`, member: m, kind: 'main', stream: cam, self, peer: peer || (inThis && !self && !m.isBot ? { connected: false } : null) });
-    if (scr) wanted.push({ key: `${m.socketId}:screen`, member: m, kind: 'screen', stream: scr, self, peer });
+    if (scr) {
+      // Экономия процессора: свою трансляцию не рисуем (если не включено превью), чужую — только по «Смотреть»
+      const watching = self ? !!prefs.get('stream.selfPreview') : rtc.isWatching(m.socketId);
+      wanted.push({ key: `${m.socketId}:screen`, member: m, kind: 'screen', stream: watching ? scr : null, hasStream: scr, watching, self, peer });
+    }
   }
 
   const keys = new Set(wanted.map((w) => w.key));
@@ -207,6 +232,7 @@ export function initStage() {
   subscribe(['nav', 'voice', 'me', 'servers', 'profile'], render);
   subscribe('speaking', updateSpeaking);
   rtc.onChange(render);
+  prefs.subscribe('stream.selfPreview', () => render());
   $('#btn-voice-join').addEventListener('click', () => {
     const ch = getChannel();
     if (ch?.type === 'voice') joinVoice(ch.id);

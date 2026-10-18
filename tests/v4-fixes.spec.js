@@ -1,7 +1,7 @@
 // v4: исправления по отзыву владельца — ввод названия роли, звук демонстрации экрана
 // (без звука звонка, фолбэк при «Устройство занято», отключение звука трансляции у зрителя),
 // шифрование (код конфиденциальности одинаков у участников, заголовки безопасности).
-import { test, expect, twoUsersOneServer, joinVoiceUI, startScreenShare } from './fixtures/ui.js';
+import { test, expect, twoUsersOneServer, joinVoiceUI, startScreenShare, watchScreen } from './fixtures/ui.js';
 import { connectUser, ack, http } from './fixtures/api.js';
 
 const socks = [];
@@ -83,6 +83,7 @@ test.describe('v4: исправления', () => {
     await startScreenShare(pa, '720p30');
     const screenTile = pb.locator('.tile--screen');
     await expect(screenTile).toBeVisible({ timeout: 20000 });
+    await watchScreen(pb);
     const btn = screenTile.locator('.tile__sound');
     if (await btn.count() === 0) test.info().annotations.push({ type: 'note', description: 'в headless у экрана нет звуковой дорожки — кнопка не показывается' });
     else {
@@ -92,6 +93,39 @@ test.describe('v4: исправления', () => {
       expect(gains.filter(([k]) => k === 'screen').every(([, g]) => g === 0)).toBe(true);
       expect(gains.filter(([k]) => k === 'mic').every(([, g]) => g > 0)).toBe(true);
     }
+  });
+
+  test('трансляция по запросу: без «Смотреть» видео не отправляется; «Выйти из трансляции»; «Остановить демонстрацию»', async ({ makePage }) => {
+    const { pa, pb } = await twoUsersOneServer(makePage, 'По запросу');
+    await joinVoiceUI(pa);
+    await joinVoiceUI(pb);
+    await expect(pa.locator('.tile[data-connected="true"]').first()).toBeVisible({ timeout: 20000 });
+    await startScreenShare(pa, '720p30');
+    // треки, которые A реально отправляет B для экрана (null = ничего не кодируется)
+    const sending = () => pa.evaluate(() => {
+      const p = [...window.__sozvon.rtc.peers.values()][0];
+      return p.senders.screen.filter((s) => s.track && s.track.kind === 'video').length;
+    });
+    await expect(pb.locator('.tile--screen .tile__watch')).toBeVisible({ timeout: 20000 });
+    await expect(pb.locator('.tile--screen video')).toHaveCount(0);
+    expect(await sending()).toBe(0);
+    // своя плашка у стримера — без превью, с кнопкой остановки
+    await expect(pa.locator('.tile--screen .tile__cover')).toBeVisible();
+    await expect(pa.locator('.tile--screen video')).toHaveCount(0);
+
+    await watchScreen(pb);
+    await expect.poll(sending, { timeout: 10000 }).toBe(1);
+    await expect.poll(() => pb.locator('.tile--screen video').evaluate((v) => v.videoWidth), { timeout: 20000 }).toBeGreaterThan(0);
+
+    await pb.locator('.tile--screen').hover();
+    await pb.locator('.tile--screen .tile__unwatch').click();
+    await expect(pb.locator('.tile--screen .tile__watch')).toBeVisible();
+    await expect(pb.locator('.tile--screen video')).toHaveCount(0);
+    await expect.poll(sending, { timeout: 10000 }).toBe(0);
+
+    await pa.locator('.tile--screen .tile__stopshare').click();
+    await expect(pa.locator('#ctrl-screen')).not.toHaveClass(/is-on/);
+    await expect(pb.locator('.tile--screen')).toHaveCount(0, { timeout: 20000 });
   });
 
   test('заголовки безопасности', async () => {

@@ -202,3 +202,11 @@ export async function startScreenShare(page, quality) {
   await modal.locator('#btn-stream-start').click();
   await expect(modal).toBeHidden();
 }
+
+/** Зритель: нажать «Смотреть трансляцию» на тайле экрана (трансляции идут только по запросу) */
+export async function watchScreen(page) {
+  const btn = page.locator('#stage-grid .tile.tile--screen .tile__watch').first();
+  await expect(btn, 'кнопка «Смотреть трансляцию»').toBeVisible({ timeout: 20000 });
+  await btn.click();
+  await expect(page.locator('#stage-grid .tile.tile--screen .tile__unwatch').first()).toBeAttached();
+}
