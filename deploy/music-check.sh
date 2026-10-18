@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Созвон — проверка музыки С САМОГО СЕРВЕРА: доступны ли YouTube, SoundCloud, Spotify (embed и API),
+# Astra — проверка музыки С САМОГО СЕРВЕРА: доступны ли YouTube, SoundCloud, Spotify (embed и API),
 # работает ли yt-dlp (с теми же cookies/прокси, что у бота). Ничего не меняет.
 #   sudo bash /opt/sozvon/deploy/music-check.sh
 set -uo pipefail
@@ -132,25 +132,40 @@ fi
 # ----------------------------------------------------------------- Spotify --
 printf '\n%sSpotify (только названия треков; звук ищется на YouTube/SoundCloud)%s\n' "$B" "$Z"
 EMBED=${SPOTIFY_EMBED_BASE:-https://open.spotify.com/embed}
-c=$(http_code "$EMBED/track/$SPOTIFY_TRACK_ID" "$TMP/embed.html")
-if [ "$c" = 200 ] && grep -q '__NEXT_DATA__\|trackList\|"type":"track"' "$TMP/embed.html"; then
+# Запросы к Spotify — через тот же прокси, что у сервера (SPOTIFY_PROXY, см. deploy/vpn-proxy.sh)
+SPX=()
+if [ -n "${SPOTIFY_PROXY:-}" ]; then
+  SPX=(-x "$SPOTIFY_PROXY")
+  if curl -sS -o /dev/null --connect-timeout 5 --max-time 10 "${SPX[@]}" https://open.spotify.com/ 2>/dev/null; then
+    pass "Прокси для Spotify отвечает (SPOTIFY_PROXY=${SPOTIFY_PROXY##*@})"
+  else
+    fail "Прокси SPOTIFY_PROXY=${SPOTIFY_PROXY##*@} не отвечает" "Проверьте VPN-прокси: sudo bash /opt/sozvon/deploy/vpn-proxy.sh --check (журнал: journalctl -u sozvon-vpn -n 30)"
+  fi
+fi
+GEO_TIP="Spotify не обслуживает российские адреса. Подключите свой VPN как прокси только для Spotify: sudo bash /opt/sozvon/deploy/vpn-proxy.sh (docs/MUSIC.md)"
+c=$(curl -sS -o "$TMP/embed.html" -w '%{http_code}' --connect-timeout 10 --max-time 20 -A 'Mozilla/5.0 (X11; Linux x86_64) Chrome/130.0' "${SPX[@]}" "$EMBED/track/$SPOTIFY_TRACK_ID" 2>/dev/null || echo 000)
+if [ "$c" = 200 ] && grep -q '"status":451' "$TMP/embed.html"; then
+  fail "Spotify недоступен в стране сервера (страница отвечает 451)" "$GEO_TIP"
+elif [ "$c" = 200 ] && grep -q '__NEXT_DATA__\|trackList\|"type":"track"' "$TMP/embed.html"; then
   if grep -q 'Never Gonna Give You Up' "$TMP/embed.html"; then pass "Embed-страница Spotify открывается и разбирается"; else note "Embed-страница Spotify открылась, но формат необычный" "Если плейлисты Spotify не добавляются — задайте ключи Spotify API (docs/MUSIC.md)"; fi
 else
-  fail "Embed-страница Spotify недоступна (HTTP $c)" "Spotify может быть недоступен из РФ. Задайте ключи SPOTIFY_CLIENT_ID/SECRET (docs/MUSIC.md) или используйте ссылки YouTube"
+  fail "Embed-страница Spotify недоступна (HTTP $c)" "$GEO_TIP"
 fi
 API=${SPOTIFY_API_BASE:-https://api.spotify.com}
 ACC=${SPOTIFY_ACCOUNTS_BASE:-https://accounts.spotify.com}
 if [ -n "${SPOTIFY_CLIENT_ID:-}" ] && [ -n "${SPOTIFY_CLIENT_SECRET:-}" ]; then
-  tok=$(curl -sS --connect-timeout 10 --max-time 20 -u "$SPOTIFY_CLIENT_ID:$SPOTIFY_CLIENT_SECRET" -d grant_type=client_credentials "$ACC/api/token" 2>/dev/null \
+  tok=$(curl -sS --connect-timeout 10 --max-time 20 "${SPX[@]}" -u "$SPOTIFY_CLIENT_ID:$SPOTIFY_CLIENT_SECRET" -d grant_type=client_credentials "$ACC/api/token" 2>/dev/null \
     | sed -n 's/.*"access_token" *: *"\([^"]*\)".*/\1/p')
   if [ -n "$tok" ]; then
-    c=$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 10 --max-time 20 -H "Authorization: Bearer $tok" "$API/v1/tracks/$SPOTIFY_TRACK_ID" 2>/dev/null || echo 000)
-    if [ "$c" = 200 ]; then pass "Spotify Web API работает (ключи приняты)"; else fail "Spotify Web API ответил HTTP $c" "Проверьте приложение на developer.spotify.com (docs/MUSIC.md)"; fi
+    c=$(curl -sS -o "$TMP/api.json" -w '%{http_code}' --connect-timeout 10 --max-time 20 "${SPX[@]}" -H "Authorization: Bearer $tok" "$API/v1/tracks/$SPOTIFY_TRACK_ID" 2>/dev/null || echo 000)
+    if [ "$c" = 200 ]; then pass "Spotify Web API работает (ключи приняты)"
+    elif grep -qi 'unavailable in this country' "$TMP/api.json" 2>/dev/null; then fail "Spotify Web API: «unavailable in this country» (HTTP $c)" "$GEO_TIP"
+    else fail "Spotify Web API ответил HTTP $c" "Проверьте приложение на developer.spotify.com (docs/MUSIC.md)"; fi
   else
     fail "Spotify API не выдал токен — ключи неверны или $ACC недоступен" "Проверьте SPOTIFY_CLIENT_ID/SECRET в /etc/sozvon.env"
   fi
 else
-  c=$(http_code "$ACC/api/token")
+  c=$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 10 --max-time 20 "${SPX[@]}" "$ACC/api/token" 2>/dev/null || echo 000)
   case "$c" in
     000) note "Ключи Spotify API не заданы (необязательно); accounts.spotify.com недоступен" ;;
     *) note "Ключи Spotify API не заданы — это необязательно (без них плейлисты берутся с embed-страницы, ~100 первых треков)" ;;

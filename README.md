@@ -176,6 +176,7 @@ npm run bot
 | `MUSIC_PLAYLIST_LIMIT` | `100` | сколько треков брать из плейлиста |
 | `MUSIC_DURATION_TOLERANCE` | `15` | допуск длительности при поиске треков Spotify, секунд |
 | `SPOTIFY_CLIENT_ID` / `SPOTIFY_CLIENT_SECRET` | — | ключи Spotify Web API (необязательно) |
+| `SPOTIFY_PROXY` | — | HTTP-прокси только для Spotify (из РФ Spotify недоступен); свой VPN подключается через `sudo bash /opt/sozvon/deploy/vpn-proxy.sh` |
 | `SPOTIFY_EMBED_BASE`, `SPOTIFY_API_BASE`, `SPOTIFY_ACCOUNTS_BASE` | адреса Spotify | для тестов: подмена на фейковый сервер |
 
 Все музыкальные настройки — в [docs/MUSIC.md](docs/MUSIC.md#все-настройки-музыки).

@@ -68,6 +68,7 @@ sudo bash /opt/sozvon/deploy/update.sh
 | Проверить, доступны ли YouTube / SoundCloud / Spotify с сервера | `sudo bash /opt/sozvon/deploy/music-check.sh` |
 | Обновить yt-dlp прямо сейчас | `sudo systemctl start sozvon-ytdlp-update` |
 | Когда следующее автообновление | `systemctl list-timers sozvon-ytdlp-update.timer` |
+| Подключить свой VPN как прокси для Spotify | `sudo bash /opt/sozvon/deploy/vpn-proxy.sh` (проверить: `--check`, выключить: `--off`) |
 | Переустановить yt-dlp | `sudo bash /opt/sozvon/deploy/ytdlp.sh install force` |
 | Журнал (ошибки скачивания видны здесь) | `sudo journalctl -u sozvon -f` |
 
@@ -119,10 +120,23 @@ Cookies со временем «протухают» (недели–месяц�
 
 После любой правки `/etc/sozvon.env`: `sudo systemctl restart sozvon sozvon-bot`.
 
-**«Spotify недоступен с этого сервера»** — сервер не может открыть open.spotify.com.
-Можно направить запросы Astra к Spotify через HTTP-прокси: в `/etc/sozvon.env`
-добавьте `NODE_USE_ENV_PROXY=1`, `HTTPS_PROXY=http://хост:порт`, `NO_PROXY=localhost,127.0.0.1`.
-Или используйте ссылки YouTube.
+**«Spotify недоступен с этого сервера» / «unavailable in this country» / 451** — Spotify не
+обслуживает российские адреса (API отвечает 403, страница — статус 451). Выход — пустить
+**только запросы к Spotify** через ваш VPN. Если у вас есть VPN для v2RayNG (Android) — подойдёт он:
+
+1. В v2RayNG: «⋮» у нужного сервера → «Поделиться» → «Копировать в буфер» (получится `vless://…`,
+   `vmess://…`, `trojan://…` или `ss://…`). Если сервис выдал ссылку на подписку (`https://…`) — можно её.
+2. На сервере: `sudo bash /opt/sozvon/deploy/vpn-proxy.sh` и вставьте ссылку (ввод скрыт).
+   Скрипт поставит Xray, запустит службу `sozvon-vpn` (слушает только `127.0.0.1:10808/10809`),
+   проверит, что Spotify открывается, и пропишет `SPOTIFY_PROXY=http://127.0.0.1:10809`.
+   Выбирайте сервер VPN в стране, где Spotify работает (не Россия/Беларусь).
+3. По желанию скрипт пустит через VPN и скачивание музыки (`YTDLP_PROXY`) — тогда заработает YouTube.
+
+Голос, чат и остальное идут напрямую. Ссылка — это ключ от вашего VPN: вводите её только на сервере,
+никуда не пересылайте. Учтите, что у VPN-сервиса может быть лимит устройств — сервер займёт одно место.
+Проверка: `vpn-proxy.sh --check`; выключить: `vpn-proxy.sh --off`.
+Если прокси у вас уже есть, просто задайте в `/etc/sozvon.env` `SPOTIFY_PROXY=http://[логин:пароль@]хост:порт`
+(нужен HTTP-прокси с CONNECT). Или используйте ссылки YouTube.
 
 **«Не удалось разобрать страницу Spotify»** — Spotify поменял свою страницу. Обновите Astra
 (`update.sh`) или задайте ключи Spotify API (ниже) — с ними страница не нужна.
@@ -172,6 +186,7 @@ Spotify разбирается 1–3 секунды. Максимум на од�
 | `MUSIC_DOWNLOAD_CONCURRENCY` | `2` | сколько загрузок одновременно |
 | `MUSIC_MAX_FAILS` | `3` | (бот) после стольких ошибок подряд бот чистит нескачанное |
 | `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET` | — | ключи Spotify Web API |
+| `SPOTIFY_PROXY` | — | HTTP-прокси только для запросов к Spotify (ставит `deploy/vpn-proxy.sh`) |
 
 Скачанные треки лежат в `/var/lib/sozvon/music` вместе с загруженными вручную. Лишние можно
 удалить прямо из этой папки — сервер заметит это сам. Место на диске: один трек ≈ 3–8 МБ,

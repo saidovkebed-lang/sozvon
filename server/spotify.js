@@ -5,6 +5,9 @@
 //   1) Web API (client credentials), если заданы SPOTIFY_CLIENT_ID / SPOTIFY_CLIENT_SECRET;
 //   2) публичная embed-страница open.spotify.com/embed/<type>/<id> (без ключей; ~50–100 первых треков).
 // Адреса переопределяются для тестов: SPOTIFY_EMBED_BASE, SPOTIFY_API_BASE, SPOTIFY_ACCOUNTS_BASE.
+import http from 'node:http';
+import https from 'node:https';
+import tls from 'node:tls';
 import { HttpError } from './auth.js';
 
 const env = (k, d) => (process.env[k] || d).replace(/\/+$/, '');
@@ -38,6 +41,7 @@ export const isSpotifyShortLink = (raw) => {
 };
 
 async function httpGet(url, { headers = {}, method = 'GET', body, redirect = 'follow' } = {}) {
+  if (process.env.SPOTIFY_PROXY) return proxiedGet(url, { headers: { 'user-agent': UA, 'accept-language': 'en', ...headers }, method, body, redirect });
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), HTTP_TIMEOUT_MS);
   try {
@@ -50,6 +54,46 @@ async function httpGet(url, { headers = {}, method = 'GET', body, redirect = 'fo
   } finally {
     clearTimeout(t);
   }
+}
+
+/**
+ * Запрос к Spotify через HTTP-прокси (SPOTIFY_PROXY=http://[логин:пароль@]хост:порт), например локальный
+ * Xray из deploy/vpn-proxy.sh: с российских адресов Spotify отвечает 451/403. Через прокси идёт только Spotify.
+ */
+async function proxiedGet(url, { headers, method, body, redirect }, hops = 0) {
+  const proxy = new URL(process.env.SPOTIFY_PROXY);
+  const target = new URL(url);
+  const port = Number(target.port) || (target.protocol === 'https:' ? 443 : 80);
+  const auth = proxy.username ? { 'proxy-authorization': `Basic ${Buffer.from(`${decodeURIComponent(proxy.username)}:${decodeURIComponent(proxy.password)}`).toString('base64')}` } : {};
+  const fail = (why) => new HttpError(502, `Spotify недоступен через прокси SPOTIFY_PROXY (${why}). Проверка: sudo bash /opt/sozvon/deploy/vpn-proxy.sh --check`);
+  const res = await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { reject(fail('не ответил за 15 с')); req?.destroy(); conn.destroy(); }, HTTP_TIMEOUT_MS);
+    let req = null;
+    const conn = http.request({ host: proxy.hostname, port: Number(proxy.port) || 80, method: 'CONNECT', path: `${target.hostname}:${port}`, headers: { host: `${target.hostname}:${port}`, ...auth } });
+    conn.on('error', (e) => { clearTimeout(timer); reject(fail(e.code || e.message)); });
+    conn.on('connect', (pres, socket) => {
+      if (pres.statusCode !== 200) { clearTimeout(timer); socket.destroy(); reject(fail(`прокси ответил ${pres.statusCode}`)); return; }
+      const lib = target.protocol === 'https:' ? https : http;
+      req = lib.request(target, {
+        method, headers: { ...headers, host: target.host },
+        createConnection: () => (target.protocol === 'https:' ? tls.connect({ socket, servername: target.hostname }) : socket),
+      }, (r) => {
+        const chunks = [];
+        r.on('data', (c) => chunks.push(c));
+        r.on('end', () => { clearTimeout(timer); resolve({ status: r.statusCode, headers: r.headers, text: Buffer.concat(chunks).toString('utf8') }); });
+        r.on('error', (e) => { clearTimeout(timer); reject(fail(e.code || e.message)); });
+      });
+      req.on('error', (e) => { clearTimeout(timer); reject(fail(e.code || e.message)); });
+      req.end(body);
+    });
+    conn.end();
+  });
+  const loc = res.headers.location;
+  if (redirect === 'follow' && loc && res.status >= 300 && res.status < 400 && hops < 5) {
+    return proxiedGet(new URL(loc, url).toString(), { headers, method: 'GET', redirect }, hops + 1);
+  }
+  const h = res.headers;
+  return { status: res.status, ok: res.status >= 200 && res.status < 300, text: res.text, headers: { get: (k) => h[String(k).toLowerCase()] ?? null } };
 }
 
 /** spotify.link/xxx → {type,id} (несколько редиректов или ссылка внутри страницы) */
@@ -122,7 +166,7 @@ function apiReason(r) {
   try { msg = String(JSON.parse(r.text)?.error?.message || ''); } catch { msg = String(r.text || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim(); }
   msg = msg.slice(0, 160);
   if (/premium/i.test(msg)) return `: «${msg}» — с 2026 г. Spotify требует Premium у владельца приложения в кабинете разработчика`;
-  if (/countr|region|territor|unavailable|not available/i.test(msg)) return `: «${msg}» — Spotify не обслуживает адрес этого сервера; нужен HTTPS-прокси вне РФ (HTTPS_PROXY, см. docs/MUSIC.md)`;
+  if (/countr|region|territor|unavailable|not available/i.test(msg)) return `: «${msg}» — Spotify не обслуживает адрес этого сервера; нужен прокси вне РФ: sudo bash /opt/sozvon/deploy/vpn-proxy.sh (SPOTIFY_PROXY, см. docs/MUSIC.md)`;
   return msg ? `: «${msg}»` : '';
 }
 
