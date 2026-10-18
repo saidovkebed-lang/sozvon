@@ -94,8 +94,19 @@ const isLocalHost = (h) => h === 'localhost' || h === '127.0.0.1' || h === '[::1
 }
 // Медиа-ключи/фоновые вкладки: голос не должен «засыпать», когда окно свёрнуто
 app.commandLine.appendSwitch('disable-background-timer-throttling');
-// Окно свёрнуто или перекрыто — Chromium перестаёт его рисовать (видео, анимации): заметно меньше нагрузка.
-// Таймеры не замедляем — индикаторы речи и пинг работают и в фоне; звук и WebRTC от этого не зависят.
+// Свёрнутому/перекрытому игрой окну Chromium понижает приоритет процесса — а в нём кодируется трансляция
+// и собираются кадры своего захвата экрана: стрим проседал по качеству и лагал. Приоритет не понижаем.
+app.commandLine.appendSwitch('disable-renderer-backgrounding');
+// Окно свёрнуто или перекрыто — Chromium перестаёт его рисовать (видео, анимации): меньше нагрузка.
+// Но только вне голосового канала: в голосе (стрим, просмотр) торможение выключается — см. applyBackgroundMode.
+
+/** В голосовом канале окно не «засыпает» в фоне: трансляция и её просмотр идут в полном качестве,
+ *  даже когда Astra свёрнута или её перекрывает игра. Вне голоса — экономим процессор. */
+function applyBackgroundMode() {
+  const wc = mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents : null;
+  if (!wc) return;
+  try { wc.setBackgroundThrottling(!voiceState.inVoice); } catch (e) { console.warn('[background]', e?.message || e); }
+}
 
 // ---------------- Одиночный экземпляр ----------------
 if (!app.requestSingleInstanceLock()) {
@@ -370,7 +381,12 @@ function createMainWindow() {
     showOffline(url, `${desc} (${code})`);
   });
   // захват экрана принадлежит странице: перезагрузка/уход/падение — остановить помощники
-  wc.on('did-start-navigation', (d) => { if (d?.isMainFrame && !d.isSameDocument) nativeCapture.stopAll(); });
+  wc.on('did-start-navigation', (d) => {
+    if (!d?.isMainFrame || d.isSameDocument) return;
+    nativeCapture.stopAll();
+    // страница перезагружается — из голоса она вышла: вернуть экономию в фоне и снять хук рации
+    if (voiceState.inVoice) { voiceState = { ...voiceState, inVoice: false }; applyHotkeys(); applyBackgroundMode(); }
+  });
   wc.on('render-process-gone', (_e, d) => {
     nativeCapture.stopAll();
     console.error('[renderer gone]', d.reason);
@@ -821,7 +837,7 @@ function setupIpc() {
     if (!fromPage(e) || !s) return;
     const wasIn = voiceState.inVoice;
     voiceState = { inVoice: !!s.inVoice, muted: !!s.muted, deafened: !!s.deafened };
-    if (wasIn !== voiceState.inVoice) applyHotkeys(); // хук рации — только в голосовом
+    if (wasIn !== voiceState.inVoice) { applyHotkeys(); applyBackgroundMode(); } // рация и фон — только в голосовом
     updateTray();
   });
   ipcMain.on('desktop:badge', (e, n) => { if (fromPage(e)) setBadge(n); });

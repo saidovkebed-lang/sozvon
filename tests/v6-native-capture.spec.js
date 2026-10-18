@@ -128,6 +128,28 @@ test.describe('v6: свой захват экрана (приложение дл
     }
   });
 
+  test('в голосовом канале окно не «засыпает» в фоне (стрим не теряет качество при свёрнутой Astra)', async ({ makePage }) => {
+    const { app, win } = await setup(makePage);
+    try {
+      const bg = () => app.evaluate(({ BrowserWindow, app: a }) => {
+        const w = BrowserWindow.getAllWindows().find((x) => /^https?:/.test(x.webContents.getURL()));
+        return { throttling: w.webContents.getBackgroundThrottling(), noBackgrounding: a.commandLine.hasSwitch('disable-renderer-backgrounding') };
+      });
+      // setup() уже зашёл в голосовой
+      await expect.poll(bg).toEqual({ throttling: false, noBackgrounding: true });
+      await win.locator('#btn-disconnect').click();
+      await expect(win.locator('#voice-panel')).toBeHidden();
+      await expect.poll(bg).toEqual({ throttling: true, noBackgrounding: true });
+      await joinVoiceUI(win);
+      await expect.poll(bg).toEqual({ throttling: false, noBackgrounding: true });
+      // перезагрузка страницы = выход из голоса
+      await win.reload();
+      await expect.poll(bg).toEqual({ throttling: true, noBackgrounding: true });
+    } finally {
+      await app.close().catch(() => {});
+    }
+  });
+
   test('окно закрыто (помощник выходит с кодом 3) → демонстрация останавливается с понятным сообщением', async ({ makePage }) => {
     const { app, win, pb, readLog } = await setup(makePage, { SOZVON_CAPTURE_FAKE_MODE: 'exit3' });
     try {
