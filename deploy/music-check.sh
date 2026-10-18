@@ -40,7 +40,12 @@ run_ytdlp() {
   local cache="$DATA_DIR/.cache/yt-dlp"
   [ -n "$NODE" ] && args+=(--js-runtimes "node:$NODE")
   if [ -n "${YTDLP_COOKIES:-}" ]; then
-    if [ -r "$YTDLP_COOKIES" ]; then cp "$YTDLP_COOKIES" "$TMP/cookies.txt"; chmod 644 "$TMP/cookies.txt"; args+=(--cookies "$TMP/cookies.txt"); fi
+    # копия, в которую yt-dlp может писать (в конце он сохраняет cookies; без права записи падает)
+    if [ -r "$YTDLP_COOKIES" ]; then
+      cp "$YTDLP_COOKIES" "$TMP/cookies.txt"; chmod 600 "$TMP/cookies.txt"
+      id "$APP_USER" >/dev/null 2>&1 && chown "$APP_USER": "$TMP/cookies.txt"
+      args+=(--cookies "$TMP/cookies.txt")
+    fi
   fi
   [ -n "${YTDLP_PROXY:-}" ] && args+=(--proxy "$YTDLP_PROXY")
   if id "$APP_USER" >/dev/null 2>&1 && [ -d "$DATA_DIR" ]; then
