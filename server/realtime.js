@@ -626,7 +626,7 @@ export function attachRealtime(io, { uploadsDir }) {
       if (now > limiter.reset) { limiter.count = 0; limiter.reset = now + 10_000; }
       if (++limiter.count > 25) fail('Слишком много сообщений подряд — подождите пару секунд');
 
-      const mentionEveryone = /(^|[^\w@])@(everyone|here)\b/.test(text) && has(perms, PERMS.MENTION_EVERYONE);
+      const mentionEveryone = /(^|[^\p{L}\p{N}_@])@(everyone|here)(?![\p{L}\p{N}_])/u.test(text) && has(perms, PERMS.MENTION_EVERYONE);
       const msg = addMessage({ channelId: channel.id, authorId: user.id, content: text, attachments: atts, mentionEveryone });
       const message = publicMessage(msg);
       emitToViewers(channel.id, 'message:new', { message });

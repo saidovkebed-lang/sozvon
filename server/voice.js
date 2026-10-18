@@ -207,7 +207,9 @@ export function createVoice(io, { getBotSocket, emitToViewers }) {
       for (const sid of [...room.keys()]) {
         if (room.get(sid).isBot) continue;
         socketChannel.delete(sid);
-        io.sockets.sockets.get(sid)?.leave(voiceRoom(channelId));
+        const s = io.sockets.sockets.get(sid);
+        s?.leave(voiceRoom(channelId));
+        s?.emit('voice:moved', { channelId: null, reason: 'deleted' }); // канал удалён — клиент отключается от голоса
       }
       const hadBot = room.has(botSocketId(channelId));
       rooms.delete(channelId);

@@ -73,7 +73,7 @@ function overviewPanel() {
         bannerInput)),
     h('div', { class: 'field' },
       h('label', { class: 'field__label', for: 'server-rename-input' }, 'Название сервера'),
-      h('input', { class: 'input', id: 'server-rename-input', name: 'name', maxlength: '40', required: true, autocomplete: 'off' })),
+      h('input', { class: 'input', id: 'server-rename-input', name: 'name', maxlength: '50', required: true, autocomplete: 'off' })),
     h('div', { class: 'field' },
       h('div', { class: 'field__row' }, h('label', { class: 'field__label', for: 'server-description-input' }, 'Описание'), count),
       desc),
@@ -764,6 +764,7 @@ export function openChannelSettings(channelId) {
   const ch = getChannel(channelId);
   const s = ch && getServer(ch.serverId);
   if (!s || !can(s, 'MANAGE_CHANNELS')) return;
+  build(); // обработчики модалки (в т.ч. «Сохранить») навешиваются здесь — даже если настройки сервера ещё не открывали
   chEdit = {
     channelId,
     serverId: s.id,
@@ -799,7 +800,7 @@ function renderChannelPerms() {
   if (!s || !ch) { closeModal('modal-channel-perms'); return; }
   const body = $('#channel-perms-body');
   const priv = owState(chEdit.overwrites[s.id], PERMS.VIEW_CHANNEL) === 'deny';
-  const name = h('input', { class: 'input', id: 'channel-edit-name', maxlength: '40', value: chEdit.name, autocomplete: 'off' });
+  const name = h('input', { class: 'input', id: 'channel-edit-name', maxlength: '32', value: chEdit.name, autocomplete: 'off' });
   name.addEventListener('input', () => { chEdit.name = name.value; });
   const privSw = h('input', { type: 'checkbox', class: 'switch', id: 'channel-private-toggle', role: 'switch' });
   privSw.checked = priv;

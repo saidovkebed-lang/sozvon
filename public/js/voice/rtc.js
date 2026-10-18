@@ -99,11 +99,32 @@ class Peer {
     this.send({ trackInfo: { streamId: stream.id, kind } });
     this.senders[kind] = stream.getTracks().map((t) => this.pc.addTrack(t, stream));
     if (kind === 'screen') {
+      this.preferH264();
       this.screenTracks = stream.getTracks();
       // не смотрит — ничего не кодируем и не отправляем (без пересогласования соединения)
       if (!this.screenWatched) for (const s of this.senders.screen) s.replaceTrack(null).catch(() => {});
       this.applyEncodings();
     }
+  }
+
+  /**
+   * Демонстрация экрана — предпочесть H.264: его кодирует видеокарта (NVENC/Quick Sync/AMF),
+   * а VP8 по умолчанию кодируется процессором. Если H.264 недоступен — остаётся как было.
+   */
+  preferH264() {
+    try {
+      const caps = RTCRtpSender.getCapabilities?.('video')?.codecs || [];
+      const h264 = caps.filter((c) => /h264/i.test(c.mimeType));
+      if (!h264.length) return;
+      // сначала профиль с packetization-mode=1 (совместимый), затем остальные H.264, затем прочие кодеки
+      h264.sort((a, b) => /packetization-mode=1/.test(b.sdpFmtpLine || '') - /packetization-mode=1/.test(a.sdpFmtpLine || ''));
+      const rest = caps.filter((c) => !/h264/i.test(c.mimeType));
+      for (const s of this.senders.screen) {
+        if (s.track?.kind !== 'video') continue;
+        const t = this.pc.getTransceivers().find((x) => x.sender === s);
+        t?.setCodecPreferences?.([...h264, ...rest]);
+      }
+    } catch (e) { console.warn('[rtc] H.264', e); }
   }
 
   /** Собеседник начал/перестал смотреть мою трансляцию */
