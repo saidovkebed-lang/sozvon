@@ -68,7 +68,7 @@ sudo bash /opt/sozvon/deploy/update.sh
 | Проверить, доступны ли YouTube / SoundCloud / Spotify с сервера | `sudo bash /opt/sozvon/deploy/music-check.sh` |
 | Обновить yt-dlp прямо сейчас | `sudo systemctl start sozvon-ytdlp-update` |
 | Когда следующее автообновление | `systemctl list-timers sozvon-ytdlp-update.timer` |
-| Подключить свой VPN как прокси для Spotify | `sudo bash /opt/sozvon/deploy/vpn-proxy.sh` (проверить: `--check`, выключить: `--off`) |
+| Подключить свой VPN как прокси для Spotify | `sudo bash /opt/sozvon/deploy/vpn-proxy.sh` (проверить: `--check`, YouTube через VPN: `--youtube`, выключить: `--off`) |
 | Переустановить yt-dlp | `sudo bash /opt/sozvon/deploy/ytdlp.sh install force` |
 | Журнал (ошибки скачивания видны здесь) | `sudo journalctl -u sozvon -f` |
 
@@ -131,6 +131,7 @@ Cookies со временем «протухают» (недели–месяц�
    проверит, что Spotify открывается, и пропишет `SPOTIFY_PROXY=http://127.0.0.1:10809`.
    Выбирайте сервер VPN в стране, где Spotify работает (не Россия/Беларусь).
 3. По желанию скрипт пустит через VPN и скачивание музыки (`YTDLP_PROXY`) — тогда заработает YouTube.
+   Включить это позже: `sudo bash /opt/sozvon/deploy/vpn-proxy.sh --youtube`.
 
 Голос, чат и остальное идут напрямую. Ссылка — это ключ от вашего VPN: вводите её только на сервере,
 никуда не пересылайте. Учтите, что у VPN-сервиса может быть лимит устройств — сервер займёт одно место.

@@ -7,6 +7,7 @@
 #
 #   sudo bash /opt/sozvon/deploy/vpn-proxy.sh            — установить / сменить ссылку
 #   sudo bash /opt/sozvon/deploy/vpn-proxy.sh --check    — проверить, что Spotify открывается через VPN
+#   sudo bash /opt/sozvon/deploy/vpn-proxy.sh --youtube  — пустить через VPN и скачивание музыки (YouTube)
 #   sudo bash /opt/sozvon/deploy/vpn-proxy.sh --off      — выключить (вернуть как было)
 set -euo pipefail
 
@@ -35,6 +36,12 @@ env_set() { # env_set KEY VALUE — заменить/раскомментиро�
 }
 env_off() { sed -i -E "s|^(${1}=.*)|#\1|" "$ENV_FILE" 2>/dev/null || true; }
 
+youtube_on() {
+  env_set YTDLP_PROXY "$HTTP_PROXY_URL"
+  env_set MUSIC_SEARCH_SOURCES "youtube,soundcloud"
+  ok "Скачивание музыки идёт через VPN; поиск: сначала YouTube, затем SoundCloud"
+}
+
 restart_app() {
   systemctl restart sozvon 2>/dev/null || true
   systemctl restart sozvon-bot 2>/dev/null || true
@@ -59,13 +66,19 @@ case "${1:-}" in
   --check)
     systemctl is-active --quiet sozvon-vpn && ok "Служба sozvon-vpn работает" || die "Служба sozvon-vpn не запущена"
     check; exit $? ;;
+  --youtube)
+    systemctl is-active --quiet sozvon-vpn || die "VPN-прокси не настроен: сначала sudo bash $0"
+    yc=$(curl -s -o /dev/null -m 20 -x "$HTTP_PROXY_URL" -w '%{http_code}' https://www.youtube.com/ || true)
+    [ "$yc" = 200 ] || die "YouTube через VPN не открылся (HTTP ${yc:-нет ответа}) — попробуйте другой сервер VPN"
+    ok "YouTube открывается через VPN"
+    youtube_on; restart_app; exit 0 ;;
   --off)
     systemctl disable --now sozvon-vpn 2>/dev/null || true
     env_off SPOTIFY_PROXY; env_off YTDLP_PROXY
     restart_app
     ok "VPN-прокси выключен, Spotify и музыка снова идут напрямую"; exit 0 ;;
   ''|--setup) ;;
-  *) die "Неизвестный параметр: $1 (есть --check и --off)" ;;
+  *) die "Неизвестный параметр: $1 (есть --check, --youtube и --off)" ;;
 esac
 
 printf '\n%sVPN-прокси для Spotify%s\n' "$B" "$Z"
@@ -143,11 +156,11 @@ ok "Служба sozvon-vpn запущена (127.0.0.1:10808 SOCKS, 127.0.0.1:1
 if check; then
   env_set SPOTIFY_PROXY "$HTTP_PROXY_URL"
   read -rp "Пустить через VPN и скачивание музыки (YouTube станет доступен)? [y/N] " yt
-  if [[ "$yt" =~ ^[YyДд] ]]; then
-    env_set YTDLP_PROXY "$HTTP_PROXY_URL"
-    env_set MUSIC_SEARCH_SOURCES "youtube,soundcloud"
-    ok "Музыка тоже идёт через VPN; поиск: YouTube, затем SoundCloud"
-  fi
+  yt=$(printf '%s' "$yt" | sed $'s/\e\\[[0-9;]*[~A-Za-z]//g; s/[[:space:][:cntrl:]]//g')  # без служебных кодов терминала (остатки вставки)
+  case "$yt" in
+    y*|Y*|д*|Д*) youtube_on ;;
+    *) echo "YouTube оставлен как был. Включить позже: sudo bash $0 --youtube" ;;
+  esac
   restart_app
   ok "Готово. Попробуйте в голосовом канале: !play <ссылка Spotify>"
 else

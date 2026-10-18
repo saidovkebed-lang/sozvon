@@ -52,8 +52,12 @@ run_ytdlp() {
   fi
 }
 # Последняя строка ERROR из вывода yt-dlp
-why() { grep -m1 -o 'ERROR:.*' "$1" | cut -c1-220 || tail -n 1 "$1" | cut -c1-220; }
-http_code() { curl -sS -o "${2:-/dev/null}" -w '%{http_code}' --connect-timeout 10 --max-time 20 -A 'Mozilla/5.0 (X11; Linux x86_64) Chrome/130.0' "$1" 2>/dev/null || echo 000; }
+why() {
+  if grep -q 'killing shell\|^Terminated' "$1" || [ ! -s "$1" ]; then echo "нет ответа за 2 минуты (YouTube недоступен или режется)"; return; fi
+  grep -m1 -o 'ERROR:.*' "$1" | cut -c1-220 || tail -n 1 "$1" | cut -c1-220
+}
+# http_code URL [файл] [curl-параметры…]; при обрыве curl сам печатает 000
+http_code() { local u=$1 f=${2:-/dev/null}; shift; shift || true; curl -sS -o "$f" -w '%{http_code}' --connect-timeout 10 --max-time 20 -A 'Mozilla/5.0 (X11; Linux x86_64) Chrome/130.0' "$@" "$u" 2>/dev/null; true; }
 
 printf '\n%sПроверка музыки Astra с этого сервера%s (%s)\n\n' "$B" "$Z" "$(hostname)"
 
@@ -96,8 +100,14 @@ fi
 
 # ----------------------------------------------------------------- YouTube --
 printf '\n%sYouTube%s\n' "$B" "$Z"
-c=$(http_code https://www.youtube.com/)
-if [ "$c" = 200 ]; then pass "www.youtube.com открывается (HTTP 200)"; else fail "www.youtube.com не открывается (HTTP $c)" "YouTube недоступен с сервера напрямую. Варианты: YTDLP_PROXY в /etc/sozvon.env, ссылки SoundCloud, MUSIC_SEARCH_SOURCES=soundcloud"; fi
+YT_TIP="YouTube недоступен с сервера напрямую. Если VPN-прокси настроен: sudo bash /opt/sozvon/deploy/vpn-proxy.sh --youtube (или ссылки SoundCloud, MUSIC_SEARCH_SOURCES=soundcloud)"
+if [ -n "${YTDLP_PROXY:-}" ]; then
+  c=$(http_code https://www.youtube.com/ /dev/null -x "$YTDLP_PROXY")
+  if [ "$c" = 200 ]; then pass "www.youtube.com открывается через прокси YTDLP_PROXY (HTTP 200)"; else fail "www.youtube.com не открывается через прокси YTDLP_PROXY (HTTP $c)" "Проверьте VPN: sudo bash /opt/sozvon/deploy/vpn-proxy.sh --check, или выберите другой сервер VPN"; fi
+else
+  c=$(http_code https://www.youtube.com/)
+  if [ "$c" = 200 ]; then pass "www.youtube.com открывается (HTTP 200)"; else fail "www.youtube.com не открывается напрямую (HTTP $c)" "$YT_TIP"; fi
+fi
 if [ "$YTDLP_OK" = 1 ]; then
   if run_ytdlp --flat-playlist -J "ytsearch1:rick astley never gonna give you up" >"$TMP/yts.json" 2>"$TMP/yts.err" && grep -q '"entries"' "$TMP/yts.json"; then
     pass "Поиск на YouTube работает"
@@ -112,7 +122,7 @@ if [ "$YTDLP_OK" = 1 ]; then
       fail "YouTube требует подтвердить «не бот» (обычное дело для IP датацентров)" \
         "Добавьте cookies YouTube: экспортируйте cookies.txt из браузера (инструкция — docs/MUSIC.md), положите в /var/lib/sozvon/cookies.txt, chown sozvon: и пропишите YTDLP_COOKIES=/var/lib/sozvon/cookies.txt в /etc/sozvon.env, затем systemctl restart sozvon"
     else
-      fail "Звук с YouTube не получается: $err" "Обновите yt-dlp (sudo bash /opt/sozvon/deploy/ytdlp.sh update); если YouTube режется — YTDLP_PROXY или SoundCloud"
+      fail "Звук с YouTube не получается: $err" "$([ -z "${YTDLP_PROXY:-}" ] && echo "$YT_TIP; ")Обновите yt-dlp (sudo bash /opt/sozvon/deploy/ytdlp.sh update); если YouTube режется — YTDLP_PROXY или SoundCloud"
     fi
   fi
 fi
