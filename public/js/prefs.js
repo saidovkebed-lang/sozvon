@@ -23,6 +23,7 @@ export const DEFAULTS = Object.freeze({
   'audio.pttReleaseDelay': 200,      // мс
   'audio.userVolumes': {},           // { [userId]: 0..200 }
   'audio.userMuted': {},             // { [userId]: true } — локально заглушён
+  'audio.streamVolumes': {},         // { [userId]: 0..200 } — громкость звука трансляции этого стримера (отдельно от голоса)
   'audio.musicVolume': 70,           // 0..100 — громкость бота
 
   // --- Внешний вид ---
@@ -120,6 +121,16 @@ export const prefs = {
     const v = Math.max(0, Math.min(200, Math.round(volume)));
     if (v === 100) delete map[userId]; else map[userId] = v;
     this.set('audio.userVolumes', map);
+  },
+  getStreamVolume(userId) {
+    const v = values['audio.streamVolumes']?.[userId];
+    return Number.isFinite(v) ? v : 100;
+  },
+  setStreamVolume(userId, volume) {
+    const map = { ...values['audio.streamVolumes'] };
+    const v = Math.max(0, Math.min(200, Math.round(volume)));
+    if (v === 100) delete map[userId]; else map[userId] = v;
+    this.set('audio.streamVolumes', map);
   },
   isUserMuted(userId) { return !!values['audio.userMuted'][userId]; },
   setUserMuted(userId, muted) {

@@ -91,7 +91,7 @@ function fillTile(entry, d) {
   }
 
   // подписи и бейджи
-  el.querySelectorAll('.tile__label, .badge, .tile__expand, .tile__more, .tile__sound, .tile__action').forEach((x) => x.remove());
+  el.querySelectorAll('.tile__label, .badge, .tile__expand, .tile__more, .tile__action').forEach((x) => x.remove());
   const label = h('div', { class: 'tile__label' }, h('span', null, kind === 'screen' ? `${name} — экран` : name));
   if (kind === 'main') {
     if (m.deafened || m.serverDeafen) label.append(icon('i-headphones-off', 'icon--sm'));
@@ -116,23 +116,13 @@ function fillTile(entry, d) {
       }));
     }
   }
-  if (kind === 'screen' && !self && stream?.getAudioTracks().length) {
-    const btn = h('button', { type: 'button', class: 'icon-btn tile__sound' });
-    const paint = () => {
-      const off = audioEngine.isStreamAudioMuted(m.socketId);
-      btn.replaceChildren(icon(off ? 'i-volume-x' : 'i-volume', 'icon--sm'));
-      btn.title = off ? 'Включить звук трансляции' : 'Выключить звук трансляции (если слышите эхо)';
-      btn.setAttribute('aria-label', btn.title);
-      btn.setAttribute('aria-pressed', String(off));
-    };
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      audioEngine.setStreamAudioMuted(m.socketId, !audioEngine.isStreamAudioMuted(m.socketId));
-      paint();
-    });
-    paint();
-    el.append(btn);
-  }
+  // Звук трансляции у зрителя: кнопка + ползунок громкости (0–200 %, свой для каждого стримера, запоминается).
+  // Элемент не пересоздаётся при перерисовке плитки — иначе ползунок обрывался бы посреди перетаскивания.
+  const hasSound = kind === 'screen' && !self && !!stream?.getAudioTracks().length;
+  let vol = el.querySelector('.tile__volume');
+  if (vol && (!hasSound || vol.dataset.socketId !== m.socketId)) { vol.remove(); vol = null; }
+  if (hasSound && !vol) el.append(streamVolumeEl(m));
+  else if (vol) vol.paint();
   if (m.isBot) el.append(h('span', { class: 'badge badge--bot' }, 'БОТ'));
   el.append(h('button', {
     type: 'button', class: 'icon-btn tile__expand',
@@ -144,6 +134,51 @@ function fillTile(entry, d) {
     more.classList.add('tile__more');
     el.append(more);
   }
+}
+
+function streamVolumeEl(m) {
+  const stop = (e) => e.stopPropagation();
+  const btn = h('button', { type: 'button', class: 'icon-btn tile__sound' });
+  const range = h('input', {
+    type: 'range', class: 'slider tile__volume-range', min: '0', max: '200', step: '5',
+    'aria-label': `Громкость трансляции ${m.username}`, title: 'Громкость трансляции · двойной клик — 100 %',
+  });
+  const pct = h('span', { class: 'tile__volume-pct', 'aria-hidden': 'true' });
+  const box = h('div', { class: 'tile__volume', dataset: { socketId: m.socketId } }, btn, range, pct);
+  const uid = () => m.userId;
+  box.paint = () => {
+    const off = audioEngine.isStreamAudioMuted(m.socketId);
+    const v = prefs.getStreamVolume(uid());
+    if (document.activeElement !== range) range.value = String(v);
+    range.style.setProperty('--val', `${(Number(range.value) / 200) * 100}%`);
+    pct.textContent = off ? 'выкл' : `${range.value}%`;
+    const silent = off || Number(range.value) === 0;
+    btn.replaceChildren(icon(silent ? 'i-volume-x' : Number(range.value) < 60 ? 'i-volume-low' : 'i-volume', 'icon--sm'));
+    btn.title = off ? 'Включить звук трансляции' : 'Выключить звук трансляции (если слышите эхо)';
+    btn.setAttribute('aria-label', btn.title);
+    btn.setAttribute('aria-pressed', String(off));
+    box.classList.toggle('is-muted', silent);
+  };
+  btn.addEventListener('click', (e) => {
+    stop(e);
+    audioEngine.setStreamAudioMuted(m.socketId, !audioEngine.isStreamAudioMuted(m.socketId));
+    box.paint();
+  });
+  range.addEventListener('input', (e) => {
+    stop(e);
+    if (audioEngine.isStreamAudioMuted(m.socketId) && Number(range.value) > 0) audioEngine.setStreamAudioMuted(m.socketId, false);
+    prefs.setStreamVolume(uid(), Number(range.value));
+    box.paint();
+  });
+  range.addEventListener('dblclick', (e) => { stop(e); range.value = '100'; prefs.setStreamVolume(uid(), 100); box.paint(); });
+  for (const ev of ['click', 'pointerdown', 'mousedown', 'keydown', 'wheel']) box.addEventListener(ev, stop);
+  box.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    range.value = String(Math.max(0, Math.min(200, Number(range.value) + (e.deltaY < 0 ? 5 : -5))));
+    range.dispatchEvent(new Event('input'));
+  }, { passive: false });
+  box.paint();
+  return box;
 }
 
 function render() {
