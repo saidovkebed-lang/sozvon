@@ -7,13 +7,13 @@ import { pushPublicKey, validSubscription } from './push.js';
 import { addPushSub, removePushSub } from './inbox.js';
 import multer from 'multer';
 import { register, login, requireAuth, HttpError, updateProfile, changePassword } from './auth.js';
-import { publicUser, publicServer, findServer, isMember } from './model.js';
+import { publicUser, publicServer, findServer, isMember, findUserByName, userServers } from './model.js';
 import { db, save } from './db.js';
 import { PERMS, can } from './permissions.js';
 import { MEDIA_KINDS, processImage, removeMediaUrl, mediaTmpDir } from './media.js';
 import { readAppRelease } from './app-release.js';
 import { Limiter, exempt, waitText } from './rate-limit.js';
-import { syncLibrary, hasYtDlp, addUploadedFile, MUSIC_MAX_BYTES, fixMulterName, sanitizeFileName, getMusicDir } from './music-library.js';
+import { syncLibrary, hasYtDlp, addUploadedFile, MUSIC_MAX_BYTES, fixMulterName, sanitizeFileName, getMusicDir, findTrackRec, deleteTrack } from './music-library.js';
 import { importFromUrl, resolveInput, fetchPending } from './music-sources.js';
 
 const limitMb = Number(process.env.UPLOAD_LIMIT_MB);
@@ -252,9 +252,28 @@ export function createApiRouter({
     res.json({ url: '/media/uploads/' + f.filename, name, type: f.mimetype || 'application/octet-stream', size: f.size });
   });
 
-  router.get('/music', requireAuth, wrap(async (_req, res) => {
+  // Удалить трек библиотеки может тот, кто его добавил, или управляющий сервером (MANAGE_SERVER),
+  // где состоит добавивший; трек без автора (положили на диск) — управляющий любым сервером, где есть кто-то ещё
+  function canDeleteTrack(user, rec) {
+    if (!rec || user.isBot) return false;
+    if (rec.addedBy && rec.addedBy.toLowerCase() === user.username.toLowerCase()) return true;
+    const author = rec.addedBy ? findUserByName(rec.addedBy) : null;
+    return userServers(user.id).some((srv) => can(srv, user.id, PERMS.MANAGE_SERVER)
+      && (author ? srv.memberIds.includes(author.id) : srv.memberIds.length > 1));
+  }
+
+  router.get('/music', requireAuth, wrap(async (req, res) => {
     // internet: можно ли искать/качать треки из интернета (установлен yt-dlp)
-    res.json({ tracks: await syncLibrary(), internet: hasYtDlp() });
+    const tracks = await syncLibrary();
+    res.json({ tracks: tracks.map((t) => ({ ...t, canDelete: canDeleteTrack(req.user, findTrackRec(t.id)) })), internet: hasYtDlp() });
+  }));
+
+  router.delete('/music/:id', requireAuth, wrap(async (req, res) => {
+    const rec = findTrackRec(String(req.params.id));
+    if (!rec) throw new HttpError(404, 'Трек не найден');
+    if (!canDeleteTrack(req.user, rec)) throw new HttpError(403, 'Удалить трек может тот, кто его добавил, или администратор сервера');
+    const track = await deleteTrack(rec.id);
+    res.json({ ok: true, track });
   }));
 
   router.post('/music/upload', requireAuth, musicUpload.single('file'), wrap(async (req, res) => {

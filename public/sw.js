@@ -7,7 +7,7 @@
 // клик по уведомлению открывает нужный чат в уже открытом окне или в новом.
 // При изменении списка/логики — поднять VERSION: старые кэши удалятся при activate.
 
-const VERSION = 'v3-3.5.0';
+const VERSION = 'v3-3.5.1';
 const CACHE = `sozvon-shell-${VERSION}`;
 
 const SHELL = [
@@ -162,7 +162,8 @@ self.addEventListener('push', (event) => {
     body: String(data.body || 'Новое сообщение').slice(0, 300),
     tag: String(data.tag || 'sozvon'),
     renotify: true,
-    icon: '/assets/icons/icon-192.png',
+    // иконка сервера / аватар автора ЛС — чтобы было видно, откуда уведомление
+    icon: typeof data.icon === 'string' && data.icon.startsWith('/') && !data.icon.startsWith('//') ? data.icon : '/assets/icons/icon-192.png',
     badge: '/assets/icons/icon-192.png',
     data: { url: typeof data.url === 'string' && data.url.startsWith('/') ? data.url : '/', channelId: data.channelId || null },
   }));

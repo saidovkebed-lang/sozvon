@@ -229,8 +229,9 @@
         <div class="music-player__artist" id="music-artist">DJ Бот</div>
       </div>
       <div class="music-player__progress">
-        <div class="progress" role="progressbar" aria-label="Прогресс трека" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="music-progress">
+        <div class="progress progress--seek" role="slider" tabindex="0" aria-label="Перемотка трека" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0" aria-valuetext="0:00" id="music-progress">
           <div class="progress__bar" id="music-progress-bar"></div>
+          <span class="progress__tip" id="music-seek-tip" hidden>0:00</span>
         </div>
         <div class="music-player__times"><span id="music-time-cur">0:00</span><span id="music-time-total">0:00</span></div>
       </div>
@@ -243,6 +244,9 @@
         </button>
         <button class="icon-btn" type="button" data-music="stop" aria-label="Остановить" title="Стоп">
           <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-stop"/></svg>
+        </button>
+        <button class="icon-btn music-player__queue-btn" type="button" id="btn-music-queue" aria-label="Очередь" title="Очередь">
+          <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-menu"/></svg><span class="music-player__badge" id="music-queue-badge" hidden>0</span>
         </button>
         <input type="range" class="slider" id="music-volume" min="0" max="100" value="50" aria-label="Громкость музыки">
       </div>

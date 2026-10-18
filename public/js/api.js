@@ -49,6 +49,7 @@ export const api = {
     return request('POST', '/api/music/upload', fd);
   },
   musicImport: (url) => request('POST', '/api/music/import', { url }),
+  musicDelete: (id) => request('DELETE', `/api/music/${encodeURIComponent(id)}`),
   // v3: профиль
   patchMe: (body) => request('PATCH', '/api/me', body),
   uploadAvatar: (file, crop) => request('POST', '/api/me/avatar', mediaForm(file, crop)),

@@ -141,6 +141,19 @@ export function syncLibrary({ force = false } = {}) {
   return syncing;
 }
 
+export const findTrackRec = (id) => db.data.tracks.find((t) => t.id === id) || null;
+
+/** Удалить трек из библиотеки вместе с файлом */
+export async function deleteTrack(id) {
+  const t = findTrackRec(id);
+  if (!t) return null;
+  await fsp.rm(path.join(musicDir, path.basename(t.file)), { force: true });
+  db.data.tracks = db.data.tracks.filter((x) => x !== t);
+  save();
+  lastSync = 0;
+  return publicTrack(t);
+}
+
 export function listTracks() {
   return [...db.data.tracks]
     .sort((a, b) => (a.artist + ' ' + a.title).localeCompare(b.artist + ' ' + b.title, 'ru'))

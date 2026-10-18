@@ -8,7 +8,7 @@ import { selectChannel } from '../nav.js';
 import { prefs } from '../prefs.js';
 import { playSound } from './sounds.js';
 import { bumpUnread, focusApp } from '../desktop.js';
-import { displayName } from '../util.js';
+import { displayName, safeMediaUrl } from '../util.js';
 import { pushActive } from '../push.js';
 
 /** «Не беспокоить» (v3): без звуков и системных уведомлений */
@@ -74,11 +74,15 @@ function showDesktop(m) {
   let body = (m.content || '').replace(/\s+/g, ' ').trim();
   if (!body && m.attachments?.length) body = `📎 ${m.attachments.length > 1 ? `Вложения (${m.attachments.length})` : (m.attachments[0].name || 'Вложение')}`;
   if (body.length > 140) body = body.slice(0, 139) + '…';
+  // откуда: «Сервер · #канал» / «Личные сообщения · Автор» — как в push и «Входящих»
+  const title = ch?.dm ? `Личные сообщения · ${who}` : `${srv?.name || 'Сервер'} · #${ch?.name || 'канал'}`;
+  if (!ch?.dm) body = `${who}: ${body}`;
+  const pic = safeMediaUrl(ch?.dm ? m.author?.avatar : srv?.icon);
   try {
-    const n = new Notification(ch?.dm ? who : `${who}${ch ? ` · #${ch.name}` : ''}${srv ? ` (${srv.name})` : ''}`, {
+    const n = new Notification(title, {
       body,
       tag: `sozvon-${m.channelId}`,
-      icon: '/assets/icons/icon-192.png',
+      icon: pic || '/assets/icons/icon-192.png',
       badge: '/assets/icons/icon-192.png',
       silent: true, // свой звук играем сами
     });

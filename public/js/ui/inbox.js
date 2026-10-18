@@ -1,7 +1,7 @@
 // «Входящие» (как в Discord): упоминания, @everyone и личные сообщения — колокольчик в шапке со счётчиком.
 // Клик по записи открывает канал/чат; открытие канала отмечает его уведомления прочитанными (channel:read).
-import { $, h, icon, avatar, displayName, fmtDate } from '../util.js';
-import { state, subscribe, notify, inboxUnread } from '../state.js';
+import { $, h, icon, avatar, displayName, fmtDate, safeMediaUrl, initials } from '../util.js';
+import { state, subscribe, notify, inboxUnread, getServer, getChannel } from '../state.js';
 import { emitAck } from '../socket.js';
 import { selectChannel } from '../nav.js';
 import { toastError } from './toasts.js';
@@ -9,10 +9,28 @@ import { toastError } from './toasts.js';
 let panel = null;
 let filter = 'all'; // all | unread
 
-function titleOf(n) {
-  if (n.type === 'dm') return n.count > 1 ? `Личные сообщения · ${n.count}` : 'Личное сообщение';
-  const where = `#${n.channelName || 'канал'}${n.serverName ? ` · ${n.serverName}` : ''}`;
-  return n.type === 'everyone' ? `@everyone в ${where}` : `Упоминание в ${where}`;
+/** Что случилось: «упомянул(а) вас» / «@everyone» / «личное сообщение» */
+function actionOf(n) {
+  if (n.type === 'dm') return n.count > 1 ? `личные сообщения · ${n.count}` : 'личное сообщение';
+  return n.type === 'everyone' ? '@everyone' : 'упомянул(а) вас';
+}
+
+/** Откуда: сервер и канал (названия — актуальные из state, с запасом из уведомления) или «Личные сообщения» */
+function sourceEl(n) {
+  if (n.type === 'dm') {
+    return h('span', { class: 'inbox-item__source', title: 'Личные сообщения' },
+      h('span', { class: 'inbox-item__src-icon inbox-item__src-icon--dm' }, icon('i-message', 'icon--sm')), 'Личные сообщения');
+  }
+  const srv = getServer(n.serverId);
+  const ch = getChannel(n.channelId);
+  const srvName = srv?.name || n.serverName || 'Сервер';
+  const chName = ch?.name || n.channelName || 'канал';
+  const pic = safeMediaUrl(srv?.icon);
+  return h('span', { class: 'inbox-item__source', title: `${srvName} · #${chName}` },
+    h('span', { class: 'inbox-item__src-icon' }, pic ? h('img', { src: pic, alt: '' }) : initials(srvName)),
+    h('span', { class: 'inbox-item__src-server' }, srvName),
+    h('span', { class: 'inbox-item__src-sep', 'aria-hidden': 'true' }, '›'),
+    h('span', { class: 'inbox-item__src-channel' }, `#${chName}`));
 }
 
 function itemEl(n) {
@@ -21,9 +39,10 @@ function itemEl(n) {
     dataset: { notificationId: n.id, channelId: n.channelId },
   }, avatar(n.author, 'sm'),
   h('span', { class: 'inbox-item__text' },
+    sourceEl(n),
     h('span', { class: 'inbox-item__top' },
       h('span', { class: 'inbox-item__who' }, displayName(n.author)),
-      h('span', { class: 'inbox-item__where' }, titleOf(n))),
+      h('span', { class: 'inbox-item__where' }, actionOf(n))),
     h('span', { class: 'inbox-item__preview' }, n.preview || ''),
     h('time', { class: 'inbox-item__time', datetime: new Date(n.createdAt).toISOString() }, fmtDate(n.createdAt))),
   n.read ? null : h('span', { class: 'inbox-item__dot', 'aria-label': 'Не прочитано' }));
@@ -130,6 +149,7 @@ export function initInbox(on) {
   subscribe(['inbox', 'me'], () => { renderBadge(); renderPanel(); });
   subscribe('servers', pruneInaccessible);
   subscribe('profile', renderPanel);
+  subscribe('servers', renderPanel); // переименовали сервер/канал — «откуда» обновится
   $('#btn-inbox').addEventListener('click', (e) => {
     e.stopPropagation();
     if (isInboxOpen()) closeInbox(); else openInbox();

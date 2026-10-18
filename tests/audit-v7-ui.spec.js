@@ -153,7 +153,8 @@ test.describe('аудит v7 UI: «Входящие»', () => {
     await expect(p.locator('#inbox')).toBeHidden();
     await p.locator('#btn-inbox').click();
     await expect(p.locator('#inbox .inbox-item')).toHaveCount(2);
-    await expect(p.locator('#inbox .inbox-item').first()).toContainText('@everyone в #');
+    await expect(p.locator('#inbox .inbox-item').first().locator('.inbox-item__where')).toHaveText('@everyone');
+    await expect(p.locator('#inbox .inbox-item').first().locator('.inbox-item__source')).toContainText('#');
     await p.locator('#inbox-read-all').click();
     await expect(inboxBadge(p)).toHaveCount(0);
     await expect(p.locator('#inbox .inbox-item.is-unread')).toHaveCount(0);
@@ -336,12 +337,15 @@ test.describe('аудит v7 UI: системные уведомления', () 
     const shown = () => p.evaluate(() => window.__shown);
     await ack(a.socket, 'message:send', { channelId: dm.id, content: 'лично тебе' });
     await expect.poll(async () => (await shown()).length).toBe(1);
-    expect((await shown())[0]).toMatchObject({ title: a.username, body: 'лично тебе', tag: `sozvon-${dm.id}` });
+    expect((await shown())[0]).toMatchObject({ title: `Личные сообщения · ${a.username}`, body: 'лично тебе', tag: `sozvon-${dm.id}` });
     await ack(a.socket, 'message:send', { channelId: text.id, content: 'всем, но без упоминания' });
     await sleep(600);
     expect((await shown()).length).toBe(1);
     await ack(a.socket, 'message:send', { channelId: text.id, content: `@${b.username} а это тебе` });
     await expect.poll(async () => (await shown()).length).toBe(2);
+    // откуда: «Сервер · #канал», в тексте — автор
+    expect((await shown())[1].title).toMatch(new RegExp(` · #${text.name}$`));
+    expect((await shown())[1].body).toBe(`${a.username}: @${b.username} а это тебе`);
     // «Не беспокоить» — ничего
     expect((await ack(b.socket, 'bootstrap')).ok).toBe(true);
   });

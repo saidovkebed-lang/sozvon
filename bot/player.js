@@ -3,6 +3,10 @@ export const IDLE_LEAVE_MS = Number(process.env.BOT_IDLE_MS) || 2 * 60 * 1000;
 // Сколько треков подряд может не скачаться, прежде чем бот перестанет перебирать очередь
 export const MAX_FAILS_IN_ROW = Math.max(1, Number(process.env.MUSIC_MAX_FAILS) || 3);
 const END_MARGIN_MS = 400; // небольшой запас, чтобы у слушателей трек успел доиграть
+let qidSeq = 0;
+/** Уникальный id элемента очереди (id трека библиотеки может повторяться: один трек дважды) */
+const newQid = () => `q${Date.now().toString(36)}${(++qidSeq).toString(36)}`;
+const withQid = (t) => (t && !t.qid ? Object.assign(t, { qid: newQid() }) : t);
 
 export function fmtTime(sec) {
   if (!Number.isFinite(sec) || sec <= 0) return '?:??';
@@ -22,11 +26,11 @@ export function trackLabel(t) {
 export function publicItem(t) {
   if (!t) return null;
   if (t.pending) {
-    const o = { id: t.id, title: t.title, artist: t.artist || '', duration: t.duration || 0, addedBy: t.addedBy || null, pending: true, source: t.source || 'search' };
+    const o = { id: t.id, qid: t.qid, title: t.title, artist: t.artist || '', duration: t.duration || 0, addedBy: t.addedBy || null, pending: true, source: t.source || 'search' };
     if (t.loading) o.loading = true;
     return o;
   }
-  return { id: t.id, title: t.title, artist: t.artist || '', duration: t.duration || 0, url: t.url, addedBy: t.addedBy || null };
+  return { id: t.id, qid: t.qid, title: t.title, artist: t.artist || '', duration: t.duration || 0, url: t.url, addedBy: t.addedBy || null };
 }
 
 export class Player {
@@ -51,6 +55,7 @@ export class Player {
     this.loading = null;     // ожидающий элемент, который качается, чтобы заиграть прямо сейчас
     this.gen = 0;            // поколение: skip/stop во время загрузки делают её результат неактуальным
     this.fails = 0;          // неудачных загрузок подряд
+    this.seekSeq = 0;        // растёт при перемотке — клиенты сразу прыгают на новую позицию
   }
 
   get active() { return !!this.voiceChannelId; }
@@ -69,6 +74,7 @@ export class Player {
       // загружаемый элемент показываем первым в очереди с loading:true
       queue: [...(this.loading ? [this.loading] : []), ...this.queue].map(publicItem),
       paused: this.paused,
+      seekSeq: this.seekSeq,
       position: Math.max(0, Math.round(this.elapsed() * 1000) / 1000),
       updatedAt: Date.now(),
     };
@@ -110,7 +116,7 @@ export class Player {
   // ---------- управление ----------
   start(track) {
     this.clearIdle();
-    this.current = track;
+    this.current = withQid(track);
     this.paused = false;
     this.position = 0;
     this.startedAt = Date.now();
@@ -135,14 +141,14 @@ export class Player {
     this.fetchFor(item).then((track) => {
       const i = this.queue.indexOf(item);
       if (i === -1) return; // уже убрали/начали играть
-      this.queue[i] = { ...track, addedBy: item.addedBy || track.addedBy };
+      this.queue[i] = { ...track, addedBy: item.addedBy || track.addedBy, qid: item.qid };
       this.broadcast();
     }, () => { /* ошибку покажем, когда дойдёт очередь */ });
   }
 
   /** @returns {number} 0 — заиграл (или начал загружаться) сразу, иначе позиция в очереди (1..n) */
   enqueue(track) {
-    this.queue.push(track);
+    this.queue.push(withQid(track));
     if (!this.current && !this.loading) { this.next(); return 0; }
     this.broadcast();
     if (this.queue.length === 1) this.prefetch();
@@ -151,7 +157,7 @@ export class Player {
 
   /** Добавить сразу много (плейлист). @returns {boolean} заиграл ли первый сразу */
   enqueueMany(items) {
-    this.queue.push(...items);
+    this.queue.push(...items.map(withQid));
     if (!this.current && !this.loading) { this.next(); return true; }
     this.broadcast();
     this.prefetch();
@@ -183,7 +189,7 @@ export class Player {
       nxt.loading = false;
       this.loading = null;
       this.fails = 0;
-      this.start({ ...track, addedBy: nxt.addedBy || track.addedBy });
+      this.start({ ...track, addedBy: nxt.addedBy || track.addedBy, qid: nxt.qid });
     }, (err) => {
       if (gen !== this.gen) return;
       nxt.loading = false;
@@ -223,10 +229,43 @@ export class Player {
     return true;
   }
 
+  /** Перемотка текущего трека на sec секунд (пауза сохраняется). @returns новая позиция или null */
+  seek(sec) {
+    if (!this.current || !Number.isFinite(sec)) return null;
+    const d = this.current.duration;
+    const pos = Math.max(0, d > 0 ? Math.min(sec, Math.max(0, d - 1)) : sec);
+    this.position = pos;
+    this.startedAt = Date.now();
+    this.seekSeq++;
+    this.scheduleEnd();
+    this.broadcast();
+    return pos;
+  }
+
   remove(n) {
     if (!Number.isInteger(n) || n < 1 || n > this.queue.length) return null;
     const [t] = this.queue.splice(n - 1, 1);
     this.broadcast();
+    if (n === 1) this.prefetch();
+    return t;
+  }
+
+  /** Номер (1..n) элемента очереди по qid; 0 — это загружаемый сейчас элемент; -1 — нет такого */
+  indexOfQid(qid) {
+    if (this.loading?.qid === qid) return 0;
+    const i = this.queue.findIndex((t) => t.qid === qid);
+    return i === -1 ? -1 : i + 1;
+  }
+
+  /** Переставить элемент очереди с позиции from на to (1..n). @returns элемент или null */
+  move(from, to) {
+    const n = this.queue.length;
+    if (!Number.isInteger(from) || !Number.isInteger(to) || from < 1 || from > n) return null;
+    const dst = Math.min(Math.max(1, to), n);
+    const [t] = this.queue.splice(from - 1, 1);
+    this.queue.splice(dst - 1, 0, t);
+    this.broadcast();
+    if (from === 1 || dst === 1) this.prefetch();
     return t;
   }
 
