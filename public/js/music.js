@@ -13,6 +13,8 @@ class MusicSync {
     this.blocked = false;
     this.currentUrl = null;
     this.timer = null;
+    this.seekSeq = new Map(); // channelId -> последний seekSeq (перемотка: прыгаем сразу, а не через DRIFT_MAX)
+    this.seekPending = false;
   }
 
   init() {
@@ -53,6 +55,11 @@ class MusicSync {
   setState(ms) {
     if (!ms || !ms.channelId) return;
     ms._skew = typeof ms.serverNow === 'number' ? ms.serverNow - Date.now() : 0;
+    const seq = Number(ms.seekSeq) || 0;
+    if (this.seekSeq.has(ms.channelId) && this.seekSeq.get(ms.channelId) !== seq) {
+      if (state.myVoice?.channelId === ms.channelId) this.seekPending = true;
+    }
+    this.seekSeq.set(ms.channelId, seq);
     state.music[ms.channelId] = ms;
     if (state.myVoice?.channelId === ms.channelId) this.sync(true);
     notify('music');
@@ -89,6 +96,7 @@ class MusicSync {
     }
     if (ms.paused) {
       if (!a.paused) a.pause();
+      if (a.readyState >= 1) this.seekPending = false;
       if (force && a.readyState >= 1 && Math.abs(a.currentTime - elapsed) > 0.25) {
         try { a.currentTime = elapsed; } catch { /* ignore */ }
       }
@@ -96,7 +104,9 @@ class MusicSync {
     }
     const dur = ms.track.duration || a.duration || Infinity;
     if (elapsed >= dur) { if (!a.paused) a.pause(); return; }
-    if (a.readyState >= 1 && Math.abs(a.currentTime - elapsed) > DRIFT_MAX) {
+    const maxDrift = this.seekPending ? 0.25 : DRIFT_MAX;
+    if (a.readyState >= 1) this.seekPending = false;
+    if (a.readyState >= 1 && Math.abs(a.currentTime - elapsed) > maxDrift) {
       try { a.currentTime = elapsed; } catch { /* ignore */ }
     }
     if (a.paused && !this.blocked) {

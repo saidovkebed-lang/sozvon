@@ -235,7 +235,7 @@ test.describe('v7: push-уведомления', () => {
       expect(Number(r.headers.ttl)).toBeGreaterThan(0);
       verifyVapid(r.headers.authorization, origin, serverKey);
       const payload = decrypt(r.body, keys);
-      expect(payload).toMatchObject({ title: a.user.username, body: 'а теперь push 🚀', channelId: dm.id, type: 'dm', url: `/?c=${dm.id}` });
+      expect(payload).toMatchObject({ title: `Личные сообщения · ${a.user.username}`, body: 'а теперь push 🚀', channelId: dm.id, type: 'dm', url: `/?c=${dm.id}`, source: { kind: 'dm', label: 'Личные сообщения', author: a.user.username } });
 
       // «Не беспокоить» — без push
       expect((await api('PATCH', '/api/me', { token: b.token, body: { status: 'dnd' } })).status).toBe(200);
@@ -253,6 +253,62 @@ test.describe('v7: push-уведомления', () => {
       await ack(a.socket, 'message:send', { channelId: dm.id, content: 'больше не придёт' });
       await sleep(800);
       expect(received.length).toBe(2);
+    } finally {
+      srv.close();
+    }
+  });
+
+  test('откуда уведомление: push «Сервер · #канал» + автор и иконка сервера, @everyone; во «Входящих» — сервер › #канал, переименование видно', async ({ makePage }) => {
+    const received = [];
+    const srv = http.createServer((req, res) => {
+      const chunks = [];
+      req.on('data', (c) => chunks.push(c));
+      req.on('end', () => { received.push(Buffer.concat(chunks)); res.writeHead(201); res.end(); });
+    });
+    await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+    try {
+      const { users: [a, b], server } = await friends(2);
+      const text = server.channels.find((ch) => ch.type === 'text');
+      // иконка сервера
+      const fd = new FormData();
+      fd.append('file', new Blob([PNG_1x1], { type: 'image/png' }), 'icon.png');
+      const up = await api('POST', `/api/servers/${server.id}/icon`, { token: a.token, body: fd });
+      expect(up.status, JSON.stringify(up.json)).toBe(200);
+      const iconUrl = up.json.url || up.json.server?.icon;
+      expect(iconUrl).toMatch(/^\/media\//);
+
+      const keys = makeBrowserKeys();
+      const sub = { endpoint: `http://127.0.0.1:${srv.address().port}/push/src`, keys: { p256dh: keys.p256dh, auth: keys.auth } };
+      expect((await api('POST', '/api/push/subscribe', { token: b.token, body: { subscription: sub } })).status).toBe(200);
+      b.socket.emit('client:view', { channelId: null, visible: false });
+      await sleep(200);
+
+      await ack(a.socket, 'message:send', { channelId: text.id, content: `@${b.user.username} посмотри` });
+      await expect.poll(() => received.length, { timeout: 10000 }).toBe(1);
+      const p1 = decrypt(received[0], keys);
+      expect(p1).toMatchObject({
+        title: `ЛС-тест · #${text.name}`, body: `${a.user.username} упомянул(а) вас: @${b.user.username} посмотри`, type: 'mention',
+        source: { kind: 'server', label: `ЛС-тест · #${text.name}`, serverName: 'ЛС-тест', channelName: text.name, author: a.user.username },
+        icon: iconUrl,
+      });
+
+      await ack(a.socket, 'message:send', { channelId: text.id, content: '@everyone сбор' });
+      await expect.poll(() => received.length, { timeout: 10000 }).toBe(2);
+      expect(decrypt(received[1], keys)).toMatchObject({ title: `ЛС-тест · #${text.name}`, body: `${a.user.username} (@everyone): @everyone сбор`, type: 'everyone' });
+
+      // «Входящие»: строка «откуда» с иконкой сервера; после переименования — новое имя
+      const pb = await makePage({ name: 'B' });
+      await pb.goto('/');
+      await pb.evaluate((t) => localStorage.setItem('sozvon.token', t), b.token);
+      await pb.reload();
+      await pb.locator('#btn-inbox').click();
+      const item = pb.locator('#inbox .inbox-item').first();
+      await expect(item.locator('.inbox-item__src-server')).toHaveText('ЛС-тест');
+      await expect(item.locator('.inbox-item__src-channel')).toHaveText(`#${text.name}`);
+      await expect(item.locator('.inbox-item__src-icon img')).toHaveAttribute('src', iconUrl);
+      await expect(item.locator('.inbox-item__where')).toHaveText('@everyone');
+      expect((await ack(a.socket, 'server:update', { serverId: server.id, name: 'Друзья' })).ok).toBe(true);
+      await expect(item.locator('.inbox-item__src-server')).toHaveText('Друзья');
     } finally {
       srv.close();
     }
@@ -315,7 +371,8 @@ test.describe('v7: интерфейс', () => {
     await pa.locator('#composer-input').press('Enter');
     await expect(pb.locator('#btn-inbox .badge-count')).toHaveText('1');
     await pb.locator('#btn-inbox').click();
-    await expect(pb.locator('#inbox .inbox-item.is-unread')).toContainText('Упоминание в #общий');
+    await expect(pb.locator('#inbox .inbox-item.is-unread .inbox-item__source')).toContainText('#общий');
+    await expect(pb.locator('#inbox .inbox-item.is-unread .inbox-item__where')).toHaveText('упомянул(а) вас');
     await pb.locator('#inbox .inbox-item.is-unread').click();
     await expect(pb.locator('#channel-title')).toHaveText('общий');
     await expect(pb.locator('#btn-inbox .badge-count')).toHaveCount(0);

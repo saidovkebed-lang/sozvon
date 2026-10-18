@@ -152,13 +152,26 @@ const HELP = [
   '!skip — следующий трек',
   '!np — что сейчас играет',
   '!queue — очередь',
+  '!seek <1:23 | 83 | +10 | -10> — перемотать текущий трек',
   '!remove <номер> — убрать трек из очереди',
+  '!move <откуда> <куда> — переставить трек в очереди',
   '!shuffle — перемешать очередь',
   '!stop — остановить, очистить очередь и выйти',
   '!leave — выйти из голосового канала',
   '!help — эта подсказка',
   'Свои файлы можно загрузить через кнопку «Библиотека» в плеере. Подробнее: docs/MUSIC.md',
 ].join('\n');
+
+/** «1:23», «83», «+10», «-10», «1:02:03» → секунды (null — не разобрать) */
+function parseSeek(arg, now = 0) {
+  const m = String(arg || '').trim().match(/^([+-])?\s*(\d+(?::\d{1,2}){0,2}(?:\.\d+)?)$/);
+  if (!m) return null;
+  const sec = m[2].split(':').reduce((acc, x) => acc * 60 + Number(x), 0);
+  if (!Number.isFinite(sec)) return null;
+  if (m[1] === '+') return now + sec;
+  if (m[1] === '-') return Math.max(0, now - sec);
+  return sec;
+}
 
 function nowPlayingText(p) {
   if (!p.current && p.loading) return `⏳ Загружаю: ${trackLabel(p.loading)} — сейчас заиграет`;
@@ -192,7 +205,7 @@ async function handleCommand(cmd) {
   if (command === 'np') return reply(nowPlayingText(p));
   if (command === 'queue') return reply(queueText(p));
 
-  const known = ['play', 'skip', 'stop', 'pause', 'resume', 'remove', 'shuffle', 'leave'];
+  const known = ['play', 'skip', 'stop', 'pause', 'resume', 'remove', 'move', 'seek', 'shuffle', 'leave'];
   if (!known.includes(command)) return reply(`🤔 Не знаю команду !${command}. Напиши !help — там всё, что я умею.`);
 
   if (!voiceChannelId) return reply(`🎧 ${username}, зайди в голосовой канал — тогда я смогу включить музыку.`);
@@ -290,7 +303,38 @@ async function handleCommand(cmd) {
       if (!p.current) return reply('🔇 Сейчас ничего не играет. Включи: !play <трек>');
       if (!p.resume()) return reply('▶️ И так играет 🎵');
       return reply(`▶️ Продолжаю: ${trackLabel(p.current)}`);
+    case 'seek': {
+      if (!p.current && p.loading) return reply('⏳ Трек ещё загружается — перемотать можно, когда заиграет.');
+      if (!p.current) return reply('🔇 Сейчас ничего не играет.');
+      const sec = parseSeek(args, p.elapsed());
+      if (sec === null) return reply('⏩ Укажи время: !seek 1:23, !seek 83, !seek +10 или !seek -10');
+      const pos = p.seek(sec);
+      return reply(`⏩ Перемотал ${trackLabel(p.current)} на ${fmtTime(pos) === '?:??' ? '0:00' : fmtTime(pos)}`);
+    }
+    case 'move': {
+      if (p.queue.length < 2) return reply('📜 В очереди меньше двух треков — переставлять нечего.');
+      const m = args.match(/^id:(\S+)\s+(\d+)$/);
+      const from = m ? p.indexOfQid(m[1]) : Number.parseInt(args.split(/\s+/)[0], 10);
+      const to = Number.parseInt(m ? m[2] : args.split(/\s+/)[1], 10);
+      if (m && from === 0) return reply('⏳ Этот трек уже загружается и сейчас заиграет — его не переставить.');
+      if (m && from === -1) return null; // элемент уже ушёл из очереди (сыграл/удалён) — молча
+      const moved = p.move(from, to);
+      if (!moved) return reply(`🔢 Укажи номера от 1 до ${p.queue.length}: !move <откуда> <куда> (номера — в !queue)`);
+      return reply(`↕️ ${trackLabel(moved)} — теперь ${p.queue.indexOf(moved) + 1}-й в очереди`);
+    }
     case 'remove': {
+      const idm = args.match(/^id:(\S+)$/);
+      if (idm) {
+        const at = p.indexOfQid(idm[1]);
+        if (at === -1) return null;
+        if (at === 0) { // загружаемый сейчас — как !skip
+          const skipped = p.loading;
+          p.next();
+          return reply(`🗑 Убрал из очереди: ${trackLabel(skipped)}`);
+        }
+        const removed = p.remove(at);
+        return reply(`🗑 Убрал из очереди: ${trackLabel(removed)}`);
+      }
       const n = Number.parseInt(args, 10);
       if (!p.queue.length) return reply('📭 Очередь пуста — удалять нечего.');
       const removed = p.remove(n);

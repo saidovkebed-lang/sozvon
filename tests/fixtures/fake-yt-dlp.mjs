@@ -9,6 +9,7 @@
 // Каталог:
 //  - youtube playlist?list=PLqaThree  → 3 видео qaVid000001..3
 //  - youtube playlist?list=PLqaWithFail → qaVid000001, qaVidFAIL01, qaVid000003
+//  - youtube playlist?list=PLqaCtl → qaCtl000001..3 (+ видео qaCtl000004) — для tests/v10-music-controls
 //  - видео с FAIL в id → «ERROR: [youtube] <id>: Video unavailable», код 1
 //  - ytsearchN:"<артист> - <название>" → если название есть в Spotify-фикстурах: 3 результата,
 //    первый с длительностью +60 с (должен быть отвергнут проверкой ±15 с), второй — точный.
@@ -61,10 +62,16 @@ const VIDEOS = {
   qaVid000003: { title: 'QA Tube Three', uploader: 'QA Channel', duration: 16 },
   qaVid000004: { title: 'QA Tube Four Single', uploader: 'QA Solo', duration: 17 },
   qaVidFAIL01: { title: 'QA Tube Broken', uploader: 'QA Channel', duration: 13 },
+  // v10 (перемотка/очередь): свои id, чтобы не трогать кэш, на который рассчитывают тесты v2
+  qaCtl000001: { title: 'QA Ctl One', uploader: 'QA Ctl', duration: 14 },
+  qaCtl000002: { title: 'QA Ctl Two', uploader: 'QA Ctl', duration: 15 },
+  qaCtl000003: { title: 'QA Ctl Three', uploader: 'QA Ctl', duration: 16 },
+  qaCtl000004: { title: 'QA Ctl Four Single', uploader: 'QA Ctl Solo', duration: 17 },
 };
 const PLAYLISTS = {
   PLqaThree: { title: 'QA YouTube Playlist', ids: ['qaVid000001', 'qaVid000002', 'qaVid000003'] },
   PLqaWithFail: { title: 'QA YouTube Playlist With Fail', ids: ['qaVid000001', 'qaVidFAIL01', 'qaVid000003'] },
+  PLqaCtl: { title: 'QA Ctl Playlist', ids: ['qaCtl000001', 'qaCtl000002', 'qaCtl000003'] },
 };
 function spotifyTracks() {
   const out = [];

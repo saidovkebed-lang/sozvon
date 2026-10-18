@@ -375,7 +375,7 @@ test.describe('аудит v7: push', () => {
       expect(p1.title).toContain(`#${text.name}`);
       await ok(a.socket, 'message:send', { channelId: text.id, content: '@everyone собираемся' });
       await expect.poll(() => rcv.at('/b').length).toBe(2);
-      expect(decrypt(rcv.at('/b')[1].body, keys)).toMatchObject({ type: 'everyone', body: '@everyone собираемся' });
+      expect(decrypt(rcv.at('/b')[1].body, keys)).toMatchObject({ type: 'everyone', body: `${a.user.username} (@everyone): @everyone собираемся` });
       // сообщение без упоминания — без push
       await ok(a.socket, 'message:send', { channelId: text.id, content: 'просто так' });
       await sleep(600);

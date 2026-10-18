@@ -16,7 +16,7 @@ import { createVoice } from './voice.js';
 import { isOwnMediaUrl, removeMediaUrl } from './media.js';
 import {
   findDm, isDmMember, dmOther, getOrCreateDm, userDms, publicDm, listDms, sharesServer, setRead,
-  addNotification, listNotifications, markNotificationsRead, dropNotifications,
+  addNotification, listNotifications, markNotificationsRead, dropNotifications, notificationText,
   livePushSubs, removePushSub, forgetMessage, dropPushSubsForSessions,
 } from './inbox.js';
 import { sendPush, pushPublicKey } from './push.js';
@@ -24,7 +24,7 @@ import { sendPush, pushPublicKey } from './push.js';
 const serverRoom = (id) => `server:${id}`;
 const userRoom = (id) => `user:${id}`;
 
-export const BOT_COMMANDS = ['play', 'skip', 'stop', 'pause', 'resume', 'queue', 'np', 'remove', 'shuffle', 'help', 'leave'];
+export const BOT_COMMANDS = ['play', 'skip', 'stop', 'pause', 'resume', 'queue', 'np', 'remove', 'move', 'seek', 'shuffle', 'help', 'leave'];
 const BOT_OFFLINE_TEXT = 'Музыкальный бот не запущен. Запустите: npm run bot';
 const NO_MUSIC_PERM = 'Нет права управлять музыкой';
 const NO_PERM = 'Недостаточно прав';
@@ -158,11 +158,14 @@ export function attachRealtime(io, { uploadsDir }) {
     const subs = livePushSubs(userId);
     if (!subs.length) return;
     const author = findUser(message.authorId);
-    const title = type === 'dm' ? nameOf(author)
-      : `${nameOf(author)} · #${n.channelName || 'канал'}${n.serverName ? ` (${n.serverName})` : ''}`;
+    const { title, body, source } = notificationText(n, nameOf(author));
+    const srvIcon = type === 'dm' ? null : findServer(serverId)?.icon;
     const payload = {
-      title, body: n.preview || 'Новое сообщение', tag: `sozvon-${channelId}`, channelId,
+      title, body, tag: `sozvon-${channelId}`, channelId,
       url: `/?c=${encodeURIComponent(channelId)}`, count: n.count, type,
+      source: { kind: type === 'dm' ? 'dm' : 'server', label: source, serverName: n.serverName, channelName: n.channelName, author: nameOf(author) },
+      // иконка сервера (только свой файл), у ЛС — аватар автора
+      icon: [type === 'dm' ? author?.avatar : srvIcon].find((u) => typeof u === 'string' && u.startsWith('/') && !u.startsWith('//')) || undefined,
     };
     for (const sub of subs) {
       sendPush(sub, payload).then((r) => { if (r.gone) removePushSub(userId, sub.endpoint); }).catch((e) => console.warn('[push]', e?.message || e));
@@ -954,6 +957,7 @@ export function attachRealtime(io, { uploadsDir }) {
         if (!isObj(t)) return null;
         const out = {
           id: str(t.id).slice(0, 64), title: str(t.title).slice(0, 200), artist: str(t.artist).slice(0, 200),
+          ...(typeof t.qid === 'string' && t.qid ? { qid: t.qid.slice(0, 40) } : {}),
           duration: Number.isFinite(t.duration) && t.duration > 0 ? t.duration : 0,
           addedBy: typeof t.addedBy === 'string' ? t.addedBy.slice(0, 50) : null,
         };
@@ -972,6 +976,7 @@ export function attachRealtime(io, { uploadsDir }) {
         track: isObj(st.track) && !st.track.pending ? cleanTrack(st.track) : null,
         queue: Array.isArray(st.queue) ? st.queue.slice(0, 500).map(cleanTrack).filter(Boolean) : [],
         paused: !!st.paused,
+        seekSeq: Number.isInteger(st.seekSeq) && st.seekSeq >= 0 ? st.seekSeq : 0,
         position: Number.isFinite(st.position) && st.position >= 0 ? st.position : 0,
         updatedAt: Number.isFinite(st.updatedAt) ? st.updatedAt : Date.now(),
       };

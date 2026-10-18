@@ -113,6 +113,18 @@ export function publicNotification(n) {
 }
 
 /**
+ * Откуда пришло уведомление — одинаково для push и «Входящих».
+ * Сервер: «Сервер · #канал», тело «Автор: текст»; ЛС: «Личные сообщения · Автор», тело — текст.
+ */
+export function notificationText(n, authorName = 'Кто-то') {
+  const text = n.preview || 'Новое сообщение';
+  if (n.type === 'dm') return { title: `Личные сообщения · ${authorName}`, body: text, source: 'Личные сообщения' };
+  const source = `${n.serverName || 'Сервер'} · #${n.channelName || 'канал'}`;
+  const how = n.type === 'everyone' ? ' (@everyone)' : ' упомянул(а) вас';
+  return { title: source, body: `${authorName}${how}: ${text}`, source };
+}
+
+/**
  * Новое уведомление. type: 'mention' | 'everyone' | 'dm'. Для ЛС непрочитанное уведомление по тому же чату
  * обновляется (счётчик), а не плодится. Возвращает публичный вид.
  */
