@@ -89,6 +89,25 @@ export async function getScreen({ video = { frameRate: { ideal: 30 } }, audio = 
   }
 }
 
+/**
+ * Только звук системы для своего захвата экрана (приложение для ПК, Windows): getDisplayMedia, где мост
+ * отдаёт вместо картинки кадр самой страницы (без захвата экрана ОС) — картинку сразу останавливаем.
+ * null — звук недоступен.
+ */
+export async function getScreenAudio(sourceId) {
+  const D = window.sozvonDesktop;
+  if (D?.platform !== 'win32' || !D.selectScreenSource) return null;
+  try {
+    if (await D.selectScreenSource(sourceId, { audioOnly: true }) === false) return null;
+    const s = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: screenAudioConstraints(), systemAudio: 'include' });
+    s.getVideoTracks().forEach((t) => t.stop());
+    return s.getAudioTracks()[0] || null;
+  } catch (e) {
+    console.warn('[media] звук экрана', e);
+    return null;
+  }
+}
+
 export function stopStream(stream) {
   stream?.getTracks().forEach((t) => { try { t.stop(); } catch { /* ignore */ } });
 }

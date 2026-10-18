@@ -45,8 +45,21 @@ if (allowed) {
       thumbnailHeight: Number(opts.thumbnailHeight) || undefined,
     } : {}, []),
     selectScreenSource: (id, opts) => invoke('desktop:select-source', {
-      id: id == null ? null : String(id), audio: !!(opts && opts.audio),
+      id: id == null ? null : String(id), audio: !!(opts && opts.audio), audioOnly: !!(opts && opts.audioOnly),
     }, false),
+    // Свой захват экрана (Windows): помощник отдаёт кадры по http://127.0.0.1 (url с одноразовым токеном)
+    nativeCapture: !!info.nativeCapture,
+    startNativeCapture: (opts) => invoke('desktop:native-capture-start', opts && typeof opts === 'object' ? {
+      sourceId: String(opts.sourceId || ''),
+      maxWidth: Number(opts.maxWidth) || undefined,
+      maxHeight: Number(opts.maxHeight) || undefined,
+      fps: Number(opts.fps) || undefined,
+    } : {}, { ok: false, error: 'ipc' }),
+    nativeCaptureControl: (token, cmd, params) => invoke('desktop:native-capture-ctl', {
+      token: String(token || ''), cmd: String(cmd || ''),
+      params: params && typeof params === 'object' ? { maxWidth: Number(params.maxWidth) || undefined, maxHeight: Number(params.maxHeight) || undefined, fps: Number(params.fps) || undefined } : undefined,
+    }, { ok: false }),
+    onNativeCaptureEnded: subscribe('desktop:native-capture-ended', ([m]) => [{ token: String(m?.token || ''), reason: String(m?.reason || '') }]),
     openServerSettings: () => send('desktop:open-server-settings'),
   }));
 }

@@ -2,7 +2,8 @@
 import { state, notify, getChannel, applyNetConfig } from '../state.js';
 import { emit, emitAck, socketId } from '../socket.js';
 import { rtc } from './rtc.js';
-import { getScreen, getCamera, stopStream } from './media.js';
+import { getScreen, getScreenAudio, getCamera, stopStream } from './media.js';
+import { nativeCaptureSupported, startNativeCapture } from './native-capture.js';
 import { engine as audio } from '../audio/engine.js';
 import { toast, toastError } from '../ui/toasts.js';
 import { music } from '../music.js';
@@ -14,6 +15,25 @@ export const STREAM_QUALITY = {
   '720p30': { label: '720p 30', video: { width: { ideal: 1280, max: 1280 }, height: { ideal: 720, max: 720 }, frameRate: { ideal: 30, max: 30 } }, maxBitrate: 2_500_000, maxFramerate: 30, hint: 'detail' },
   '1080p60': { label: '1080p 60', video: { width: { ideal: 1920, max: 1920 }, height: { ideal: 1080, max: 1080 }, frameRate: { ideal: 60, max: 60 } }, maxBitrate: 6_000_000, maxFramerate: 60, hint: 'motion' },
   source: { label: 'Исходное', video: { frameRate: { ideal: 60, max: 60 } }, maxBitrate: 8_000_000, maxFramerate: 60, hint: 'detail' },
+};
+
+// свой захват (приложение для ПК, Windows): размер и частота кадров для помощника
+function nativeParams(q) {
+  const Q = STREAM_QUALITY[q] || STREAM_QUALITY['720p30'];
+  const w = Q.video.width?.max || 2560;
+  const h = Q.video.height?.max || 1440;
+  return { maxWidth: w, maxHeight: h, fps: Q.maxFramerate };
+}
+
+let native = null;        // сессия своего захвата экрана (native-capture.js)
+let viewersTimer = null;
+
+// Никто не смотрит трансляцию — помощник захвата спит (не тратит процессор/видеокарту)
+rtc.onScreenViewers = (n) => {
+  clearTimeout(viewersTimer);
+  if (!native) return;
+  if (n > 0) native.pause(false);
+  else viewersTimer = setTimeout(() => native?.pause(true), 3000);
 };
 
 function screenParams(q) {
@@ -166,12 +186,36 @@ export async function startScreen({ quality = prefs.get('stream.quality'), audio
   const Q = STREAM_QUALITY[quality] || STREAM_QUALITY['720p30'];
   try {
     const D = window.sozvonDesktop;
-    if (sourceId && D?.selectScreenSource) {
-      const ok = await D.selectScreenSource(sourceId, { audio: !!withAudio });
-      if (ok === false) { toast('Не удалось выбрать источник — попробуйте ещё раз'); return false; }
+    let stream = null;
+    if (sourceId && nativeCaptureSupported()) {
+      const nat = await startNativeCapture(sourceId, nativeParams(quality));
+      if (nat) {
+        stream = new MediaStream([nat.track]);
+        if (withAudio && D?.platform === 'win32') { // системный звук в Electron — только Windows
+          const at = await getScreenAudio(sourceId);
+          if (at) stream.addTrack(at); else stream.audioFallback = true;
+        }
+        native = nat;
+        nat.onEnded((reason) => {
+          if (native !== nat) return;
+          native = null;
+          if (rtc.local.screen === stream) {
+            stopScreen();
+            if (reason === 'window-closed') toast('Окно закрыто — демонстрация остановлена', '', 4000);
+            else if (reason !== 'stopped') toast('Демонстрация экрана прервалась', 'error', 4000);
+          }
+        });
+        if (!rtc.screenViewers()) rtc.onScreenViewers(0);
+      }
     }
-    const stream = await getScreen({ video: Q.video, audio: !!withAudio });
-    if (!state.myVoice) { stopStream(stream); return false; }
+    if (!stream) {
+      if (sourceId && D?.selectScreenSource) {
+        const ok = await D.selectScreenSource(sourceId, { audio: !!withAudio });
+        if (ok === false) { toast('Не удалось выбрать источник — попробуйте ещё раз'); return false; }
+      }
+      stream = await getScreen({ video: Q.video, audio: !!withAudio });
+    }
+    if (!state.myVoice) { stopNative(); stopStream(stream); return false; }
     if (stream.audioFallback) toast('Звук экрана недоступен на этом компьютере — трансляция идёт без звука. Совет: показывайте отдельное окно или вкладку браузера со звуком.', '', 7000);
     const vt = stream.getVideoTracks()[0];
     if (vt) {
@@ -186,9 +230,17 @@ export async function startScreen({ quality = prefs.get('stream.quality'), audio
     notify('me', 'voice');
     return true;
   } catch (e) {
+    stopNative();
     if (e.cancelled) toast(e.message, '', 2500); else toastError(e);
     return false;
   }
+}
+
+function stopNative() {
+  clearTimeout(viewersTimer);
+  const n = native;
+  native = null;
+  n?.stop();
 }
 
 /** Сменить качество идущей демонстрации на лету */
@@ -197,6 +249,7 @@ export async function setStreamQuality(quality) {
   if (!Q) return;
   state.streamQuality = quality;
   rtc.setScreenParams(screenParams(quality));
+  native?.update(nativeParams(quality));
   const vt = rtc.local.screen?.getVideoTracks()[0];
   if (vt) {
     try { vt.contentHint = Q.hint; } catch { /* ignore */ }
@@ -207,6 +260,7 @@ export async function setStreamQuality(quality) {
 export function stopScreen() {
   if (!state.streaming && !rtc.local.screen) return;
   state.streaming = false;
+  stopNative();
   rtc.setLocalStream('screen', null);
   sendState();
   notify('me', 'voice');
