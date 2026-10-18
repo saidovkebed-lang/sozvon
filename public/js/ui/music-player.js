@@ -185,7 +185,8 @@ function initQueueEditing() {
 }
 
 /* ---------- перемотка ---------- */
-let seekDrag = null; // { sec } пока тянут ползунок — прогресс не прыгает назад
+let seekDrag = null; // { sec, until? } пока тянут ползунок или ждут ответа бота — прогресс не прыгает назад
+let seekPointer = null; // pointerId, пока кнопка мыши зажата на ползунке (только тогда он следует за мышью)
 
 function seekDuration() {
   const ms = music.currentState();
@@ -229,16 +230,20 @@ function initSeek() {
   prog.addEventListener('pointerdown', (e) => {
     if (e.button !== 0 || !enabled()) return;
     e.preventDefault();
+    seekPointer = e.pointerId;
     prog.setPointerCapture?.(e.pointerId);
     prog.classList.add('is-seeking');
     preview(secAt(e.clientX));
   });
   prog.addEventListener('pointermove', (e) => {
-    if (seekDrag) preview(secAt(e.clientX));
+    if (seekPointer !== e.pointerId) return; // просто навели мышь — не тянем
+    if (e.pointerType === 'mouse' && !(e.buttons & 1)) { finish(e, true); return; } // кнопку отпустили вне окна
+    preview(secAt(e.clientX));
   });
-  const finish = (e, apply) => {
-    if (!seekDrag) return;
-    const { sec } = seekDrag;
+  function finish(e, apply) {
+    if (seekPointer === null || e.pointerId !== seekPointer) return;
+    seekPointer = null;
+    const sec = seekDrag?.sec ?? 0;
     prog.classList.remove('is-seeking');
     tip.hidden = true;
     try { prog.releasePointerCapture?.(e.pointerId); } catch { /* уже отпущен */ }
@@ -247,10 +252,10 @@ function initSeek() {
       seekDrag = { sec, until: Date.now() + 1500 };
       seekTo(sec);
     } else seekDrag = null;
-  };
+  }
   prog.addEventListener('pointerup', (e) => finish(e, true));
   prog.addEventListener('pointercancel', (e) => finish(e, false));
-  prog.addEventListener('lostpointercapture', (e) => { if (seekDrag && !seekDrag.until) finish(e, true); });
+  prog.addEventListener('lostpointercapture', (e) => finish(e, true));
   prog.addEventListener('keydown', (e) => {
     if (!enabled()) return;
     const ms = music.currentState();

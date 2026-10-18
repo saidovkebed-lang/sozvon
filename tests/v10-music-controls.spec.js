@@ -149,10 +149,24 @@ test('UI: ползунок перемотки (мышь и клавиатура)
   await expect(prog).toHaveAttribute('role', 'slider');
   await expect(prog).toHaveAttribute('aria-disabled', 'false');
   const box = await prog.boundingBox();
+  // как на настоящем сервере: ответ бота о новой позиции приходит не мгновенно
+  await page.evaluate(() => {
+    const m = window.__sozvon.music; const orig = m.setState.bind(m);
+    m.setState = (ms) => setTimeout(() => orig(ms), 700);
+  });
   await page.mouse.click(box.x + box.width * 0.75, box.y + box.height / 2);
+  // сразу после клика мышь уводят по полосе без нажатия — ползунок не должен поехать за ней
+  await page.mouse.move(box.x + box.width * 0.2, box.y + box.height / 2, { steps: 4 });
+  await expect(page.locator('#music-seek-tip')).toBeHidden();
   await expect.poll(elapsed, { timeout: 10000 }).toBeGreaterThan(9.5);
   expect(await elapsed()).toBeLessThan(11.5); // 75 % от 14 с ≈ 10.5
   await expect.poll(audioTime, { timeout: 10000 }).toBeGreaterThan(9.5);
+  await page.waitForTimeout(1800); // дольше окна ожидания ответа бота
+  await page.mouse.move(box.x + box.width * 0.1, box.y + box.height / 2, { steps: 4 });
+  const pct = () => page.locator('#music-progress-bar').evaluate((el) => parseFloat(el.style.width));
+  expect(await pct()).toBeGreaterThan(60); // ≈ 75 %, а не 10 % под мышью
+  expect(await elapsed()).toBeGreaterThan(9.5);
+  await page.evaluate(() => { delete window.__sozvon.music.setState; }); // снова без задержки
   // перетаскивание: тянем к началу
   await page.mouse.move(box.x + box.width * 0.6, box.y + box.height / 2);
   await page.mouse.down();
