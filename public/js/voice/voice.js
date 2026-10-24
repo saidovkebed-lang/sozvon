@@ -38,7 +38,9 @@ rtc.onScreenViewers = (n) => {
 
 function screenParams(q) {
   const Q = STREAM_QUALITY[q] || STREAM_QUALITY['720p30'];
-  return { maxBitrate: Q.maxBitrate, maxFramerate: Q.maxFramerate, degradation: Q.maxFramerate >= 60 ? 'maintain-framerate' : 'maintain-resolution' };
+  // 60 к/с: «balanced» — при нехватке канала понемногу и кадры, и разрешение (а не обвал до 480p ради 60 к/с)
+  return { maxBitrate: Q.maxBitrate, maxFramerate: Q.maxFramerate,
+    degradation: Q.maxFramerate >= 60 ? 'balanced' : 'maintain-resolution' };
 }
 
 let joining = false;

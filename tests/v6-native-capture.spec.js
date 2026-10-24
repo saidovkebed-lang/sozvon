@@ -178,6 +178,30 @@ test.describe('v6: свой захват экрана (приложение дл
     }
   });
 
+  test('1080p60 штатным захватом: зритель сразу получает полное разрешение, а не 480p «мыло»', async ({ makePage }) => {
+    const { app, win, pb } = await setup(makePage, {}, null);
+    try {
+      // движущаяся картинка на весь экран — как игра
+      await win.evaluate(() => { const c = document.createElement('div'); c.style.cssText = 'position:fixed;inset:0;z-index:99999;pointer-events:none'; document.body.append(c); let n = 0; setInterval(() => { n++; c.style.background = `linear-gradient(${n}deg, hsl(${n % 360} 80% 50%), hsl(${(n * 3) % 360} 80% 30%))`; }, 16); });
+      await win.locator('#ctrl-screen').click();
+      const modal = win.locator('#modal-stream');
+      await expect(modal.locator('.source-card').first()).toBeVisible({ timeout: 15000 });
+      await modal.locator('[data-quality="1080p60"]').click();
+      await modal.locator('#btn-stream-start').click();
+      await expect(modal).toBeHidden();
+      await watchScreen(pb);
+      await pb.waitForTimeout(5000);
+      const w = await pb.evaluate(async () => {
+        let best = 0;
+        for (const p of window.__sozvon.rtc.peers.values()) (await p.pc.getStats()).forEach((s) => { if (s.type === 'inbound-rtp' && s.kind === 'video') best = Math.max(best, s.frameWidth || 0); });
+        return best;
+      });
+      expect(w).toBeGreaterThanOrEqual(1280); // было 480×300 из-за медленного старта битрейта и maintain-framerate
+    } finally {
+      await app.close().catch(() => {});
+    }
+  });
+
   test('помощник не прислал кадров → обычный захват Chromium (демонстрация всё равно идёт)', async ({ makePage }) => {
     const { app, win, readLog, pb } = await setup(makePage, { SOZVON_CAPTURE_FAKE_MODE: 'silent' });
     try {

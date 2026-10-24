@@ -8,6 +8,51 @@ import { engine as audio } from '../audio/engine.js';
 import { prefs } from '../prefs.js';
 // Обработка микрофона, шумовой гейт («говорит»), громкость собеседников — в js/audio/engine.js.
 
+/**
+ * Видео (трансляции и камера) — стартовый и минимальный битрейт в SDP (x-google-*, читает Chromium).
+ * Без этого WebRTC стартует с ~300 кбит/с и разгоняется десятки секунд: всё это время трансляция
+ * идёт «мылом» и в уменьшенном разрешении. Потолок задаёт applyEncodings (maxBitrate по качеству).
+ */
+export const VIDEO_START_KBPS = 2500;
+export const VIDEO_MIN_KBPS = 600;
+export function tuneVideoSdp(desc) {
+  if (!desc?.sdp || !/m=video/.test(desc.sdp)) return desc;
+  const out = [];
+  let inVideo = false; let pts = new Set(); let fmtpSeen = new Set(); let section = [];
+  const flush = () => {
+    if (inVideo) {
+      for (const pt of pts) {
+        if (fmtpSeen.has(pt)) continue;
+        // у VP8 строки fmtp обычно нет — добавляем сразу после rtpmap
+        const i = section.findIndex((l) => l.startsWith(`a=rtpmap:${pt} `));
+        if (i >= 0) section.splice(i + 1, 0, `a=fmtp:${pt} x-google-start-bitrate=${VIDEO_START_KBPS};x-google-min-bitrate=${VIDEO_MIN_KBPS}`);
+      }
+    }
+    out.push(...section);
+    section = []; pts = new Set(); fmtpSeen = new Set();
+  };
+  const lines = desc.sdp.split(/\r\n/);
+  if (lines[lines.length - 1] === '') lines.pop();
+  for (const line of lines) {
+    if (line.startsWith('m=')) { flush(); inVideo = line.startsWith('m=video'); }
+    if (inVideo) {
+      const rm = line.match(/^a=rtpmap:(\d+) (VP8|VP9|H264|AV1)\//i);
+      if (rm) pts.add(rm[1]);
+      const fm = line.match(/^a=fmtp:(\d+) (.*)$/);
+      if (fm && pts.has(fm[1])) {
+        fmtpSeen.add(fm[1]);
+        if (!/x-google-start-bitrate/.test(fm[2])) {
+          section.push(`a=fmtp:${fm[1]} ${fm[2]};x-google-start-bitrate=${VIDEO_START_KBPS};x-google-min-bitrate=${VIDEO_MIN_KBPS}`);
+          continue;
+        }
+      }
+    }
+    section.push(line);
+  }
+  flush();
+  return { type: desc.type, sdp: out.join('\r\n') + '\r\n' };
+}
+
 class Peer {
   constructor(id, polite, mgr) {
     this.id = id;
@@ -212,7 +257,7 @@ class Peer {
       if (this.ignoreOffer) return;
       this.isSettingRemoteAnswerPending = description.type === 'answer';
       try {
-        await pc.setRemoteDescription(description);
+        await pc.setRemoteDescription(tuneVideoSdp(description));
       } finally {
         this.isSettingRemoteAnswerPending = false;
       }
