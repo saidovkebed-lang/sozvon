@@ -344,6 +344,18 @@ export function initVoiceSocket(on) {
     notify('voice');
   });
   on('voice:signal', ({ from, data }) => rtc.handleSignal(from, data));
+  // SFU трансляций экрана (voice/sfu.js)
+  on('sfu:producer', (p) => { if (state.myVoice && p) rtc.sfu.onProducer(p); });
+  on('sfu:producer-closed', (p) => { if (p) rtc.sfu.onProducerClosed(p); });
+  on('sfu:consumer-closed', (p) => { if (p) rtc.sfu.onConsumerClosed(p); });
+  on('sfu:viewers', ({ count } = {}) => rtc.sfu.onViewers(count));
+  on('sfu:reset', () => {
+    // сервер SFU перезапустился: трансляция — напрямую, затем снова подключаемся к SFU
+    if (!state.myVoice) return;
+    rtc.sfuProduceFailed();
+    rtc.sfu.leave({ silent: true });
+    rtc.sfu.join();
+  });
   on('voice:speaking', ({ socketId: id, speaking }) => {
     if (speaking) state.speaking.add(id); else state.speaking.delete(id);
     notify('speaking');

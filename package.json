@@ -9,6 +9,7 @@
     "share": "node server/index.js --share",
     "bot": "node bot/index.js",
     "test": "playwright test",
+    "build:vendor": "node tools/build-vendor.mjs",
     "postinstall": "node deploy/npm-postinstall.mjs"
   },
   "engines": {
@@ -24,6 +25,11 @@
     "socket.io-client": "^4.8.1"
   },
   "devDependencies": {
-    "@playwright/test": "^1.56.1"
+    "@playwright/test": "^1.56.1",
+    "esbuild": "^0.25.12",
+    "mediasoup-client": "^3.25.3"
+  },
+  "optionalDependencies": {
+    "mediasoup": "^3.31.0"
   }
 }

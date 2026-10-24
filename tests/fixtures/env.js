@@ -17,3 +17,6 @@ export const MUSIC_DATA_DIR = process.env.QA_MUSIC_DATA_DIR || path.join(os.tmpd
 export const SPOTIFY_FAKE_PORT = Number(process.env.QA_SPOTIFY_PORT || PORT + 91);
 export const FAKE_YTDLP = path.join(ROOT, 'tests', 'fixtures', 'fake-yt-dlp.mjs');
 export const YTDLP_LOG = path.join(MUSIC_DATA_DIR + '-ytdlp-calls.log');
+
+// SFU трансляций экрана (mediasoup): порт UDP+TCP основного тестового сервера
+export const SFU_PORT = Number(process.env.QA_SFU_PORT || PORT + 30000);

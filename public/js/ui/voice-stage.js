@@ -213,13 +213,14 @@ function render() {
       scr = liveVideo(rtc.local.screen) ? rtc.local.screen : null;
     } else if (peer) {
       cam = liveVideo(peer.remote.camera) && m.camera !== false ? peer.remote.camera : null;
-      scr = liveVideo(peer.remote.screen) && m.streaming !== false ? peer.remote.screen : null;
+      // напрямую (mesh) или через SFU: до «Смотреть» — пустой поток-заглушка (плитка с кнопкой)
+      scr = m.streaming !== false ? rtc.screenOf(m.socketId) : null;
     }
     wanted.push({ key: `${m.socketId}:main`, member: m, kind: 'main', stream: cam, self, peer: peer || (inThis && !self && !m.isBot ? { connected: false } : null) });
     if (scr) {
       // Экономия процессора: свою трансляцию не рисуем (если не включено превью), чужую — только по «Смотреть»
       const watching = self ? !!prefs.get('stream.selfPreview') : rtc.isWatching(m.socketId);
-      wanted.push({ key: `${m.socketId}:screen`, member: m, kind: 'screen', stream: watching ? scr : null, hasStream: scr, watching, self, peer });
+      wanted.push({ key: `${m.socketId}:screen`, member: m, kind: 'screen', stream: watching && liveVideo(scr) ? scr : null, hasStream: scr, watching, self, peer });
     }
   }
 

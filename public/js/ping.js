@@ -175,10 +175,12 @@ function encryptionSection(inVoice) {
     h('div', { class: 'ping-popup__subtitle' }, icon(tls ? 'i-lock' : 'i-shield-off', 'icon--sm'), 'Шифрование'),
     h('div', { class: 'ping-popup__rows' },
       row('Соединение с сервером', tls ? 'TLS (HTTPS)' : 'не зашифровано', tls ? '' : 'is-bad'),
-      inVoice ? row('Голос и видео', 'сквозное · DTLS-SRTP') : null),
+      inVoice ? row('Голос и камера', 'сквозное · DTLS-SRTP') : null,
+      // трансляции через SFU сервер расшифровывает и раздаёт зрителям (SFU=0 на сервере — снова сквозные)
+      inVoice ? row('Трансляции экрана', rtc.sfu.device ? 'через сервер · DTLS-SRTP' : 'сквозное · DTLS-SRTP') : null),
     inVoice ? h('div', { class: 'ping-popup__privacy' },
       h('span', null, 'Код конфиденциальности'), code,
-      h('p', { class: 'ping-popup__hint' }, 'Сравните код с собеседниками (голосом или в чате). Совпадает у всех — звонок зашифрован напрямую между вами, и его не может прослушать даже сервер.')) : null);
+      h('p', { class: 'ping-popup__hint' }, 'Сравните код с собеседниками (голосом или в чате). Совпадает у всех — звонок зашифрован напрямую между вами, и голос с камерой не может прослушать даже сервер.')) : null);
   if (inVoice) {
     rtc.privacyCode().then((v) => {
       const el = document.getElementById('privacy-code');

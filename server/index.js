@@ -18,6 +18,7 @@ import { attachRealtime } from './realtime.js';
 import { initMusicLibrary, syncLibrary, hasYtDlp } from './music-library.js';
 import { getIceServers, turnConfigured, forceRelay } from './ice.js';
 import { startTunnel, getPublicUrl } from './tunnel.js';
+import { createSfu } from './sfu.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DATA_DIR = path.resolve(process.env.DATA_DIR || path.join(ROOT, 'data'));
@@ -66,7 +67,10 @@ const io = new IOServer(server, {
   pingTimeout: 20_000,
   serveClient: true, // /socket.io/socket.io.esm.min.js и /socket.io/socket.io.min.js
 });
-const realtime = attachRealtime(io, { uploadsDir, dataDir: DATA_DIR });
+// SFU трансляций экрана (mediasoup, необязателен): без него — как раньше, напрямую между участниками
+const sfu = createSfu({ share: SHARE });
+sfu.start().catch((err) => console.warn('[sfu] Ошибка запуска:', err.message));
+const realtime = attachRealtime(io, { uploadsDir, dataDir: DATA_DIR, sfu });
 
 app.use('/api/watch', realtime.watch.router); // «Смотреть вместе»: загрузка видеофайла
 app.use('/api', createApiRouter({
@@ -195,6 +199,7 @@ function shutdown(signal) {
   flushSync();
   const force = setTimeout(() => process.exit(0), 3000);
   force.unref();
+  sfu.close();
   io.close(() => {
     flushSync();
     process.exit(0);

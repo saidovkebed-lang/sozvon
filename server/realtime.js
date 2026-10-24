@@ -59,7 +59,7 @@ function mediaInUse(url) {
     || db.data.users.some((u) => u.avatar === url || u.avatarAnimated === url || u.banner === url || u.bannerAnimated === url);
 }
 
-export function attachRealtime(io, { uploadsDir, dataDir = path.dirname(uploadsDir) }) {
+export function attachRealtime(io, { uploadsDir, dataDir = path.dirname(uploadsDir), sfu = null }) {
   let botSocket = null;
   const isBotOnline = () => !!botSocket?.connected;
   const moveGrants = new Map(); // userId -> {channelId, until}: можно зайти без CONNECT (перемещён модератором)
@@ -82,7 +82,8 @@ export function attachRealtime(io, { uploadsDir, dataDir = path.dirname(uploadsD
     target.emit(event, payload);
   }
 
-  const voice = createVoice(io, { getBotSocket: () => botSocket, emitToViewers });
+  // onLeave: участник ушёл из голосового канала — закрыть его трансляцию/просмотр в SFU
+  const voice = createVoice(io, { getBotSocket: () => botSocket, emitToViewers, onLeave: (sid) => sfu?.removePeer(sid) });
   const watch = createWatch(io, { voice, emitToViewers, dataDir }); // «Смотреть вместе» (server/watch.js)
 
   function emitPresence(userId) {
@@ -885,6 +886,16 @@ export function attachRealtime(io, { uploadsDir, dataDir = path.dirname(uploadsD
     });
     socket.on('voice:signal', (payload) => { if (isObj(payload)) voice.signal(socket, payload); });
     socket.on('voice:speaking', (payload) => { if (isObj(payload)) voice.speaking(socket, payload.speaking); });
+    // SFU трансляций экрана (server/sfu.js): производить — право STREAM, смотреть — участник того же голосового канала
+    sfu?.attach({
+      on, fail, socket,
+      channelOf: () => voice.channelOf(socket.id),
+      canStream: (chId) => {
+        const ch = findChannel(chId);
+        const server = ch && findServer(ch.serverId);
+        return !!server && isMember(server, user.id) && has(computeChannel(server, ch.id, user.id), PERMS.STREAM);
+      },
+    });
 
     on('music:command', ({ command, args }) => {
       const cmd = str(command).trim().toLowerCase();
