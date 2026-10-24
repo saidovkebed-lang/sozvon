@@ -1,0 +1,11 @@
+# Astra — резервная копия раз в сутки (~04:30, со случайной задержкой до 20 мин). Создан deploy/install.sh.
+[Unit]
+Description=Astra: daily backup at ~04:30
+
+[Timer]
+OnCalendar=*-*-* 04:30:00
+RandomizedDelaySec=20min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

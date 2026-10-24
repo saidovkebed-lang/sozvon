@@ -680,6 +680,18 @@ setup_app_release_timer() {
   ok "Автообновление приложения для ПК: sozvon-app-release.timer (раз в час)"
 }
 
+# Ежедневная резервная копия (~04:30) в /var/backups/sozvon (deploy/backup.sh, docs/BACKUP.md)
+setup_backup_timer() {
+  local u
+  for u in sozvon-backup.service sozvon-backup.timer; do
+    render "$APP_DIR/deploy/templates/$u" "/etc/systemd/system/$u" 0644 root:root \
+      "APP_DIR=$APP_DIR" "DATA_DIR=$DATA_DIR" "ENV_FILE=$ENV_FILE" "APP_USER=$APP_USER"
+  done
+  systemctl daemon-reload
+  systemctl enable -q --now sozvon-backup.timer
+  ok "Резервные копии: sozvon-backup.timer (каждую ночь, хранятся 7 дней + 4 недели)"
+}
+
 # Ежедневное обновление yt-dlp (systemd timer)
 setup_ytdlp_timer() {
   local u
@@ -706,6 +718,7 @@ setup_services() {
     done
     setup_ytdlp_timer
     setup_app_release_timer
+    setup_backup_timer
     systemctl daemon-reload
     systemctl enable -q coturn sozvon sozvon-bot
   else
@@ -820,7 +833,7 @@ banner() {
   printf '  3. Скопируйте инвайт-код сервера и отправьте друзьям вместе со ссылкой — им нужен только браузер.\n\n'
   printf 'Полезное:\n'
   printf '  обновить:     sudo bash %s/deploy/update.sh\n' "$APP_DIR"
-  printf '  бэкап:        sudo bash %s/deploy/backup.sh\n' "$APP_DIR"
+  printf '  бэкап:        sudo bash %s/deploy/backup.sh now | list (каждую ночь — автоматически, docs/BACKUP.md)\n' "$APP_DIR"
   printf '  журнал:       journalctl -u sozvon -f\n'
   printf '  музыка:       sudo bash %s/deploy/music-check.sh  (доступны ли YouTube/SoundCloud/Spotify)\n' "$APP_DIR"
   printf '  настройки:    %s (после правки: systemctl restart sozvon)\n' "$ENV_FILE"
