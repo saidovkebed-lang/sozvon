@@ -8,6 +8,7 @@ import { music } from '../music.js';
 import { prefs } from '../prefs.js';
 import { openModal, confirmDialog } from './modals.js';
 import { toastError, toastOk } from './toasts.js';
+import { initPlaylists, openPlaylistPicker, itemFromState } from './music-playlists.js';
 
 async function command(cmd, args = '') {
   try {
@@ -66,6 +67,14 @@ function renderPlayer() {
     b.disabled = !allowed;
     if (!allowed) b.title = 'Нет права управлять музыкой';
   });
+  // автоплей (настройка сервера; бот присылает её в MusicState)
+  const ap = $('#btn-music-autoplay');
+  ap.setAttribute('aria-pressed', String(!!ms.autoplay));
+  ap.classList.toggle('is-on', !!ms.autoplay);
+  ap.disabled = !allowed;
+  ap.title = !allowed ? 'Нет права управлять музыкой'
+    : (ms.autoplay ? 'Автоплей: включён — когда очередь кончится, бот подберёт похожие треки' : 'Автоплей: выключен');
+  if (t.autoplay) $('#music-artist').textContent += ' · автоплей';
   const prog = $('#music-progress');
   const canSeek = allowed && !!t.duration;
   prog.setAttribute('aria-disabled', String(!canSeek));
@@ -107,15 +116,19 @@ function renderQueue() {
     h('span', { class: 'queue-item__grip', 'aria-hidden': 'true', title: canMove ? 'Перетащите, чтобы изменить порядок' : '' }, icon('i-grip')),
     h('span', { class: 'queue-item__n' }, String(i + 1)),
     h('div', { class: 'queue-item__info' },
-      h('div', { class: 'queue-item__title' }, t.title || 'Без названия'),
+      h('div', { class: 'queue-item__title' }, t.autoplay ? h('span', { class: 'queue-item__auto', title: 'Добавлено автоплеем' }, 'авто') : null, t.title || 'Без названия'),
       h('div', { class: 'queue-item__meta' }, [
         t.artist || null,
         t.loading ? 'загружается…' : (t.pending ? 'скачается перед воспроизведением' : null),
-        t.addedBy ? `добавил ${t.addedBy}` : null,
+        t.addedBy && !t.autoplay ? `добавил ${t.addedBy}` : null,
       ].filter(Boolean).join(' · '))),
     t.loading ? h('span', { class: 'spinner', role: 'img', 'aria-label': 'загружается' }) : null,
     h('span', { class: 'queue-item__dur' }, t.duration ? fmtDuration(t.duration) : '—'),
     t.qid ? h('div', { class: 'queue-item__actions' },
+      h('button', {
+        type: 'button', class: 'icon-btn', dataset: { q: 'playlist' }, disabled: !itemFromState(t),
+        'aria-label': `В плейлист: «${t.title}»`, title: 'Добавить в плейлист',
+      }, icon('i-plus')),
       btn('up', 'i-chevron-right', `Выше: «${t.title}»`, !canMove || pos <= 1),
       btn('down', 'i-chevron-right', `Ниже: «${t.title}»`, !canMove || pos >= movable),
       btn('remove', 'i-trash', `Убрать из очереди «${t.title}»`, false)) : null);
@@ -133,7 +146,10 @@ function initQueueEditing() {
     const li = b?.closest('.queue-item');
     if (!li?.dataset.qid || b.disabled) return;
     const pos = Number(li.dataset.pos);
-    if (b.dataset.q === 'remove') {
+    if (b.dataset.q === 'playlist') {
+      const t = (music.currentState()?.queue || []).find((x) => x.qid === li.dataset.qid);
+      openPlaylistPicker(itemFromState(t), t && trackName(t));
+    } else if (b.dataset.q === 'remove') {
       li.classList.add('is-pending');
       command('remove', `id:${li.dataset.qid}`);
     } else if (b.dataset.q === 'up') queueMove(li.dataset.qid, pos - 1);
@@ -332,6 +348,11 @@ function renderLibrary(tracks) {
       },
     }, icon('i-trash')) : null,
     h('button', {
+      type: 'button', class: 'icon-btn', dataset: { addPl: t.id },
+      'aria-label': `Добавить «${t.title}» в плейлист`, title: 'В плейлист',
+      onclick: () => openPlaylistPicker({ trackId: t.id }, trackName(t)),
+    }, icon('i-plus')),
+    h('button', {
       type: 'button', class: 'icon-btn', dataset: { play: t.title },
       'aria-label': `Включить «${t.title}»`, title: 'Включить',
       onclick: async (e) => {
@@ -380,6 +401,15 @@ export function initMusicPlayer(on) {
   });
   initSeek();
   initQueueEditing();
+  initPlaylists({ command, on });
+  $('#btn-music-autoplay').addEventListener('click', (e) => {
+    const on = e.currentTarget.getAttribute('aria-pressed') === 'true';
+    command('autoplay', on ? 'off' : 'on');
+  });
+  $('#btn-music-to-playlist').addEventListener('click', () => {
+    const t = music.currentState()?.track;
+    openPlaylistPicker(itemFromState(t), t && trackName(t));
+  });
   $('#btn-open-music').addEventListener('click', openLibrary);
 
   $('#music-file-input').addEventListener('change', async (e) => {

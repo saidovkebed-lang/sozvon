@@ -79,6 +79,8 @@ app.use('/api', createApiRouter({
   onUserUpdated: realtime.emitUserUpdated,
   onSessionsRevoked: realtime.disconnectSessions,
   onServerUpdated: realtime.emitServerUpdated,
+  onMusicPlaylists: realtime.emitMusicPlaylists,
+  onMusicSettings: realtime.emitMusicSettings,
 }));
 
 // Аватары/баннеры/иконки: имя файла содержит хэш — кэш «навсегда»

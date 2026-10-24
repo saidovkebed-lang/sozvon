@@ -10,11 +10,15 @@
 //  - youtube playlist?list=PLqaThree  → 3 видео qaVid000001..3
 //  - youtube playlist?list=PLqaWithFail → qaVid000001, qaVidFAIL01, qaVid000003
 //  - youtube playlist?list=PLqaCtl → qaCtl000001..3 (+ видео qaCtl000004) — для tests/v10-music-controls
+//  - youtube playlist?list=PLqaPls → qaPls000001..3 (+ видео qaPls000004) — для tests/v15-playlists-autoplay
 //  - видео с FAIL в id → «ERROR: [youtube] <id>: Video unavailable», код 1
 //  - ytsearchN:"<артист> - <название>" → если название есть в Spotify-фикстурах: 3 результата,
 //    первый с длительностью +60 с (должен быть отвергнут проверкой ±15 с), второй — точный.
 //    Название с «QA FAIL» → результаты есть, но скачивание падает. Иначе — пусто.
 //  - scsearchN: → всегда пусто.
+//  - v15 автоплей: видео qaAuto000NN («QA Auto …», по 8 с); радио-микс watch?v=<id>&list=RD<id> → MIXES[id]
+//    (первым идёт само видео, как у YouTube); микса нет (qaAutoNoMix) → ошибка. ytsearch «… QA Auto Three …» →
+//    это видео (поиск затравки для треков не с YouTube).
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -67,11 +71,35 @@ const VIDEOS = {
   qaCtl000002: { title: 'QA Ctl Two', uploader: 'QA Ctl', duration: 15 },
   qaCtl000003: { title: 'QA Ctl Three', uploader: 'QA Ctl', duration: 16 },
   qaCtl000004: { title: 'QA Ctl Four Single', uploader: 'QA Ctl Solo', duration: 17 },
+  // v15 (плейлисты): свои id — тесты v2 рассчитывают, что qaVid* ещё не скачаны
+  qaPls000001: { title: 'QA Pls One', uploader: 'QA Pls', duration: 14 },
+  qaPls000002: { title: 'QA Pls Two', uploader: 'QA Pls', duration: 15 },
+  qaPls000003: { title: 'QA Pls Three', uploader: 'QA Pls', duration: 16 },
+  qaPls000004: { title: 'QA Pls Four Single', uploader: 'QA Pls Solo', duration: 17 },
+  // v15 (автоплей)
+  qaAuto00001: { title: 'QA Auto One', uploader: 'QA Auto', duration: 8 },
+  qaAuto00002: { title: 'QA Auto Two', uploader: 'QA Auto', duration: 8 },
+  qaAuto00003: { title: 'QA Auto Three', uploader: 'QA Auto', duration: 8 },
+  qaAuto00004: { title: 'QA Auto Four', uploader: 'QA Auto', duration: 8 },
+  qaAuto00005: { title: 'QA Auto Five', uploader: 'QA Auto', duration: 8 },
+  qaAuto00006: { title: 'QA Auto Six', uploader: 'QA Auto', duration: 8 },
+  qaAuto00007: { title: 'QA Auto Seven', uploader: 'QA Auto', duration: 8 },
+  qaAuto00008: { title: 'QA Auto Eight', uploader: 'QA Auto', duration: 8 },
+  qaAuto00009: { title: 'QA Auto Nine', uploader: 'QA Auto', duration: 8 },
+  qaAuto00010: { title: 'QA Auto Ten', uploader: 'QA Auto', duration: 8 },
+  qaAutoNoMix: { title: 'QA Auto Lonely', uploader: 'QA Auto', duration: 8 },
+};
+// радио-миксы YouTube (list=RD<id>): детерминированные «похожие» для автоплея
+const MIXES = {
+  qaAuto00001: ['qaAuto00001', 'qaAuto00002', 'qaAuto00003', 'qaAuto00004', 'qaAuto00005', 'qaAuto00006'],
+  qaAuto00002: ['qaAuto00002', 'qaAuto00001', 'qaAuto00003', 'qaAuto00007', 'qaAuto00008', 'qaAuto00009', 'qaAuto00010'],
+  qaAuto00003: ['qaAuto00003', 'qaAuto00002', 'qaAuto00004', 'qaAuto00005', 'qaAuto00006'],
 };
 const PLAYLISTS = {
   PLqaThree: { title: 'QA YouTube Playlist', ids: ['qaVid000001', 'qaVid000002', 'qaVid000003'] },
   PLqaWithFail: { title: 'QA YouTube Playlist With Fail', ids: ['qaVid000001', 'qaVidFAIL01', 'qaVid000003'] },
   PLqaCtl: { title: 'QA Ctl Playlist', ids: ['qaCtl000001', 'qaCtl000002', 'qaCtl000003'] },
+  PLqaPls: { title: 'QA Pls Playlist', ids: ['qaPls000001', 'qaPls000002', 'qaPls000003'] },
 };
 function spotifyTracks() {
   const out = [];
@@ -120,6 +148,12 @@ function search(kind, n, q) {
     extractor: kind === 'ytsearch' ? 'youtube:search' : 'soundcloud:search', extractor_key: kind === 'ytsearch' ? 'YoutubeSearch' : 'SoundcloudSearch', entries: [] };
   if (kind !== 'ytsearch') return base;
   const ql = q.toLowerCase();
+  const auto = Object.entries(VIDEOS).filter(([, v]) => v.title.startsWith('QA Auto ') && ql.includes(v.title.toLowerCase()));
+  if (auto.length) {
+    base.entries = auto.slice(0, n).map(([id]) => videoInfo(id));
+    base.playlist_count = base.entries.length;
+    return base;
+  }
   const hit = spotifyTracks().find((t) => t.title && ql.includes(t.title.toLowerCase()));
   if (!hit) return base;
   const dur = Math.round(hit.ms / 1000);
@@ -147,6 +181,14 @@ function resolve() {
   const list = u.searchParams.get('list');
   const vid = u.hostname === 'youtu.be' ? u.pathname.slice(1) : (u.searchParams.get('v') || (u.pathname.match(/\/shorts\/([\w-]{11})/) || [])[1]);
   if (list && (!vid || opts['yes-playlist']) && !opts['no-playlist']) {
+    if (list.startsWith('RD')) {
+      const mix = MIXES[list.slice(2)];
+      if (!mix) fail(`[youtube:tab] ${list}: Unable to recognize tab page. The playlist does not exist`);
+      const end = Number(opts['playlist-end'] || 1e9);
+      return { kind: 'playlist', data: { ...tplPlaylist, id: list, title: `Mix - ${VIDEOS[list.slice(2)]?.title || list}`, uploader: 'YouTube',
+        channel: null, webpage_url: `https://www.youtube.com/watch?v=${list.slice(2)}&list=${list}`, playlist_count: null,
+        entries: mix.slice(0, end).map(videoInfo) } };
+    }
     const pl = PLAYLISTS[list];
     if (!pl) fail(`[youtube:tab] ${list}: The playlist does not exist.`);
     const end = Number(opts['playlist-end'] || 1e9);

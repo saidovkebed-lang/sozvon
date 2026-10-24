@@ -17,6 +17,11 @@ export function fmtTime(sec) {
   return h ? `${h}:${String(m).padStart(2, '0')}:${r}` : `${m}:${r}`;
 }
 
+/** Нормализованное название для «уже играло» (как titleKey в server/music-sources.js) */
+export const titleKey = (title) => 't:' + String(title || '').toLowerCase().replace(/ё/g, 'е')
+  .replace(/\([^)]*\)|\[[^\]]*\]/g, ' ').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+const HISTORY_MAX = 150; // ≈ 50 треков: id, название и ключ источника
+
 export function trackLabel(t) {
   if (!t) return '—';
   return t.artist ? `«${t.title}» — ${t.artist}` : `«${t.title}»`;
@@ -28,9 +33,20 @@ export function publicItem(t) {
   if (t.pending) {
     const o = { id: t.id, qid: t.qid, title: t.title, artist: t.artist || '', duration: t.duration || 0, addedBy: t.addedBy || null, pending: true, source: t.source || 'search' };
     if (t.loading) o.loading = true;
+    if (t.ref) o.ref = t.ref; // откуда скачать — для «Сохранить очередь как плейлист»
+    if (t.autoplay) o.autoplay = true;
     return o;
   }
-  return { id: t.id, qid: t.qid, title: t.title, artist: t.artist || '', duration: t.duration || 0, url: t.url, addedBy: t.addedBy || null };
+  const o = { id: t.id, qid: t.qid, title: t.title, artist: t.artist || '', duration: t.duration || 0, url: t.url, addedBy: t.addedBy || null };
+  if (t.autoplay) o.autoplay = true;
+  return o;
+}
+
+/** Ожидающий элемент скачался → готовый трек (qid, кто поставил и метка автоплея сохраняются) */
+function asReady(item, track) {
+  const t = { ...track, addedBy: item.addedBy || track.addedBy, qid: item.qid };
+  if (item.autoplay) t.autoplay = true;
+  return t;
 }
 
 export class Player {
@@ -39,6 +55,7 @@ export class Player {
    * @param {{ emitState(state):void, joinVoice(id):void, leaveVoice(id):void, onIdleLeave(player):void,
    *           fetch?(item):Promise<object>, onTrackError?(player, item, err, info):void }} hooks
    *   fetch — скачать ожидающий элемент (REST /api/music/fetch) → готовый Track.
+   *   onQueueEnd(player) — очередь закончилась (автоплей подбирает похожие треки).
    */
   constructor(serverId, hooks) {
     this.serverId = serverId;
@@ -56,6 +73,30 @@ export class Player {
     this.gen = 0;            // поколение: skip/stop во время загрузки делают её результат неактуальным
     this.fails = 0;          // неудачных загрузок подряд
     this.seekSeq = 0;        // растёт при перемотке — клиенты сразу прыгают на новую позицию
+    // автоплей
+    this.autoplay = false;   // настройка сервера (db.json musicSettings), бот кэширует
+    this.autoplayPaused = false; // не удалось подобрать треки — ждём, пока поставят трек вручную
+    this.autoplayBusy = false;
+    this.session = 0;        // растёт при stop: ответ автоплея после !stop выбрасывается
+    this.history = new Set(); // что уже играло/предлагалось в этой сессии (id, «t:название», ключ источника)
+    this.lastPlayed = null;  // затравка для автоплея
+  }
+
+  /** Запомнить трек как «уже был» (автоплей его не повторит) */
+  remember(t) {
+    if (!t) return;
+    for (const k of [t.pending ? null : t.id, t.title ? titleKey(t.title) : null, t.ref?.key]) {
+      if (!k) continue;
+      this.history.delete(k);
+      this.history.add(k);
+    }
+    while (this.history.size > HISTORY_MAX) this.history.delete(this.history.values().next().value);
+  }
+
+  /** Куда вставить элементы, поставленные людьми: перед треками автоплея */
+  userInsertAt() {
+    const i = this.queue.findIndex((t) => t.autoplay);
+    return i === -1 ? this.queue.length : i;
   }
 
   get active() { return !!this.voiceChannelId; }
@@ -74,6 +115,7 @@ export class Player {
       // загружаемый элемент показываем первым в очереди с loading:true
       queue: [...(this.loading ? [this.loading] : []), ...this.queue].map(publicItem),
       paused: this.paused,
+      autoplay: this.autoplay,
       seekSeq: this.seekSeq,
       position: Math.max(0, Math.round(this.elapsed() * 1000) / 1000),
       updatedAt: Date.now(),
@@ -117,6 +159,8 @@ export class Player {
   start(track) {
     this.clearIdle();
     this.current = withQid(track);
+    this.lastPlayed = track;
+    this.remember(track);
     this.paused = false;
     this.position = 0;
     this.startedAt = Date.now();
@@ -141,23 +185,28 @@ export class Player {
     this.fetchFor(item).then((track) => {
       const i = this.queue.indexOf(item);
       if (i === -1) return; // уже убрали/начали играть
-      this.queue[i] = { ...track, addedBy: item.addedBy || track.addedBy, qid: item.qid };
+      this.queue[i] = asReady(item, track);
       this.broadcast();
     }, () => { /* ошибку покажем, когда дойдёт очередь */ });
   }
 
   /** @returns {number} 0 — заиграл (или начал загружаться) сразу, иначе позиция в очереди (1..n) */
   enqueue(track) {
-    this.queue.push(withQid(track));
+    if (!track.autoplay) this.autoplayPaused = false;
+    if (track.autoplay) this.queue.push(withQid(track));
+    else this.queue.splice(this.userInsertAt(), 0, withQid(track));
     if (!this.current && !this.loading) { this.next(); return 0; }
     this.broadcast();
-    if (this.queue.length === 1) this.prefetch();
-    return this.queue.length;
+    const pos = this.queue.indexOf(track) + 1;
+    if (pos === 1) this.prefetch();
+    return pos;
   }
 
   /** Добавить сразу много (плейлист). @returns {boolean} заиграл ли первый сразу */
   enqueueMany(items) {
-    this.queue.push(...items.map(withQid));
+    const auto = items.length > 0 && items.every((t) => t.autoplay);
+    if (!auto) this.autoplayPaused = false;
+    this.queue.splice(auto ? this.queue.length : this.userInsertAt(), 0, ...items.map(withQid));
     if (!this.current && !this.loading) { this.next(); return true; }
     this.broadcast();
     this.prefetch();
@@ -178,6 +227,7 @@ export class Player {
     if (!nxt) {
       this.broadcast();
       this.scheduleIdle();
+      this.hooks.onQueueEnd?.(this);
       return null;
     }
     this.clearIdle();
@@ -189,7 +239,8 @@ export class Player {
       nxt.loading = false;
       this.loading = null;
       this.fails = 0;
-      this.start({ ...track, addedBy: nxt.addedBy || track.addedBy, qid: nxt.qid });
+      this.remember(nxt);
+      this.start(asReady(nxt, track));
     }, (err) => {
       if (gen !== this.gen) return;
       nxt.loading = false;
@@ -198,6 +249,7 @@ export class Player {
       let dropped = 0;
       const gaveUp = this.fails >= MAX_FAILS_IN_ROW;
       if (gaveUp) {
+        if (nxt.autoplay) this.autoplayPaused = true; // источник недоступен — автоплей не перебирает дальше
         // источник, похоже, недоступен целиком — не перебираем оставшиеся сотни треков
         const before = this.queue.length;
         this.queue = this.queue.filter((t) => !t.pending);
@@ -283,8 +335,12 @@ export class Player {
     this.clearEnd();
     this.clearIdle();
     this.gen++;
+    this.session++;
     this.loading = null;
     this.fails = 0;
+    this.history.clear();
+    this.lastPlayed = null;
+    this.autoplayPaused = false;
     this.current = null;
     this.queue = [];
     this.paused = false;
