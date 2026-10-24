@@ -1,0 +1,16 @@
+# Astra — ежедневная резервная копия данных и настроек. Создан deploy/install.sh.
+# Запускается таймером sozvon-backup.timer; вручную: systemctl start sozvon-backup
+# Копии: /var/backups/sozvon (sudo bash @APP_DIR@/deploy/backup.sh list)
+[Unit]
+Description=Astra: daily backup
+Documentation=https://github.com/saidovkebed-lang/sozvon/blob/main/docs/BACKUP.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Environment=DATA_DIR=@DATA_DIR@ SOZVON_ENV_FILE=@ENV_FILE@ APP_USER=@APP_USER@
+ExecStart=/bin/bash @APP_DIR@/deploy/backup.sh now
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=2h

@@ -152,6 +152,16 @@ if have_systemd; then
     systemctl enable -q --now sozvon-app-release.timer
     ok "Автообновление приложения для ПК: таймер sozvon-app-release.timer активен"
   fi
+  # Ежедневная резервная копия (~04:30): deploy/backup.sh, docs/BACKUP.md
+  if [ -f "$APP_DIR/deploy/templates/sozvon-backup.timer" ]; then
+    for u in sozvon-backup.service sozvon-backup.timer; do
+      render_unit "$APP_DIR/deploy/templates/$u" "/etc/systemd/system/$u" \
+        "APP_DIR=$APP_DIR" "DATA_DIR=$DATA_DIR" "ENV_FILE=$ENV_FILE" "APP_USER=$APP_USER" || true
+    done
+    systemctl daemon-reload
+    systemctl enable -q --now sozvon-backup.timer
+    ok "Резервные копии: таймер sozvon-backup.timer активен (sudo bash $APP_DIR/deploy/backup.sh list)"
+  fi
 fi
 
 # nginx: перерисовать конфиг из шаблона (новый лимит загрузки и т.п.), домен и сертификат — прежние

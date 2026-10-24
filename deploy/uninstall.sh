@@ -50,10 +50,12 @@ fi
 if [ -d /run/systemd/system ]; then
   systemctl disable --now sozvon-bot sozvon 2>/dev/null || true
   systemctl disable --now sozvon-ytdlp-update.timer 2>/dev/null || true
+  systemctl disable --now sozvon-backup.timer 2>/dev/null || true
   systemctl disable --now coturn 2>/dev/null || true
 fi
 rm -f /etc/systemd/system/sozvon.service /etc/systemd/system/sozvon-bot.service \
-  /etc/systemd/system/sozvon-ytdlp-update.service /etc/systemd/system/sozvon-ytdlp-update.timer
+  /etc/systemd/system/sozvon-ytdlp-update.service /etc/systemd/system/sozvon-ytdlp-update.timer \
+  /etc/systemd/system/sozvon-backup.service /etc/systemd/system/sozvon-backup.timer
 [ -d /run/systemd/system ] && systemctl daemon-reload
 ok "Службы остановлены и удалены"
 

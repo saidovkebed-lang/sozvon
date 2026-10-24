@@ -157,38 +157,21 @@ sudo bash /opt/sozvon/deploy/app-release.sh --from-dir /root/dist 1.0.0   # св
 
 ## Резервная копия
 
-Все данные (пользователи, сообщения, загруженные файлы и музыка) лежат в `/var/lib/sozvon`.
-Сделать копию:
+Сервер **сам** делает резервную копию каждую ночь (~04:30): база, сообщения, вложения, аватары, музыка,
+ключи и настройки `/etc/sozvon.env`. Копии лежат в `/var/backups/sozvon/astra-ДАТА.tar.zst`,
+хранятся 7 последних дней + 4 недели.
 
 ```bash
-sudo bash /opt/sozvon/deploy/backup.sh
+sudo bash /opt/sozvon/deploy/backup.sh now                 # сделать копию сейчас
+sudo bash /opt/sozvon/deploy/backup.sh list                # копии, размеры, последний ночной запуск
+sudo bash /opt/sozvon/deploy/backup.sh restore ФАЙЛ        # восстановить
+sudo bash /opt/sozvon/deploy/backup.sh setup               # (по желанию) отправлять копии в свой Telegram-бот, зашифрованно
 ```
 
-Копия сохранится в `/var/backups/sozvon/sozvon-ДАТА.tar.gz`. Чтобы старые копии не занимали
-место, оставляйте только несколько последних: `backup.sh --keep 7`.
+Скачать копию к себе (команда на **своём компьютере**):
+`scp root@81.200.10.20:/var/backups/sozvon/astra-20260101-0430.tar.zst .`
 
-Хранить копию на том же сервере мало толку. Скачайте её к себе на компьютер: в PowerShell
-или Терминале **на своём компьютере** (не на сервере) выполните:
-
-```
-scp root@81.200.10.20:/var/backups/sozvon/sozvon-20260101-120000.tar.gz .
-```
-
-Файл появится в текущей папке. Храните его как пароль: внутри есть секретные ключи сервера.
-
-Восстановление (например, на новом сервере после установки):
-
-```bash
-sudo bash /opt/sozvon/deploy/backup.sh --restore /путь/к/sozvon-ДАТА.tar.gz
-```
-
-Текущие данные при этом не удаляются, а переименовываются в `/var/lib/sozvon.before-restore-…`.
-
-**Автоматический бэкап каждую ночь** (необязательно): выполните `sudo crontab -e` и добавьте строку
-
-```
-30 4 * * * /bin/bash /opt/sozvon/deploy/backup.sh --keep 7 >/dev/null
-```
+Подробно — что входит в копию, Telegram, расшифровка, восстановление: **[docs/BACKUP.md](BACKUP.md)**.
 
 ## Управление
 
