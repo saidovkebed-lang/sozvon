@@ -14,7 +14,8 @@ import { MEDIA_KINDS, processImage, removeMediaUrl, mediaTmpDir } from './media.
 import { readAppRelease } from './app-release.js';
 import { Limiter, exempt, waitText } from './rate-limit.js';
 import { syncLibrary, hasYtDlp, addUploadedFile, MUSIC_MAX_BYTES, fixMulterName, sanitizeFileName, getMusicDir, findTrackRec, deleteTrack } from './music-library.js';
-import { importFromUrl, resolveInput, fetchPending } from './music-sources.js';
+import { importFromUrl, resolveInput, fetchPending, similarTracks } from './music-sources.js';
+import { createPlaylistRouter } from './music-playlists.js';
 
 const limitMb = Number(process.env.UPLOAD_LIMIT_MB);
 export const ATTACHMENT_LIMIT_MB = Number.isFinite(limitMb) && limitMb > 0 ? limitMb : 100;
@@ -33,6 +34,7 @@ function wrap(fn) {
 export function createApiRouter({
   uploadsDir, dataDir, getIceServers, getPublicUrl, turnConfigured, forceRelay, isBotOnline,
   onUserUpdated = () => {}, onSessionsRevoked = () => {}, onServerUpdated = () => {},
+  onMusicPlaylists = () => {}, onMusicSettings = () => {},
 }) {
   const router = express.Router();
   router.use(express.json({ limit: '100kb' }));
@@ -297,6 +299,15 @@ export function createApiRouter({
     const track = await fetchPending(req.body?.item, { addedBy: addedByOf(req) });
     res.json({ track });
   }));
+
+  // Автоплей (вызывает бот): похожие треки по радио-миксу YouTube → «ожидающие» элементы
+  router.post('/music/similar', requireAuth, wrap(async (req, res) => {
+    const b = req.body || {};
+    res.json(await similarTracks(b.seed, { exclude: Array.isArray(b.exclude) ? b.exclude : [], count: b.count }));
+  }));
+
+  // Сохранённые плейлисты и настройки музыки серверов
+  router.use(createPlaylistRouter({ onChanged: onMusicPlaylists, onSettings: onMusicSettings }));
 
   router.use((_req, res) => res.status(404).json({ error: 'Не найдено' }));
 

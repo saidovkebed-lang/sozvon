@@ -18,7 +18,7 @@ import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { HttpError } from './auth.js';
 import {
-  getMusicDir, registerFile, findBySource, sanitizeFileName, uniqueName, hasYtDlp, hasFfmpeg, ytdlpPath,
+  getMusicDir, registerFile, findBySource, findTrackRec, sanitizeFileName, uniqueName, hasYtDlp, hasFfmpeg, ytdlpPath,
   AUDIO_EXT, MUSIC_MAX_BYTES, YTDLP_HOSTS, parseUrl, downloadDirect,
 } from './music-library.js';
 import { parseSpotify, isSpotifyShortLink, expandShortLink, fetchSpotify, spotifyApiConfigured, TYPE_RU } from './spotify.js';
@@ -524,4 +524,63 @@ export async function importFromUrl(rawUrl, addedBy) {
   if (track) return track;
   if (hasYtDlp()) return downloadUrl(u.toString(), { addedBy });
   throw new HttpError(400, 'По ссылке не аудиофайл. Нужна прямая ссылка на mp3/ogg/m4a… (для YouTube и других сайтов установите yt-dlp)');
+}
+
+// ---------- автоплей: похожие треки (радио-микс YouTube) ----------
+// Микс «RD<id>» строит сам YouTube по видео-затравке. Затравка — YouTube-id трека (из ключей кэша
+// библиотеки или ссылки), иначе ищем «<исполнитель> <название>» на YouTube и берём id найденного.
+/** Нормализованное название для сравнения «уже играло» (бот считает так же: bot/index.js) */
+export const titleKey = (title) => 't:' + String(title || '').toLowerCase().replace(/ё/g, 'е')
+  .replace(/\([^)]*\)|\[[^\]]*\]/g, ' ').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+
+/**
+ * @param {{id?:string, title?:string, artist?:string, ref?:{url?:string,key?:string}}} seed — последний сыгранный трек
+ * @param {{exclude?:string[], count?:number}} opts — exclude: id треков библиотеки, ключи источников, «t:<название>»
+ * @returns {Promise<{seed:{videoId:string, via:'youtube'|'search'}, items:object[]}>} items — «ожидающие» с autoplay:true
+ */
+export async function similarTracks(seed, { exclude = [], count = 4 } = {}) {
+  if (!seed || typeof seed !== 'object') throw new HttpError(400, 'Нет трека для автоплея');
+  const n = Math.min(5, Math.max(3, Number(count) || 4));
+  const ex = new Set(exclude.filter((x) => typeof x === 'string').slice(0, 300).map((x) => x.slice(0, 220)));
+  for (const k of [...ex]) findTrackRec(k)?.sources?.forEach((x) => ex.add(x));
+  const rec = typeof seed.id === 'string' ? findTrackRec(seed.id) : null;
+  const ref = seed.ref && typeof seed.ref === 'object' ? seed.ref : {};
+  const keys = [...(rec?.sources || [])];
+  if (typeof ref.key === 'string') keys.push(ref.key);
+  if (typeof ref.url === 'string') {
+    const l = parseMusicLink(ref.url);
+    if (l?.kind === 'youtube' && l.id) keys.push(`youtube:${l.id}`);
+  }
+  let vid = keys.map((k) => /^youtube:([A-Za-z0-9_-]{11})$/.exec(k)?.[1]).find(Boolean) || null;
+  let via = 'youtube';
+  if (!vid) {
+    const str = (v) => (typeof v === 'string' ? v.trim() : '');
+    const q = [str(rec?.artist ?? seed.artist), str(rec?.title || seed.title)].filter(Boolean).join(' ').slice(0, 200);
+    if (!q) throw new HttpError(400, 'У трека нет названия — не по чему искать похожие');
+    const cand = pickCandidate(await searchOn('youtube', q, 3), 0, 0);
+    vid = cand?.src === 'youtube' && YT_ID.test(cand.id || '') ? cand.id : null;
+    if (!vid) throw new HttpError(404, `не нашёл «${q}» на YouTube`);
+    via = 'search';
+  }
+  ex.add(`youtube:${vid}`);
+  if (rec?.title) ex.add(titleKey(rec.title));
+  const timeoutMs = metaTimeoutMs();
+  const res = await runYtDlp(['-J', '--flat-playlist', '--yes-playlist', '--playlist-end', '30', '--',
+    `https://www.youtube.com/watch?v=${vid}&list=RD${vid}`], { timeoutMs });
+  const json = res.code === 0 ? parseLastJson(res.stdout) : null;
+  if (!json) throw new HttpError(502, explain(res, 'youtube', timeoutMs));
+  const max = num('MUSIC_SEARCH_MAX_DURATION', 900, 60);
+  const items = [];
+  for (const raw of json.entries || []) {
+    const e = normEntry(raw, { extractor: 'Youtube' });
+    if (!e?.key || (e.duration && e.duration > max)) continue;
+    const tk = titleKey(e.title);
+    if (ex.has(e.key) || ex.has(urlKey(e.url)) || ex.has(tk)) continue;
+    const hit = findBySource([e.key, urlKey(e.url)]);
+    if (hit && (ex.has(hit.id) || ex.has(titleKey(hit.title)))) continue;
+    ex.add(tk);
+    items.push({ ...pendingFromEntry(e, 'youtube'), autoplay: true });
+    if (items.length >= n) break;
+  }
+  return { seed: { videoId: vid, via }, items };
 }

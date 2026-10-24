@@ -248,6 +248,12 @@
         <button class="icon-btn music-player__queue-btn" type="button" id="btn-music-queue" aria-label="Очередь" title="Очередь">
           <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-menu"/></svg><span class="music-player__badge" id="music-queue-badge" hidden>0</span>
         </button>
+        <button class="icon-btn music-player__autoplay" type="button" id="btn-music-autoplay" aria-pressed="false" aria-label="Автоплей" title="Автоплей: выключен">
+          <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-repeat"/></svg>
+        </button>
+        <button class="icon-btn" type="button" id="btn-music-to-playlist" aria-label="Добавить трек в плейлист" title="В плейлист">
+          <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-plus"/></svg>
+        </button>
         <input type="range" class="slider" id="music-volume" min="0" max="100" value="50" aria-label="Громкость музыки">
       </div>
       <button class="btn btn--primary music-player__unlock" id="btn-music-unlock" type="button" hidden><svg class="icon icon--sm" aria-hidden="true"><use href="/assets/icons.svg#i-play"/></svg> Включить звук</button>
@@ -476,11 +482,16 @@
       </button>
     </div>
     <div class="modal__body">
+      <div class="tabs music-tabs" role="tablist" aria-label="Разделы музыки">
+        <button class="tab is-active" type="button" role="tab" id="music-tab-library" data-music-tab="library" aria-selected="true" aria-controls="music-panel-library">Библиотека</button>
+        <button class="tab" type="button" role="tab" id="music-tab-playlists" data-music-tab="playlists" aria-selected="false" aria-controls="music-panel-playlists">Плейлисты</button>
+      </div>
       <p class="modal__hint" id="music-hint">Нажми <svg class="icon icon--sm" aria-hidden="true"><use href="/assets/icons.svg#i-play"/></svg>, чтобы DJ Бот поставил трек в очередь. Нужно быть в голосовом канале.</p>
       <div class="music-queue" id="music-queue" hidden>
         <h4 class="music-queue__title">Очередь <span class="music-queue__count" id="music-queue-count">0</span></h4>
         <ol class="queue-list"></ol>
       </div>
+      <div class="music-panel" id="music-panel-library" role="tabpanel" aria-labelledby="music-tab-library">
       <div class="track-list" id="track-list"></div>
       <div class="music-add">
         <label class="btn btn--ghost music-add__upload" for="music-file-input">
@@ -493,6 +504,62 @@
         </form>
       </div>
       <p class="form__error" id="music-error" data-error></p>
+      </div>
+      <div class="music-panel" id="music-panel-playlists" role="tabpanel" aria-labelledby="music-tab-playlists" hidden>
+        <div class="pl-browse" id="pl-browse">
+          <form class="pl-create" id="form-pl-create" autocomplete="off">
+            <input class="input" id="pl-name-input" name="name" maxlength="60" placeholder="Название плейлиста" aria-label="Название плейлиста">
+            <button class="btn btn--primary" type="submit">Создать</button>
+            <button class="btn btn--ghost" type="button" id="btn-pl-save-queue" title="Сохранить текущую очередь (и играющий трек) как плейлист">Сохранить очередь как плейлист</button>
+          </form>
+          <div class="pl-list" id="pl-list"></div>
+        </div>
+        <div class="pl-detail" id="pl-detail" hidden>
+          <div class="pl-detail__head">
+            <button class="icon-btn" type="button" id="btn-pl-back" aria-label="Назад к плейлистам" title="Назад"><svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-arrow-left"/></svg></button>
+            <div class="pl-detail__title">
+              <div class="pl-detail__name" id="pl-detail-name"></div>
+              <div class="pl-detail__meta" id="pl-detail-meta"></div>
+            </div>
+            <button class="icon-btn pl-play" type="button" id="btn-pl-detail-play" aria-label="Включить плейлист" title="Включить"><svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-play"/></svg></button>
+            <button class="icon-btn" type="button" id="btn-pl-detail-shuffle" aria-label="Включить вперемешку" title="Вперемешку"><svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-shuffle"/></svg></button>
+            <button class="icon-btn" type="button" id="btn-pl-rename" aria-label="Переименовать плейлист" title="Переименовать"><svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-pencil"/></svg></button>
+            <button class="icon-btn pl-danger" type="button" id="btn-pl-delete" aria-label="Удалить плейлист" title="Удалить плейлист"><svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-trash"/></svg></button>
+          </div>
+          <form class="pl-create" id="form-pl-rename" autocomplete="off" hidden>
+            <input class="input" id="pl-rename-input" name="name" maxlength="60" aria-label="Новое название плейлиста">
+            <button class="btn btn--primary" type="submit">Сохранить</button>
+            <button class="btn btn--ghost" type="button" id="btn-pl-rename-cancel">Отмена</button>
+          </form>
+          <div class="pl-add" id="pl-add">
+            <button class="btn btn--ghost" type="button" id="btn-pl-add-current"><svg class="icon icon--sm" aria-hidden="true"><use href="/assets/icons.svg#i-plus"/></svg> Сейчас играет</button>
+            <form class="music-add__import" id="form-pl-add-url" autocomplete="off">
+              <input class="input" id="pl-url-input" name="url" placeholder="Ссылка YouTube / SoundCloud / Spotify или название" aria-label="Ссылка или название трека">
+              <button class="btn btn--primary" type="submit">Добавить</button>
+            </form>
+          </div>
+          <ol class="queue-list pl-items" id="pl-items"></ol>
+        </div>
+        <p class="form__error" id="pl-error" data-error></p>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog class="modal" id="modal-pl-pick" aria-labelledby="modal-pl-pick-title">
+    <div class="modal__header">
+      <h3 id="modal-pl-pick-title">Добавить в плейлист</h3>
+      <button class="icon-btn" type="button" data-close aria-label="Закрыть">
+        <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-close"/></svg>
+      </button>
+    </div>
+    <div class="modal__body">
+      <p class="modal__hint" id="pl-pick-track"></p>
+      <div class="pl-pick-list" id="pl-pick-list"></div>
+      <form class="pl-create" id="form-pl-pick-new" autocomplete="off">
+        <input class="input" id="pl-pick-name" name="name" maxlength="60" placeholder="Новый плейлист" aria-label="Название нового плейлиста">
+        <button class="btn btn--primary" type="submit">Создать и добавить</button>
+      </form>
+      <p class="form__error" id="pl-pick-error" data-error></p>
     </div>
   </dialog>
 

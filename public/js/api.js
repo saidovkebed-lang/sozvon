@@ -50,6 +50,14 @@ export const api = {
   },
   musicImport: (url) => request('POST', '/api/music/import', { url }),
   musicDelete: (id) => request('DELETE', `/api/music/${encodeURIComponent(id)}`),
+  // v15: плейлисты сервера
+  playlists: (sid) => request('GET', `/api/servers/${encodeURIComponent(sid)}/playlists`),
+  playlist: (sid, pid) => request('GET', `/api/servers/${encodeURIComponent(sid)}/playlists/${encodeURIComponent(pid)}`),
+  playlistCreate: (sid, body) => request('POST', `/api/servers/${encodeURIComponent(sid)}/playlists`, body),
+  playlistPatch: (sid, pid, body) => request('PATCH', `/api/servers/${encodeURIComponent(sid)}/playlists/${encodeURIComponent(pid)}`, body),
+  playlistDelete: (sid, pid) => request('DELETE', `/api/servers/${encodeURIComponent(sid)}/playlists/${encodeURIComponent(pid)}`),
+  playlistAdd: (sid, pid, body) => request('POST', `/api/servers/${encodeURIComponent(sid)}/playlists/${encodeURIComponent(pid)}/items`, body),
+  playlistRemoveItem: (sid, pid, iid) => request('DELETE', `/api/servers/${encodeURIComponent(sid)}/playlists/${encodeURIComponent(pid)}/items/${encodeURIComponent(iid)}`),
   // v3: профиль
   patchMe: (body) => request('PATCH', '/api/me', body),
   uploadAvatar: (file, crop) => request('POST', '/api/me/avatar', mediaForm(file, crop)),

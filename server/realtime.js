@@ -24,7 +24,7 @@ import { sendPush, pushPublicKey } from './push.js';
 const serverRoom = (id) => `server:${id}`;
 const userRoom = (id) => `user:${id}`;
 
-export const BOT_COMMANDS = ['play', 'skip', 'stop', 'pause', 'resume', 'queue', 'np', 'remove', 'move', 'seek', 'shuffle', 'help', 'leave'];
+export const BOT_COMMANDS = ['play', 'skip', 'stop', 'pause', 'resume', 'queue', 'np', 'remove', 'move', 'seek', 'shuffle', 'help', 'leave', 'playlist', 'pl', 'autoplay'];
 const BOT_OFFLINE_TEXT = 'Музыкальный бот не запущен. Запустите: npm run bot';
 const NO_MUSIC_PERM = 'Нет права управлять музыкой';
 const NO_PERM = 'Недостаточно прав';
@@ -966,9 +966,18 @@ export function attachRealtime(io, { uploadsDir }) {
           out.pending = true;
           out.source = ['youtube', 'soundcloud', 'spotify', 'search'].includes(t.source) ? t.source : 'search';
           if (t.loading) out.loading = true;
+          // откуда скачать (для «Сохранить очередь как плейлист» / «В плейлист» в интерфейсе)
+          if (isObj(t.ref)) {
+            const ref = {};
+            if (/^https?:\/\//.test(str(t.ref.url))) ref.url = str(t.ref.url).slice(0, 500);
+            if (/^[a-z]+:[^\s]{1,200}$/.test(str(t.ref.key))) ref.key = str(t.ref.key);
+            if (str(t.ref.query)) ref.query = str(t.ref.query).slice(0, 200);
+            if (Object.keys(ref).length) out.ref = ref;
+          }
         } else {
           out.url = str(t.url).slice(0, 500);
         }
+        if (t.autoplay === true) out.autoplay = true; // добавлен автоплеем
         return out;
       };
       const state = {
@@ -976,6 +985,7 @@ export function attachRealtime(io, { uploadsDir }) {
         track: isObj(st.track) && !st.track.pending ? cleanTrack(st.track) : null,
         queue: Array.isArray(st.queue) ? st.queue.slice(0, 500).map(cleanTrack).filter(Boolean) : [],
         paused: !!st.paused,
+        autoplay: !!st.autoplay,
         seekSeq: Number.isInteger(st.seekSeq) && st.seekSeq >= 0 ? st.seekSeq : 0,
         position: Number.isFinite(st.position) && st.position >= 0 ? st.position : 0,
         updatedAt: Number.isFinite(st.updatedAt) ? st.updatedAt : Date.now(),
@@ -1027,6 +1037,15 @@ export function attachRealtime(io, { uploadsDir }) {
     }
   }
 
-  return { isBotOnline, emitUserUpdated, disconnectSessions, emitServerUpdated };
+  // Плейлисты/настройки музыки сервера изменились (REST, server/music-playlists.js)
+  function emitMusicPlaylists(serverId) {
+    io.to(serverRoom(serverId)).emit('music:playlists', { serverId });
+  }
+  function emitMusicSettings(serverId, settings) {
+    io.to(serverRoom(serverId)).emit('music:settings', { serverId, ...settings });
+    botSocket?.emit('bot:music-settings', { serverId, ...settings });
+  }
+
+  return { isBotOnline, emitUserUpdated, disconnectSessions, emitServerUpdated, emitMusicPlaylists, emitMusicSettings };
 }
 

@@ -120,6 +120,7 @@ function getPlayer(serverId) {
       leaveVoice: (channelId) => socket.emit('bot:voice-leave', { channelId }),
       onIdleLeave: (pl) => say(pl.textChannelId, `💤 ${Math.max(1, Math.round(IDLE_LEAVE_MS / 60000))} мин. тишины — я пошёл отдыхать. Позовёте снова: !play <трек> 🎵`),
       fetch: fetchPending,
+      onQueueEnd: (pl) => { runAutoplay(pl).catch((err) => console.warn('[bot] автоплей:', err.message)); },
       onTrackError: (pl, item, err, { gaveUp, dropped, hasNext }) => {
         console.warn(`[bot] Не скачался «${item.title}»: ${err.message}`);
         let text = `⚠️ Не получилось включить ${trackLabel(item)}: ${err.message}.`;
@@ -134,8 +135,53 @@ function getPlayer(serverId) {
       },
     });
     players.set(serverId, p);
+    p.settingsReady = loadSettings(p);
   }
   return p;
+}
+
+// ---------- настройки сервера (автоплей) ----------
+function loadSettings(p) {
+  return api('GET', `/api/servers/${encodeURIComponent(p.serverId)}/music-settings`)
+    .then(({ settings }) => { p.autoplay = !!settings?.autoplay; p.broadcast(); })
+    .catch((err) => console.warn(`[bot] Настройки музыки сервера ${p.serverId}: ${err.message}`));
+}
+
+// ---------- автоплей ----------
+const AUTOPLAY_BATCH = Math.min(5, Math.max(3, Number(process.env.MUSIC_AUTOPLAY_BATCH) || 4));
+const AUTOPLAY_TIMEOUT_MS = 3 * 60_000;
+
+/** Очередь закончилась: подобрать похожие треки (радио-микс YouTube) и поставить их «ожидающими». */
+async function runAutoplay(p) {
+  if (!p.autoplay || p.autoplayPaused || p.autoplayBusy || !p.active || p.busy || !p.lastPlayed) return;
+  const seed = p.lastPlayed;
+  const session = p.session;
+  p.autoplayBusy = true;
+  let res;
+  try {
+    res = await api('POST', '/api/music/similar', {
+      seed: { id: seed.id, title: seed.title, artist: seed.artist, ref: seed.ref },
+      exclude: [...p.history], count: AUTOPLAY_BATCH,
+    }, { timeoutMs: AUTOPLAY_TIMEOUT_MS });
+  } catch (err) {
+    if (session !== p.session || !p.autoplay) return;
+    p.autoplayPaused = true;
+    say(p.textChannelId, `🔁 Автоплей: не получилось подобрать похожие треки — ${err.message}. ` +
+      'Автоплей на паузе: включите трек через !play, и он продолжит подбирать. Выключить: !autoplay off');
+    return;
+  } finally {
+    p.autoplayBusy = false;
+  }
+  if (session !== p.session || !p.autoplay || !p.active || p.busy) return; // остановили / уже поставили что-то
+  const items = (res.items || []).map((it) => ({ ...it, autoplay: true, addedBy: 'автоплей' }));
+  if (!items.length) {
+    p.autoplayPaused = true;
+    say(p.textChannelId, `🔁 Автоплей: похожих на ${trackLabel(seed)} треков, которых ещё не было, не нашлось. Включите что-нибудь через !play — продолжу от него.`);
+    return;
+  }
+  items.forEach((it) => p.remember(it));
+  p.enqueueMany(items);
+  say(p.textChannelId, `🔁 Автоплей: ${items.map((t) => trackLabel(t)).join(', ')}`);
 }
 
 function say(channelId, content) {
@@ -156,10 +202,13 @@ const HELP = [
   '!remove <номер> — убрать трек из очереди',
   '!move <откуда> <куда> — переставить трек в очереди',
   '!shuffle — перемешать очередь',
+  '!playlist <название> (или !pl) — включить сохранённый плейлист сервера; !playlist shuffle <название> — вперемешку',
+  '!playlist list — плейлисты сервера; !playlist save <название> — сохранить текущую очередь как плейлист',
+  '!autoplay on | off — автоплей: когда очередь кончится, подберу похожие треки',
   '!stop — остановить, очистить очередь и выйти',
   '!leave — выйти из голосового канала',
   '!help — эта подсказка',
-  'Свои файлы можно загрузить через кнопку «Библиотека» в плеере. Подробнее: docs/MUSIC.md',
+  'Свои файлы и плейлисты — кнопка «Библиотека» в плеере. Подробнее: docs/MUSIC.md',
 ].join('\n');
 
 /** «1:23», «83», «+10», «-10», «1:02:03» → секунды (null — не разобрать) */
@@ -187,10 +236,129 @@ function queueText(p) {
   const lines = [nowPlayingText(p)];
   if (p.queue.length) {
     lines.push('', `📜 В очереди (${p.queue.length}):`);
-    p.queue.slice(0, 15).forEach((t, i) => lines.push(`${i + 1}. ${trackLabel(t)} (${fmtTime(t.duration)})${t.pending ? ' ⌛' : ''}`));
+    p.queue.slice(0, 15).forEach((t, i) => lines.push(`${i + 1}. ${trackLabel(t)} (${fmtTime(t.duration)})${t.pending ? ' ⌛' : ''}${t.autoplay ? ' · авто' : ''}`));
     if (p.queue.length > 15) lines.push(`…и ещё ${p.queue.length - 15}`);
   } else lines.push('Дальше в очереди пусто.');
   return lines.join('\n');
+}
+
+// ---------- плейлисты ----------
+const sid = (serverId) => `/api/servers/${encodeURIComponent(serverId)}`;
+const asUser = (userId) => (userId ? `?asUserId=${encodeURIComponent(userId)}` : '');
+
+async function listPlaylists(serverId, userId) {
+  return (await api('GET', `${sid(serverId)}/playlists${asUser(userId)}`)).playlists || [];
+}
+
+/** Плейлист по названию: точное совпадение → начало → вхождение (без учёта регистра) */
+function matchPlaylist(list, name) {
+  const q = norm(name);
+  const exact = list.filter((p) => norm(p.name) === q);
+  if (exact.length) return { pl: exact[0] };
+  for (const test of [(n) => n.startsWith(q), (n) => n.includes(q)]) {
+    const hit = list.filter((p) => test(norm(p.name)));
+    if (hit.length === 1) return { pl: hit[0] };
+    if (hit.length > 1) return { many: hit };
+  }
+  return {};
+}
+
+/** Текущая очередь бота (играет + загружается + очередь) → элементы для сохранения в плейлист */
+function queueForSave(p) {
+  return [p.current, p.loading, ...p.queue].filter(Boolean).map((t) => (t.pending
+    ? (t.ref ? { pending: true, title: t.title, artist: t.artist, duration: t.duration, source: t.source, ref: t.ref } : null)
+    : { trackId: t.id })).filter(Boolean);
+}
+
+async function playlistCommand(p, cmd, args, reply) {
+  const { username, userId, serverId, voiceChannelId } = cmd;
+  const m = args.match(/^(list|список|save|сохранить|shuffle|mix|перемешать)(?:\s+([\s\S]*))?$/i);
+  const sub = m ? m[1].toLowerCase() : (args ? 'play' : 'list');
+  const rest = (m ? m[2] || '' : args).trim();
+
+  if (sub === 'list' || sub === 'список') {
+    let list;
+    try { list = await listPlaylists(serverId, userId); } catch (err) { return reply(`😕 Не получилось открыть плейлисты: ${err.message}`); }
+    if (!list.length) return reply('📭 На сервере пока нет плейлистов. Сохранить текущую очередь: !playlist save <название>; создать — в «Библиотеке» → «Плейлисты».');
+    const lines = [`📚 Плейлисты сервера (${list.length}):`];
+    list.slice(0, 25).forEach((pl) => lines.push(`• ${pl.name} — ${pl.count} ${plural(pl.count, 'трек', 'трека', 'треков')} (${pl.createdBy?.username || '?'})`));
+    if (list.length > 25) lines.push(`…и ещё ${list.length - 25}`);
+    lines.push('Включить: !playlist <название>');
+    return reply(lines.join('\n'));
+  }
+
+  if (sub === 'save' || sub === 'сохранить') {
+    if (!rest) return reply('💾 Укажи название: !playlist save <название>');
+    const items = queueForSave(p);
+    if (!items.length) return reply('📭 Очередь пуста — сохранять нечего. Включи треки через !play.');
+    try {
+      const r = await api('POST', `${sid(serverId)}/playlists`, { name: rest, items, replace: true, asUserId: userId });
+      const n = r.playlist.count;
+      return reply(`💾 ${r.replaced ? 'Обновил' : 'Сохранил'} плейлист «${r.playlist.name}»: ${n} ${plural(n, 'трек', 'трека', 'треков')}` +
+        (r.skipped ? ` (не поместилось или без источника: ${r.skipped})` : '') + `. Включить: !playlist ${r.playlist.name}`);
+    } catch (err) {
+      return reply(`😕 Не получилось сохранить плейлист: ${err.message}`);
+    }
+  }
+
+  // включить: «<название>», «shuffle <название>», из интерфейса — «id:<id> [shuffle]»
+  if (!voiceChannelId) return reply(`🎧 ${username}, зайди в голосовой канал — тогда я смогу включить музыку.`);
+  if (p.active && p.voiceChannelId !== voiceChannelId && p.busy) {
+    return reply('🎵 Я уже играю в другом голосовом канале этого сервера. Заходи туда или останови меня там: !stop');
+  }
+  let shuffle = sub === 'shuffle' || sub === 'mix' || sub === 'перемешать';
+  const idm = rest.match(/^id:(\S+)(?:\s+(shuffle))?$/);
+  let plId = idm ? idm[1] : null;
+  if (idm?.[2]) shuffle = true;
+  if (!plId) {
+    if (!rest) return reply('📜 Какой плейлист включить? !playlist <название>; список: !playlist list');
+    let list;
+    try { list = await listPlaylists(serverId, userId); } catch (err) { return reply(`😕 Не получилось открыть плейлисты: ${err.message}`); }
+    const found = matchPlaylist(list, rest);
+    if (found.many) return reply(`🤔 Подходит несколько плейлистов: ${found.many.slice(0, 10).map((x) => `«${x.name}»`).join(', ')}. Уточни название.`);
+    if (!found.pl) return reply(`🔍 Плейлист «${rest.slice(0, 60)}» не найден. Список: !playlist list`);
+    plId = found.pl.id;
+  }
+  let res;
+  try { res = await api('GET', `${sid(serverId)}/playlists/${encodeURIComponent(plId)}/play${asUser(userId)}`); } catch (err) {
+    return reply(`😕 Не получилось включить плейлист: ${err.message}`);
+  }
+  const items = (res.items || []).map((it) => ({ ...it, addedBy: username }));
+  if (!items.length) return reply(`📭 В плейлисте «${res.playlist?.name}» нет треков, которые можно включить.`);
+  if (shuffle) {
+    for (let i = items.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [items[i], items[j]] = [items[j], items[i]];
+    }
+  }
+  p.join(voiceChannelId);
+  const startedNow = p.enqueueMany(items);
+  return reply(`📜 Плейлист «${res.playlist.name}»${shuffle ? ' (вперемешку)' : ''}: ${startedNow ? 'включаю' : 'добавил в очередь'} ${items.length} ${plural(items.length, 'трек', 'трека', 'треков')}` +
+    (res.missing ? `; ${res.missing} ${plural(res.missing, 'трек удалён', 'трека удалены', 'треков удалены')} из библиотеки и без ссылки — пропускаю` : '') +
+    (startedNow && items[0].pending ? '. Первый трек загружается и сейчас заиграет 🎵' : ' 🎵'));
+}
+
+async function autoplayCommand(p, cmd, args, reply) {
+  await p.settingsReady;
+  const a = args.toLowerCase();
+  let on;
+  if (/^(on|вкл|включить|да|1)$/.test(a)) on = true;
+  else if (/^(off|выкл|выключить|нет|0)$/.test(a)) on = false;
+  else if (!a) {
+    return reply(`🔁 Автоплей ${p.autoplay ? 'включён' : 'выключен'}${p.autoplay && p.autoplayPaused ? ' (на паузе: не нашлось похожих треков)' : ''}. ` +
+      'Включить: !autoplay on, выключить: !autoplay off');
+  } else return reply('🔁 Напиши: !autoplay on или !autoplay off');
+  try {
+    const { settings } = await api('PUT', `${sid(cmd.serverId)}/music-settings`, { autoplay: on, asUserId: cmd.userId });
+    p.autoplay = !!settings.autoplay;
+  } catch (err) {
+    return reply(`😕 Не получилось ${on ? 'включить' : 'выключить'} автоплей: ${err.message}`);
+  }
+  p.autoplayPaused = false;
+  p.broadcast();
+  reply(on ? '🔁 Автоплей включён: когда очередь закончится, подберу похожие треки.' : '🔁 Автоплей выключен.');
+  if (on) runAutoplay(p).catch((err) => console.warn('[bot] автоплей:', err.message));
+  return undefined;
 }
 
 async function handleCommand(cmd) {
@@ -204,6 +372,8 @@ async function handleCommand(cmd) {
   if (command === 'help') return reply(HELP);
   if (command === 'np') return reply(nowPlayingText(p));
   if (command === 'queue') return reply(queueText(p));
+  if (command === 'playlist' || command === 'pl') return playlistCommand(p, cmd, args, reply);
+  if (command === 'autoplay') return autoplayCommand(p, cmd, args, reply);
 
   const known = ['play', 'skip', 'stop', 'pause', 'resume', 'remove', 'move', 'seek', 'shuffle', 'leave'];
   if (!known.includes(command)) return reply(`🤔 Не знаю команду !${command}. Напиши !help — там всё, что я умею.`);
@@ -362,7 +532,7 @@ async function handleCommand(cmd) {
 socket.on('connect', () => {
   console.log(`[bot] 🎵 DJ Бот подключён к ${SERVER_URL}`);
   // после переподключения сервер нас «забыл» — начинаем с чистого листа
-  for (const p of players.values()) p.reset();
+  for (const p of players.values()) { p.reset(); p.settingsReady = loadSettings(p); } // автоплей могли переключить, пока нас не было
 });
 
 socket.on('disconnect', (reason) => {
@@ -388,6 +558,16 @@ socket.on('bot:command', (cmd) => {
     console.error('[bot] Ошибка команды:', err);
     say(cmd.textChannelId, '😵 Что-то пошло не так. Попробуй ещё раз.');
   });
+});
+
+// автоплей переключили (REST / другой экземпляр интерфейса)
+socket.on('bot:music-settings', ({ serverId, autoplay } = {}) => {
+  const p = typeof serverId === 'string' ? players.get(serverId) : null;
+  if (!p || typeof autoplay !== 'boolean' || p.autoplay === autoplay) return;
+  p.autoplay = autoplay;
+  p.autoplayPaused = false;
+  p.broadcast();
+  if (autoplay) runAutoplay(p).catch((err) => console.warn('[bot] автоплей:', err.message));
 });
 
 socket.on('bot:voice-empty', ({ channelId } = {}) => {
