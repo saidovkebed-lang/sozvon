@@ -19,6 +19,10 @@
 //  - v15 автоплей: видео qaAuto000NN («QA Auto …», по 8 с); радио-микс watch?v=<id>&list=RD<id> → MIXES[id]
 //    (первым идёт само видео, как у YouTube); микса нет (qaAutoNoMix) → ошибка. ytsearch «… QA Auto Three …» →
 //    это видео (поиск затравки для треков не с YouTube).
+//  - «Смотреть вместе» (tests/v14-watch): видео qaWatch0001..3 (по 20 с), qaWatchSlo1 (медленная загрузка),
+//    qaWatchLong (4 ч — больше WATCH_MAX_DURATION_MIN), qaWatchBIG1 (больше --max-filesize), qaWatchFAIL.
+//    Скачивание с -f …height… / --merge-output-format → ffmpeg testsrc+синус в mp4 (VP9+Opus: Chromium из Playwright
+//    не умеет H.264/AAC), прогресс по --progress-template.
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -40,7 +44,7 @@ if (argv.includes('--version')) { log({ result: 'version' }); console.log('2026.
 const VALUE_FLAGS = new Set(['-o', '--output', '-f', '--format', '--audio-format', '--audio-quality', '--print', '-O',
   '--cookies', '--proxy', '--js-runtimes', '--playlist-end', '--playlist-start', '-I', '--playlist-items', '--socket-timeout',
   '--retries', '--ffmpeg-location', '--extractor-args', '--max-filesize', '--paths', '-P', '--cache-dir', '--match-filter',
-  '--default-search', '--user-agent', '--sleep-interval', '--limit-rate', '-r', '--fragment-retries', '--add-header', '--remux-video', '--recode-video', '--match-filters', '--match-filter']);
+  '--default-search', '--user-agent', '--sleep-interval', '--limit-rate', '-r', '--fragment-retries', '--add-header', '--remux-video', '--recode-video', '--progress-template', '-S', '--format-sort', '--merge-output-format', '--match-filters', '--match-filter']);
 const opts = { print: [] }; const positional = [];
 for (let i = 0; i < argv.length; i++) {
   const a = argv[i];
@@ -88,6 +92,14 @@ const VIDEOS = {
   qaAuto00009: { title: 'QA Auto Nine', uploader: 'QA Auto', duration: 8 },
   qaAuto00010: { title: 'QA Auto Ten', uploader: 'QA Auto', duration: 8 },
   qaAutoNoMix: { title: 'QA Auto Lonely', uploader: 'QA Auto', duration: 8 },
+  // v14 «Смотреть вместе»
+  qaWatch0001: { title: 'QA Watch One', uploader: 'QA Cinema', duration: 20 },
+  qaWatch0002: { title: 'QA Watch Two', uploader: 'QA Cinema', duration: 20 },
+  qaWatch0003: { title: 'QA Watch Three', uploader: 'QA Cinema', duration: 20 },
+  qaWatchSlo1: { title: 'QA Watch Slow', uploader: 'QA Cinema', duration: 20 },
+  qaWatchLong: { title: 'QA Watch Four Hours', uploader: 'QA Cinema', duration: 4 * 3600 },
+  qaWatchBIG1: { title: 'QA Watch Huge', uploader: 'QA Cinema', duration: 30 },
+  qaWatchFAIL: { title: 'QA Watch Broken', uploader: 'QA Cinema', duration: 20 },
 };
 // радио-миксы YouTube (list=RD<id>): детерминированные «похожие» для автоплея
 const MIXES = {
@@ -235,6 +247,7 @@ if (!wantsDownload) {
 // ---- скачивание ----
 const info = r.data;
 if (/FAIL/.test(info.id)) fail(`[youtube] ${info.id}: Video unavailable. This video has been removed by the uploader`);
+if (opts['merge-output-format'] || /height/.test(String(opts.f || opts.format || ''))) downloadVideo(info);
 const fmtArg = String(opts['audio-format'] || 'mp3');
 const ext = fmtArg === 'm4a' ? 'm4a' : 'mp3';
 let outTpl = opts.o || opts.output || '%(title)s [%(id)s].%(ext)s';
@@ -253,3 +266,34 @@ log({ result: 'download', id: info.id, title: info.title, filepath, target });
 if (opts.print.length) for (const p of opts.print) process.stdout.write(fmt(p, full) + '\n');
 else process.stdout.write(`[download] Destination: ${filepath}\n`);
 process.exit(0);
+
+// ---- скачивание видео («Смотреть вместе») ----
+function downloadVideo(v) {
+  const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+  const size = 150_000;
+  if (/BIG/.test(v.id)) {
+    log({ result: 'too-big', id: v.id });
+    process.stdout.write(`[download] File is larger than max-filesize (999999999 bytes > ${opts['max-filesize']}). Aborting.\n`);
+    process.exit(0);
+  }
+  const tpl = String(opts['progress-template'] || '').replace(/^download:/, '');
+  const step = /Slo/.test(v.id) ? 1000 : 120;
+  for (const pct of [0, 0.25, 0.5, 0.75, 1]) {
+    if (tpl) process.stderr.write(tpl.replace('%(progress.downloaded_bytes)s', String(Math.round(size * pct)))
+      .replace('%(progress.total_bytes)s', String(size)).replace('%(progress.total_bytes_estimate)s', 'NA') + '\n');
+    sleep(step);
+  }
+  let outTpl = opts.o || opts.output || '%(title)s [%(id)s].%(ext)s';
+  const filepath = outTpl.replace(/%\(id\)s/g, v.id).replace(/%\(ext\)s/g, 'mp4').replace(/%\(title\)s/g, v.title.replace(/[\\/]/g, '_'));
+  fs.mkdirSync(path.dirname(filepath), { recursive: true });
+  const dur = Math.max(1, Math.min(Number(process.env.QA_FAKE_MAXDUR || 600), v.duration || 10));
+  try {
+    execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-f', 'lavfi', '-i', `testsrc2=size=320x180:rate=10:duration=${dur}`,
+      '-f', 'lavfi', '-i', `sine=frequency=440:duration=${dur}`, '-c:v', 'libvpx-vp9', '-deadline', 'realtime', '-cpu-used', '8',
+      '-b:v', '100k', '-g', '10', '-c:a', 'libopus', '-b:a', '32k', '-ac', '1', '-movflags', '+faststart', '-shortest', filepath]);
+  } catch (e) { fail('ffmpeg failed: ' + e.message); }
+  const full = { ...v, filepath, ext: 'mp4', extractor_key: 'Youtube' };
+  log({ result: 'download-video', id: v.id, filepath, target });
+  for (const p of opts.print) process.stdout.write(fmt(p, full) + '\n');
+  process.exit(0);
+}

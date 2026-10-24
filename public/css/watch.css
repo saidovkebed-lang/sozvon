@@ -1,0 +1,144 @@
+/* «Смотреть вместе» (public/js/ui/watch.js): панель видео на сцене голосового канала */
+
+.watch {
+  flex: none;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--sp-3);
+  margin: var(--sp-4) var(--sp-4) 0;
+  min-width: 0;
+}
+.watch[hidden] { display: none; }
+@media (min-width: 1100px) {
+  .watch { grid-template-columns: minmax(0, 1fr) minmax(260px, 320px); align-items: start; }
+  .watch__head { flex-wrap: wrap; }
+  .watch__now { flex: 1 1 100%; white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .watch__form .btn--primary { flex: 1; }
+}
+/* плавающий плеер музыки сверху справа — не перекрываем его */
+.app:has(#music-player:not([hidden])) #voice-view .watch { margin-top: 84px; }
+.app:has(#music-player:not([hidden])) #voice-view:has(.watch:not([hidden])) .stage__grid { padding-top: var(--sp-3); }
+
+/* экран */
+.watch__screen {
+  position: relative;
+  display: grid; place-items: center;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  max-height: 58vh;
+  background: #000;
+  border-radius: var(--r-lg);
+  overflow: hidden;
+  box-shadow: var(--shadow-md);
+}
+.watch__video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
+.watch:not(.has-video) .watch__video { visibility: hidden; }
+.watch__placeholder {
+  position: relative; z-index: 1;
+  display: grid; justify-items: center; gap: var(--sp-2);
+  max-width: 420px; padding: var(--sp-4);
+  color: var(--text-muted); text-align: center; font-size: var(--fs-sm);
+}
+.watch__placeholder .icon { width: 40px; height: 40px; color: var(--text-faint); }
+.watch__placeholder[hidden] { display: none; }
+.watch__unlock { position: absolute; z-index: 3; top: 50%; left: 50%; transform: translate(-50%, -50%); min-height: 44px; }
+.watch__unlock[hidden] { display: none; }
+
+.watch__controls {
+  position: absolute; z-index: 2; left: 0; right: 0; bottom: 0;
+  display: flex; align-items: center; gap: var(--sp-2);
+  padding: var(--sp-6) var(--sp-3) var(--sp-2);
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.75));
+  color: #fff;
+  opacity: 0; transition: opacity var(--dur);
+}
+.watch__controls[hidden] { display: none; }
+.watch__screen:hover .watch__controls, .watch__screen:focus-within .watch__controls,
+.watch.is-paused .watch__controls { opacity: 1; }
+@media (hover: none) { .watch__controls { opacity: 1; } }
+.watch__controls .icon-btn { color: #fff; flex: none; }
+.watch__controls .icon-btn:hover:not(:disabled) { background: rgba(255, 255, 255, 0.15); }
+.watch__controls .icon-btn.is-on { background: rgba(255, 255, 255, 0.22); }
+.watch__progress { flex: 1; min-width: 60px; height: 4px; background: rgba(255, 255, 255, 0.25); }
+.watch__progress .progress__bar { transition: none; }
+.watch__time { flex: none; font-size: var(--fs-xs); font-variant-numeric: tabular-nums; color: rgba(255, 255, 255, 0.9); }
+.watch__vol { display: flex; align-items: center; flex: none; }
+.watch__volume { width: 80px; }
+
+.watch__screen:fullscreen { max-height: none; aspect-ratio: auto; border-radius: 0; }
+.watch__screen.is-fullscreen { max-height: none; aspect-ratio: auto; border-radius: 0; }
+
+/* боковая часть: что смотрим, ссылка, загрузки, очередь */
+.watch__side { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
+.watch__head { display: flex; align-items: center; gap: var(--sp-1); min-width: 0; }
+.watch__now {
+  flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: var(--fs-sm); color: var(--text-muted);
+}
+.watch__now b { color: var(--text); font-weight: var(--fw-semibold); }
+.watch__head .btn[hidden] { display: none; }
+.watch__form { display: flex; flex-wrap: wrap; gap: var(--sp-2); min-width: 0; }
+.watch__input { flex: 1 1 200px; min-width: 0; }
+.watch__form .btn { flex: none; }
+.watch__hint { margin: 0; font-size: var(--fs-xs); color: var(--text-faint); }
+.watch__error { margin: 0; }
+.watch__error:empty { display: none; }
+
+.watch__loading, .watch__queue { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-1); }
+.watch__loading[hidden], .watch__queue[hidden] { display: none; }
+.watch__load {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: var(--sp-2); row-gap: 4px;
+  padding: var(--sp-2); border-radius: var(--r-md); background: var(--bg-2);
+}
+.watch__load-text { display: flex; flex-direction: column; min-width: 0; }
+.watch__load-title, .watch__qtitle { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-sm); color: var(--text); }
+.watch__load-stage, .watch__qmeta { font-size: var(--fs-xs); color: var(--text-muted); }
+.watch__load-bar { grid-column: 1; }
+.watch__load > .icon-btn { grid-row: 1 / span 2; grid-column: 2; }
+.watch__load-bar.is-indeterminate .progress__bar { opacity: 0.45; animation: watch-pulse 1.2s ease-in-out infinite; }
+@keyframes watch-pulse { 50% { opacity: 0.15; } }
+.watch__qhead { font-size: var(--fs-xs); font-weight: var(--fw-semibold); color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.02em; padding: var(--sp-1) 0; }
+.watch__qitem {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; column-gap: var(--sp-2);
+  padding: 4px var(--sp-2); border-radius: var(--r-md); background: var(--bg-2);
+}
+.watch__qnum { font-size: var(--fs-xs); color: var(--text-faint); font-variant-numeric: tabular-nums; }
+.watch__qmeta { grid-column: 2; }
+.watch__qitem > .icon-btn { grid-row: 1 / span 2; grid-column: 3; }
+
+/* сцена с открытой панелью: плитки — компактной лентой */
+#voice-view:has(.watch:not([hidden])) .stage__grid {
+  flex: 1 1 auto;
+  grid-template-columns: repeat(auto-fill, minmax(min(180px, 100%), 1fr));
+  align-content: start;
+}
+/* «кинотеатр»: видео на всю сцену */
+.stage.is-watch-focus .stage__grid { display: none; }
+.stage.is-watch-focus .watch { flex: 1; min-height: 0; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }
+.stage.is-watch-focus .watch__screen { max-height: none; height: 100%; aspect-ratio: auto; }
+.stage.is-watch-focus .watch__side > :not(.watch__head) { display: none; }
+
+/* кнопка в нижней панели: видео идёт */
+#ctrl-watch.has-video:not(.is-on) { box-shadow: inset 0 0 0 2px var(--accent); }
+
+/* индикатор в списке каналов */
+.channel-watch {
+  display: flex; align-items: center; gap: 6px;
+  margin: -4px 0 6px 30px; padding: 2px 6px;
+  font-size: var(--fs-xs); color: var(--accent-text);
+  min-width: 0;
+}
+.channel-watch .icon { flex: none; }
+.channel-watch span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+@media (max-width: 639.98px) {
+  .watch { margin: var(--sp-2) var(--sp-2) 0; gap: var(--sp-2); }
+  .app:has(#music-player:not([hidden])) #voice-view .watch { margin-top: 76px; }
+  .watch__screen { max-height: 42vh; border-radius: var(--r-md); }
+  .watch__controls { gap: 4px; padding: var(--sp-4) var(--sp-2) 4px; }
+  .watch__volume { width: 56px; }
+  .watch__upload-text { display: none; }
+  .watch__hint { display: none; }
+  #voice-view:has(.watch:not([hidden])) .stage__grid { grid-template-columns: repeat(auto-fill, minmax(min(120px, 100%), 1fr)); padding: var(--sp-2); }
+}

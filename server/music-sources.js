@@ -167,13 +167,17 @@ async function baseArgs() {
 
 export const ytdlpStats = { calls: 0 }; // для отладки/проверок
 
-/** Запуск yt-dlp → {code, stdout, stderr, timedOut} */
-async function runYtDlp(args, { timeoutMs }) {
+/**
+ * Запуск yt-dlp → {code, stdout, stderr, timedOut}.
+ * onLine(line, stream) — построчно (для прогресса); вернул true — строка «съедена» и не копится в stdout/stderr.
+ * signal — AbortSignal (отмена убивает процесс); queue=false — без общей очереди скачиваний музыки.
+ */
+async function runYtDlp(args, { timeoutMs, onLine = null, signal = null, queue = true }) {
   if (!hasYtDlp()) {
     throw new HttpError(503, 'На сервере не установлен yt-dlp — музыка из YouTube/SoundCloud/Spotify недоступна. ' +
       'Администратору: sudo bash /opt/sozvon/deploy/update.sh (или pip install yt-dlp; путь — YTDLP_PATH). Можно загрузить mp3 через «Библиотеку».');
   }
-  await acquire();
+  if (queue) await acquire();
   try {
     const full = [...(await baseArgs()), ...args];
     ytdlpStats.calls++;
@@ -183,17 +187,38 @@ async function runYtDlp(args, { timeoutMs }) {
         env: { ...process.env, PYTHONUNBUFFERED: '1', XDG_CACHE_HOME: path.dirname(cacheDir()) },
       });
       let stdout = '', stderr = '', timedOut = false;
-      child.stdout.on('data', (d) => { if (stdout.length < 20e6) stdout += d; });
-      child.stderr.on('data', (d) => { if (stderr.length < 1e6) stderr += d; });
+      const tail = { stdout: '', stderr: '' };
+      const take = (which, d) => {
+        if (!onLine) {
+          if (which === 'stdout') { if (stdout.length < 20e6) stdout += d; } else if (stderr.length < 1e6) stderr += d;
+          return;
+        }
+        const lines = (tail[which] + d).split(/\r?\n|\r/);
+        tail[which] = lines.pop();
+        for (const line of lines) {
+          if (onLine(line, which)) continue;
+          if (which === 'stdout') { if (stdout.length < 20e6) stdout += line + '\n'; } else if (stderr.length < 1e6) stderr += line + '\n';
+        }
+      };
+      child.stdout.on('data', (d) => take('stdout', String(d)));
+      child.stderr.on('data', (d) => take('stderr', String(d)));
       const killer = setTimeout(() => { timedOut = true; child.kill('SIGKILL'); }, timeoutMs);
+      const onAbort = () => child.kill('SIGKILL');
+      if (signal) { if (signal.aborted) onAbort(); else signal.addEventListener('abort', onAbort, { once: true }); }
       child.on('error', (err) => {
         clearTimeout(killer);
+        signal?.removeEventListener('abort', onAbort);
         reject(new HttpError(503, `Не удалось запустить yt-dlp (${ytdlpPath()}): ${err.code || err.message}`));
       });
-      child.on('close', (code) => { clearTimeout(killer); resolve({ code, stdout, stderr, timedOut }); });
+      child.on('close', (code) => {
+        clearTimeout(killer);
+        signal?.removeEventListener('abort', onAbort);
+        if (onLine) { for (const w of ['stdout', 'stderr']) if (tail[w]) take(w, '\n'); }
+        resolve({ code, stdout, stderr, timedOut });
+      });
     });
   } finally {
-    release();
+    if (queue) release();
   }
 }
 
@@ -221,6 +246,7 @@ function explain(res, src, timeoutMs) {
   if (/is live|live event|premieres/.test(e)) return 'прямые эфиры не поддерживаются';
   return (err.replace(/^.*?ERROR:\s*/, '').replace(/\[[^\]]+\]\s*/g, '') || `yt-dlp завершился с кодом ${res.code}`).slice(0, 200);
 }
+export { runYtDlp, explain as explainYtDlp, parseLastJson };
 const isBotCheck = (msg) => /не бот|cookies|не отвечает|403|429/.test(msg);
 
 function parseLastJson(stdout) {

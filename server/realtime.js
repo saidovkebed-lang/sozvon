@@ -13,6 +13,7 @@ import {
   highestPosition, normalizePositions, newServerFields,
 } from './permissions.js';
 import { createVoice } from './voice.js';
+import { createWatch } from './watch.js';
 import { isOwnMediaUrl, removeMediaUrl } from './media.js';
 import {
   findDm, isDmMember, dmOther, getOrCreateDm, userDms, publicDm, listDms, sharesServer, setRead,
@@ -58,7 +59,7 @@ function mediaInUse(url) {
     || db.data.users.some((u) => u.avatar === url || u.avatarAnimated === url || u.banner === url || u.bannerAnimated === url);
 }
 
-export function attachRealtime(io, { uploadsDir }) {
+export function attachRealtime(io, { uploadsDir, dataDir = path.dirname(uploadsDir) }) {
   let botSocket = null;
   const isBotOnline = () => !!botSocket?.connected;
   const moveGrants = new Map(); // userId -> {channelId, until}: можно зайти без CONNECT (перемещён модератором)
@@ -82,6 +83,7 @@ export function attachRealtime(io, { uploadsDir }) {
   }
 
   const voice = createVoice(io, { getBotSocket: () => botSocket, emitToViewers });
+  const watch = createWatch(io, { voice, emitToViewers, dataDir }); // «Смотреть вместе» (server/watch.js)
 
   function emitPresence(userId) {
     const rooms = userServers(userId).map((s) => serverRoom(s.id));
@@ -306,6 +308,7 @@ export function attachRealtime(io, { uploadsDir }) {
     for (const s of userServers(user.id)) socket.join(serverRoom(s.id));
     socket.data.view = { channelId: null, visible: false };
     if (addOnlineSocket(user.id, socket.id) && user.status !== 'invisible') emitPresence(user.id);
+    watch.attach(socket, user);
 
     // обёртка: ack обязателен, ошибки → {ok:false,error}
     const on = (event, handler) => socket.on(event, async (payload, ack) => {
@@ -1046,6 +1049,6 @@ export function attachRealtime(io, { uploadsDir }) {
     botSocket?.emit('bot:music-settings', { serverId, ...settings });
   }
 
-  return { isBotOnline, emitUserUpdated, disconnectSessions, emitServerUpdated, emitMusicPlaylists, emitMusicSettings };
+  return { isBotOnline, emitUserUpdated, disconnectSessions, emitServerUpdated, emitMusicPlaylists, emitMusicSettings, watch };
 }
 
