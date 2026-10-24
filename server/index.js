@@ -66,8 +66,9 @@ const io = new IOServer(server, {
   pingTimeout: 20_000,
   serveClient: true, // /socket.io/socket.io.esm.min.js и /socket.io/socket.io.min.js
 });
-const realtime = attachRealtime(io, { uploadsDir });
+const realtime = attachRealtime(io, { uploadsDir, dataDir: DATA_DIR });
 
+app.use('/api/watch', realtime.watch.router); // «Смотреть вместе»: загрузка видеофайла
 app.use('/api', createApiRouter({
   uploadsDir,
   dataDir: DATA_DIR,
@@ -122,6 +123,8 @@ app.use('/media/music', express.static(path.join(DATA_DIR, 'music'), {
   dotfiles: 'deny', index: false, fallthrough: false, maxAge: '1h',
   setHeaders(res) { res.setHeader('X-Content-Type-Options', 'nosniff'); },
 }));
+// «Смотреть вместе»: видео с Range, по подписанной ссылке (?t=) и только тем, кто видит канал
+app.get('/media/watch/:file', realtime.watch.media);
 app.use(express.static(PUBLIC_DIR, { index: 'index.html' }));
 
 // Ошибки статики (404 медиа и т.п.)

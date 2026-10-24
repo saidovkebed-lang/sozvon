@@ -7,13 +7,14 @@
 // клик по уведомлению открывает нужный чат в уже открытом окне или в новом.
 // При изменении списка/логики — поднять VERSION: старые кэши удалятся при activate.
 
-const VERSION = 'v3-3.5.1';
+const VERSION = 'v3-3.5.2';
 const CACHE = `sozvon-shell-${VERSION}`;
 
 const SHELL = [
   '/',
   '/css/tokens.css',
   '/css/app.css',
+  '/css/watch.css',
   '/js/main.js',
   '/js/api.js',
   '/js/music.js',
@@ -33,6 +34,7 @@ const SHELL = [
   '/js/ui/members.js',
   '/js/ui/modals.js',
   '/js/ui/music-player.js',
+  '/js/ui/watch.js',
   '/js/ui/servers.js',
   '/js/ui/sidebar.js',
   '/js/ui/toasts.js',

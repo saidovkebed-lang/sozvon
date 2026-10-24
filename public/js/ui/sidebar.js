@@ -103,6 +103,8 @@ function renderChannels() {
       if (ch.type === 'voice') {
         const members = state.voice[ch.id] || [];
         items.push(h('div', { class: 'voice-users', dataset: { channelId: ch.id } }, members.map(voiceUserEl)));
+        const watching = state.watch?.[ch.id]?.video; // «Смотреть вместе» (ui/watch.js)
+        if (watching) items.push(h('div', { class: 'channel-watch', dataset: { channelId: ch.id }, title: watching.title }, icon('i-monitor', 'icon--sm'), h('span', null, `Сейчас смотрим: ${watching.title}`)));
       }
     }
     return h('div', { class: 'channel-group', dataset: { group: g.type } }, header, items);
@@ -236,7 +238,7 @@ async function copyInvite() {
 }
 
 export function initSidebar() {
-  subscribe(['servers', 'nav', 'voice', 'profile', 'dms', 'presence'], renderChannels);
+  subscribe(['servers', 'nav', 'voice', 'profile', 'dms', 'presence', 'watch'], renderChannels);
   subscribe(['servers', 'nav'], renderHeader);
   subscribe(['me', 'voice', 'servers', 'presence', 'profile'], renderUserPanel);
   subscribe('speaking', updateSpeaking);

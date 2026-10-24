@@ -17,6 +17,8 @@ Object.assign(process.env, {
   SPOTIFY_EMBED_BASE: `http://127.0.0.1:${SPOTIFY_FAKE_PORT}/embed`,
   // Web API не используем: недостижимые адреса, чтобы случайные ключи из окружения не увели в сеть
   SPOTIFY_API_BASE: 'http://127.0.0.1:9', SPOTIFY_ACCOUNTS_BASE: 'http://127.0.0.1:9',
+  // «Смотреть вместе» (tests/v14-watch): маленькие лимиты, чтобы проверить отказ по размеру, LRU и уборку
+  WATCH_MAX_MB: '2', WATCH_CACHE_GB: '0.001', WATCH_IDLE_SEC: '3',
 });
 delete process.env.SPOTIFY_CLIENT_ID; delete process.env.SPOTIFY_CLIENT_SECRET;
 delete process.env.YTDLP_COOKIES; delete process.env.YTDLP_PROXY;
