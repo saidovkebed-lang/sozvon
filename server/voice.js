@@ -10,7 +10,7 @@ const userFields = (u) => ({
   avatar: u.avatar ?? null, avatarAnimated: u.avatarAnimated ?? null,
 });
 
-export function createVoice(io, { getBotSocket, emitToViewers }) {
+export function createVoice(io, { getBotSocket, emitToViewers, onLeave = () => {} }) {
   const rooms = new Map();        // channelId -> Map(socketId -> VoiceMember)
   const socketChannel = new Map(); // socketId -> channelId (только люди)
   const musicStates = new Map();  // channelId -> MusicState (без serverNow)
@@ -70,6 +70,7 @@ export function createVoice(io, { getBotSocket, emitToViewers }) {
     socketChannel.delete(socketId);
     const room = rooms.get(channelId);
     room?.delete(socketId);
+    onLeave(socketId, channelId);
     const s = io.sockets.sockets.get(socketId);
     s?.leave(voiceRoom(channelId));
     if (notify) {
@@ -207,6 +208,7 @@ export function createVoice(io, { getBotSocket, emitToViewers }) {
       for (const sid of [...room.keys()]) {
         if (room.get(sid).isBot) continue;
         socketChannel.delete(sid);
+        onLeave(sid, channelId);
         const s = io.sockets.sockets.get(sid);
         s?.leave(voiceRoom(channelId));
         s?.emit('voice:moved', { channelId: null, reason: 'deleted' }); // канал удалён — клиент отключается от голоса

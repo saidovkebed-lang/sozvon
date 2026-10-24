@@ -6,6 +6,7 @@ import { state } from '../state.js';
 import { toast } from '../ui/toasts.js';
 import { engine as audio } from '../audio/engine.js';
 import { prefs } from '../prefs.js';
+import { SfuClient } from './sfu.js';
 // Обработка микрофона, шумовой гейт («говорит»), громкость собеседников — в js/audio/engine.js.
 
 /**
@@ -51,6 +52,25 @@ export function tuneVideoSdp(desc) {
   }
   flush();
   return { type: desc.type, sdp: out.join('\r\n') + '\r\n' };
+}
+
+/** maxBitrate/maxFramerate/degradationPreference видеосендера трансляции (mesh и SFU) */
+export function applySenderParams(sender, want) {
+  let p;
+  try { p = sender.getParameters(); } catch { return; }
+  if (!p.encodings || !p.encodings.length) return; // до negotiation encodings пусты — применим позже
+  const e = p.encodings[0];
+  if (e.maxBitrate === want.maxBitrate && e.maxFramerate === want.maxFramerate) return;
+  e.maxBitrate = want.maxBitrate;
+  e.maxFramerate = want.maxFramerate;
+  if (want.degradation) p.degradationPreference = want.degradation;
+  sender.setParameters(p).catch((err) => {
+    // degradationPreference поддерживается не везде — повтор без него
+    if (p.degradationPreference) {
+      delete p.degradationPreference;
+      sender.setParameters(p).catch((e2) => console.warn('[rtc] setParameters', e2));
+    } else console.warn('[rtc] setParameters', err);
+  });
 }
 
 class Peer {
@@ -114,7 +134,7 @@ class Peer {
         // сервер только ретранслирует voice:speaking — новичок не знает, что мы уже говорим
         if (mgr.localSpeaking && state.myVoice) emit('voice:speaking', { speaking: true });
         // после переподключения напоминаем стримеру, что смотрим его трансляцию
-        if (mgr.watching.has(this.id)) this.send({ watch: true });
+        if (mgr.watching.has(this.id) && !mgr.sfu.consuming(this.id)) this.send({ watch: true });
       }
       mgr.changed();
     };
@@ -134,7 +154,8 @@ class Peer {
     } else if (!this.polite) {
       this.pc.addTransceiver('audio', { direction: 'recvonly' });
     }
-    if (screen) this.addStream('screen', screen);
+    // трансляция через SFU в mesh не идёт — только этому собеседнику, если он не смог смотреть через сервер
+    if (screen && (!this.mgr.sfuScreen || this.screenWatched)) this.addStream('screen', screen);
     if (camera) this.addStream('camera', camera);
   }
 
@@ -175,6 +196,13 @@ class Peer {
   /** Собеседник начал/перестал смотреть мою трансляцию */
   setScreenWatched(on) {
     this.screenWatched = !!on;
+    // моя трансляция идёт через SFU, а этот зритель смотреть через сервер не смог — шлём ему напрямую (mesh)
+    const screen = this.mgr.local.screen;
+    if (on && screen && this.mgr.sfuScreen && !this.senders.screen.length) {
+      this.addStream('screen', screen);
+      this.mgr.screenViewersChanged();
+      return;
+    }
     this.senders.screen.forEach((s, i) => {
       s.replaceTrack(on ? this.screenTracks[i] || null : null).catch((e) => console.warn('[rtc] replaceTrack', e));
     });
@@ -187,22 +215,7 @@ class Peer {
     const want = this.mgr.screenParams;
     if (!want) return;
     for (const sender of this.senders.screen) {
-      if (sender.track?.kind !== 'video') continue;
-      let p;
-      try { p = sender.getParameters(); } catch { continue; }
-      if (!p.encodings || !p.encodings.length) continue; // до negotiation encodings пусты — применим позже
-      const e = p.encodings[0];
-      if (e.maxBitrate === want.maxBitrate && e.maxFramerate === want.maxFramerate) continue;
-      e.maxBitrate = want.maxBitrate;
-      e.maxFramerate = want.maxFramerate;
-      if (want.degradation) p.degradationPreference = want.degradation;
-      sender.setParameters(p).catch((err) => {
-        // degradationPreference поддерживается не везде — повтор без него
-        if (p.degradationPreference) {
-          delete p.degradationPreference;
-          sender.setParameters(p).catch((e2) => console.warn('[rtc] setParameters', e2));
-        } else console.warn('[rtc] setParameters', err);
-      });
+      if (sender.track?.kind === 'video') applySenderParams(sender, want);
     }
   }
 
@@ -218,7 +231,14 @@ class Peer {
     let kind = this.trackInfo.get(stream.id);
     if (!kind) kind = track.kind === 'audio' ? 'mic' : 'camera';
     this.remote[kind] = stream;
-    if (kind === 'screen' && prefs.get('stream.autoWatch') && !this.mgr.watching.has(this.id)) this.mgr.setWatching(this.id, true);
+    if (kind === 'screen') {
+      if (!this.mgr.watching.has(this.id)) {
+        if (prefs.get('stream.autoWatch')) this.mgr.setWatching(this.id, true);
+      } else if (!this.mgr.sfu.consuming(this.id)) {
+        // смотрели через SFU, а стример перешёл на mesh — попросить трансляцию напрямую
+        this.send({ watch: true });
+      }
+    }
     const cleanup = () => {
       if (this.remote[kind] === stream && !stream.getTracks().some((t) => t.readyState === 'live')) {
         this.remote[kind] = null;
@@ -298,6 +318,10 @@ class RtcManager {
     this.screenParams = null;   // { maxBitrate, maxFramerate, degradation } — качество демонстрации
     this.lastViewers = 0;
     this.onScreenViewers = null; // (n) => void — число зрителей моей трансляции изменилось
+    this.sfu = new SfuClient(this); // трансляции экрана через сервер (sfu.js); при сбое — mesh
+    this.sfuScreen = false;         // моя трансляция идёт через SFU
+    this.autoWatch = () => !!prefs.get('stream.autoWatch');
+    this.applySenderParams = applySenderParams;
     // смена отправляемого трека (пересборка цепочки микрофона) → replaceTrack у всех пиров, без перезахода
     audio.onOutgoingTrack((track) => this.replaceMicTrack(track));
     audio.onGateChange(() => this.updateSpeaking());
@@ -377,8 +401,10 @@ class RtcManager {
     }
     this.iceServers = iceServers || [];
     this.watching.clear();
+    this.sfuScreen = false;
     this.local.mic = mic || null;
     this.applyMute();
+    this.sfu.join();
     this.changed();
   }
 
@@ -386,6 +412,8 @@ class RtcManager {
     for (const p of this.peers.values()) p.close();
     this.peers.clear();
     this.watching.clear();
+    this.sfu.leave();
+    this.sfuScreen = false;
     audio.releaseVoiceMic();
     this.local.mic = null;
     this.setLocalSpeaking(false);
@@ -429,16 +457,56 @@ class RtcManager {
   /** Зритель: смотреть / выйти из трансляции участника */
   setWatching(socketId, on) {
     if (on) this.watching.add(socketId); else this.watching.delete(socketId);
-    this.peers.get(socketId)?.send({ watch: !!on });
+    const peer = this.peers.get(socketId);
+    if (on && this.sfu.canConsume(socketId)) {
+      // через SFU; не вышло — sfuWatchFailed() попросит трансляцию напрямую
+      this.sfu.watch(socketId).catch(() => {});
+    } else {
+      if (!on) this.sfu.unwatch(socketId);
+      peer?.send({ watch: !!on });
+    }
     this.changed();
   }
 
   isWatching(socketId) { return this.watching.has(socketId); }
 
-  /** Сколько собеседников смотрит мою трансляцию */
+  /** SFU: смотреть через сервер не вышло — смотрим напрямую (mesh) */
+  sfuWatchFailed(socketId) {
+    if (!this.watching.has(socketId)) return;
+    this.peers.get(socketId)?.send({ watch: true });
+    this.changed();
+  }
+
+  /** SFU: у участника больше нет трансляции на сервере (остановил или перешёл на mesh) */
+  sfuRemoteGone(socketId) {
+    // стример перешёл на mesh, а его дорожка пришла раньше, чем закрылись consumers, — попросить её напрямую
+    const p = this.peers.get(socketId);
+    if (this.watching.has(socketId) && p?.remote.screen?.getVideoTracks().some((t) => t.readyState === 'live')) p.send({ watch: true });
+    this.changed();
+  }
+
+  /** SFU: моя трансляция через сервер оборвалась — переходим на mesh для всех */
+  sfuProduceFailed() {
+    if (!this.sfuScreen) return;
+    this.sfu.closeProducers();
+    this.sfuScreen = false;
+    const screen = this.local.screen;
+    if (screen) for (const p of this.peers.values()) if (!p.senders.screen.length) p.addStream('screen', screen);
+    this.screenViewersChanged();
+    this.changed();
+  }
+
+  /** Поток трансляции участника для плитки: напрямую (mesh) или через SFU (пустой, пока не смотрим) */
+  screenOf(socketId) {
+    const st = this.peers.get(socketId)?.remote.screen;
+    if (st && st.getVideoTracks().some((t) => t.readyState === 'live')) return st;
+    return this.sfu.screenOf(socketId);
+  }
+
+  /** Сколько собеседников смотрит мою трансляцию (напрямую + через SFU) */
   screenViewers() {
-    let n = 0;
-    for (const p of this.peers.values()) if (p.screenWatched && !p.closed) n++;
+    let n = this.sfuScreen ? this.sfu.viewers : 0;
+    for (const p of this.peers.values()) if (p.screenWatched && !p.closed && p.senders.screen.length) n++;
     return n;
   }
 
@@ -451,6 +519,7 @@ class RtcManager {
 
   removePeer(socketId) {
     this.watching.delete(socketId);
+    this.sfu.forget(socketId);
     const p = this.peers.get(socketId);
     if (!p) return;
     p.close();
@@ -463,9 +532,36 @@ class RtcManager {
     const old = this.local[kind];
     if (old && old !== stream) old.getTracks().forEach((t) => t.stop());
     this.local[kind] = stream || null;
+    if (kind === 'screen') return this.setLocalScreen(stream);
     for (const p of this.peers.values()) {
       if (stream) p.addStream(kind, stream); else p.removeStream(kind);
     }
+    this.changed();
+  }
+
+  /** Трансляция: через SFU (одна копия на сервер), при сбое — mesh (копия каждому зрителю) */
+  setLocalScreen(stream) {
+    if (this.sfuScreen) this.sfu.closeProducers();
+    this.sfuScreen = false;
+    const viaSfu = !!stream && !!this.sfu.device;
+    for (const p of this.peers.values()) {
+      if (viaSfu) {
+        p.removeStream('screen');
+        p.screenWatched = false; // зрители запросят заново (через SFU или напрямую)
+      } else if (stream) p.addStream('screen', stream);
+      else p.removeStream('screen');
+    }
+    if (viaSfu) {
+      this.sfuScreen = true;
+      this.sfu.produce(stream, this.screenParams).then((ok) => {
+        if (ok || this.local.screen !== stream || !this.sfuScreen) return;
+        this.sfuScreen = false;
+        for (const p of this.peers.values()) if (!p.senders.screen.length) p.addStream('screen', stream);
+        this.screenViewersChanged();
+        this.changed();
+      });
+    }
+    this.screenViewersChanged();
     this.changed();
   }
 
@@ -473,6 +569,7 @@ class RtcManager {
   setScreenParams(params) {
     this.screenParams = params || null;
     for (const p of this.peers.values()) p.applyEncodings();
+    if (this.sfuScreen) this.sfu.applyParams(this.screenParams);
   }
 
   /** Отладка (qa): encodings[0] всех видеосендеров демонстрации */
@@ -484,6 +581,8 @@ class RtcManager {
         try { out.push({ peer: p.id, ...(s.getParameters().encodings?.[0] || {}) }); } catch { /* ignore */ }
       }
     }
+    const s = this.sfuScreen && this.sfu.producers.video?.rtpSender;
+    if (s) try { out.push({ peer: 'sfu', ...(s.getParameters().encodings?.[0] || {}) }); } catch { /* ignore */ }
     return out;
   }
 
@@ -516,6 +615,10 @@ class RtcManager {
         const st = p.remote[kind];
         if (st && st.getAudioTracks().length) list.push({ socketId: p.id, kind, stream: st });
       }
+    }
+    // звук трансляций через SFU (если этой же трансляции нет напрямую)
+    for (const { socketId, stream } of this.sfu.liveStreams()) {
+      if (stream.getAudioTracks().length && !list.some((x) => x.socketId === socketId && x.kind === 'screen')) list.push({ socketId, kind: 'screen', stream });
     }
     audio.syncRemote(list);
   }

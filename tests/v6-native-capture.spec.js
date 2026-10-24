@@ -194,6 +194,8 @@ test.describe('v6: свой захват экрана (приложение дл
       const w = await pb.evaluate(async () => {
         let best = 0;
         for (const p of window.__sozvon.rtc.peers.values()) (await p.pc.getStats()).forEach((s) => { if (s.type === 'inbound-rtp' && s.kind === 'video') best = Math.max(best, s.frameWidth || 0); });
+        // v11: трансляция может идти через SFU
+        for (const v of (await window.__sozvon.rtc.sfu.debug()).recv?.inVideo || []) best = Math.max(best, v.width);
         return best;
       });
       expect(w).toBeGreaterThanOrEqual(1280); // было 480×300 из-за медленного старта битрейта и maintain-framerate

@@ -26,6 +26,7 @@ TURN_PORT=3478
 TURNS_PORT=5349
 RELAY_MIN_PORT=49160
 RELAY_MAX_PORT=49999
+SFU_PORT=40000            # SFU трансляций экрана (mediasoup): один порт UDP и TCP
 ACME_ROOT=/var/www/letsencrypt
 TURN_CERT_DIR=/etc/coturn/certs
 NGINX_SITE=/etc/nginx/sites-available/sozvon.conf
@@ -493,6 +494,9 @@ write_env() {
     env_set FORCE_RELAY 1
   fi
   env_set BOT_SERVER_URL "http://127.0.0.1:$APP_PORT"
+  # SFU трансляций экрана: порт (свой — не трогаем) и внешний адрес для ICE-кандидатов
+  if [ -n "$(env_get SFU_PORT)" ]; then SFU_PORT=$(env_get SFU_PORT); else env_set SFU_PORT "$SFU_PORT"; fi
+  [ -n "${PUBLIC_IP:-}" ] && env_set SFU_ANNOUNCED_IP "$PUBLIC_IP"
   env_set SOZVON_DOMAIN "$DOMAIN"
   env_set SOZVON_DOMAIN_AUTO "$DOMAIN_AUTO"
   [ -n "$OPT_EMAIL" ] && env_set SOZVON_EMAIL "$OPT_EMAIL"
@@ -748,12 +752,14 @@ setup_firewall() {
   ufw allow "$TURN_PORT/tcp" comment 'sozvon turn' >/dev/null
   ufw allow "$TURNS_PORT/tcp" comment 'sozvon turns' >/dev/null
   ufw allow "$RELAY_MIN_PORT:$RELAY_MAX_PORT/udp" comment 'sozvon turn relay' >/dev/null
+  ufw allow "$SFU_PORT/udp" comment 'sozvon sfu' >/dev/null
+  ufw allow "$SFU_PORT/tcp" comment 'sozvon sfu' >/dev/null
   if ufw status | grep -q 'Status: active'; then
     ufw reload >/dev/null
   else
     ufw --force enable >/dev/null
   fi
-  ok "Открыты: SSH, 80, 443/tcp, $TURN_PORT/udp+tcp, $TURNS_PORT/tcp, $RELAY_MIN_PORT-$RELAY_MAX_PORT/udp"
+  ok "Открыты: SSH, 80, 443/tcp, $TURN_PORT/udp+tcp, $TURNS_PORT/tcp, $RELAY_MIN_PORT-$RELAY_MAX_PORT/udp, $SFU_PORT/udp+tcp (SFU)"
   warn "Если у провайдера есть «облачный файрвол» в панели — откройте там те же порты."
 }
 
@@ -827,8 +833,8 @@ banner() {
   if [ "$DOMAIN_AUTO" = 1 ]; then
     printf '  свой домен:   sudo bash %s/deploy/install.sh --domain ваш-домен.ru\n' "$APP_DIR"
   fi
-  printf '\nЕсли сайт не открывается снаружи — откройте порты 80, 443, %s, %s и %s-%s/udp\n' \
-    "$TURN_PORT" "$TURNS_PORT" "$RELAY_MIN_PORT" "$RELAY_MAX_PORT"
+  printf '\nЕсли сайт не открывается снаружи — откройте порты 80, 443, %s, %s, %s-%s/udp и %s (udp+tcp, трансляции)\n' \
+    "$TURN_PORT" "$TURNS_PORT" "$RELAY_MIN_PORT" "$RELAY_MAX_PORT" "$SFU_PORT"
   printf 'в облачном файрволе в панели провайдера (если он там есть).\n\n'
   [ "${HEALTH_FAILED:-0}" = 0 ] || exit 1
 }

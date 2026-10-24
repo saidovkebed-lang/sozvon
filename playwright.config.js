@@ -1,6 +1,6 @@
 // Playwright config for Sozvon QA (owner: qa)
 import { defineConfig } from '@playwright/test';
-import { PORT, BASE_URL, DATA_DIR, MUSIC_PORT, MUSIC_BASE_URL } from './tests/fixtures/env.js';
+import { PORT, BASE_URL, DATA_DIR, MUSIC_PORT, MUSIC_BASE_URL, SFU_PORT } from './tests/fixtures/env.js';
 
 // Параллельные прогоны (QA_PORT≠3200) пишут артефакты в отдельный каталог, чтобы не мешать друг другу.
 const RESULTS = PORT === 3200 ? 'tests/.results' : `tests/.results/p${PORT}`;
@@ -66,7 +66,8 @@ export default defineConfig({
     stdout: 'pipe',
     stderr: 'pipe',
     // SOZVON_PUSH_ALLOW_HTTP: тестовый приёмник push на http://127.0.0.1 (в бою только https)
-    env: { PORT: String(PORT), HTTPS: '1', DATA_DIR, SOZVON_PUSH_ALLOW_HTTP: '1' },
+    // SFU трансляций: свой порт на прогон (параллельные прогоны не мешают друг другу), кандидаты на 127.0.0.1
+    env: { PORT: String(PORT), HTTPS: '1', DATA_DIR, SOZVON_PUSH_ALLOW_HTTP: '1', SFU_PORT: String(SFU_PORT), SFU_ANNOUNCED_IP: '127.0.0.1' },
   }, {
     // v2: музыкальный стенд — фейковые yt-dlp и Spotify embed (tests/start-server-music.js)
     command: 'node tests/start-server-music.js',
@@ -76,6 +77,6 @@ export default defineConfig({
     timeout: 30_000,
     stdout: 'pipe',
     stderr: 'pipe',
-    env: { PORT: String(MUSIC_PORT), HTTPS: '1' },
+    env: { PORT: String(MUSIC_PORT), HTTPS: '1', SFU: '0' },
   }],
 });

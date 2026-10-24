@@ -102,6 +102,19 @@ if [ -f "$ENV_FILE" ]; then
   fi
 fi
 
+# SFU трансляций экрана (mediasoup): порт для старых установок и правило ufw (SFU=0 — выключен, порт не нужен)
+if [ -f "$ENV_FILE" ] && [ "$(env_get SFU)" != 0 ]; then
+  if [ -z "$(env_get SFU_PORT)" ]; then
+    env_set SFU_PORT 40000
+    ok "Трансляции через сервер (SFU): порт 40000 udp+tcp — SFU_PORT в $ENV_FILE"
+  fi
+  sfu_port=$(env_get SFU_PORT)
+  if have ufw && ufw status 2>/dev/null | grep -q 'Status: active' && ! ufw status 2>/dev/null | grep -q "^$sfu_port/udp"; then
+    ufw allow "$sfu_port/udp" comment 'sozvon sfu' >/dev/null && ufw allow "$sfu_port/tcp" comment 'sozvon sfu' >/dev/null \
+      && ok "ufw: открыт порт SFU $sfu_port/udp+tcp (и в облачном файрволе провайдера, если он есть)"
+  fi
+fi
+
 # ffmpeg: аватары/баннеры (кадрирование, анимация) и часть треков yt-dlp
 if ! have ffmpeg && have apt-get; then
   printf '  … ставлю ffmpeg (аватары, баннеры, музыка)\n'

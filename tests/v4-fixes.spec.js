@@ -103,8 +103,11 @@ test.describe('v4: исправления', () => {
     await startScreenShare(pa, '720p30');
     // треки, которые A реально отправляет B для экрана (null = ничего не кодируется)
     const sending = () => pa.evaluate(() => {
-      const p = [...window.__sozvon.rtc.peers.values()][0];
-      return p.senders.screen.filter((s) => s.track && s.track.kind === 'video').length;
+      const rtc = window.__sozvon.rtc;
+      const p = [...rtc.peers.values()][0];
+      // v11: через SFU — одна копия на сервер (track = null, пока никто не смотрит)
+      const sfu = rtc.sfuScreen && rtc.sfu.producers.video?.rtpSender?.track ? 1 : 0;
+      return p.senders.screen.filter((s) => s.track && s.track.kind === 'video').length + sfu;
     });
     await expect(pb.locator('.tile--screen .tile__watch')).toBeVisible({ timeout: 20000 });
     await expect(pb.locator('.tile--screen video')).toHaveCount(0);
