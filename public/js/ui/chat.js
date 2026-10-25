@@ -100,6 +100,8 @@ function messageEl(m, prev) {
   const body = h('div', { class: 'message__body' }, meta);
   if (m.content) body.append(h('div', { class: 'message__content' }, renderMarkdown(m.content)));
   if (m.attachments?.length) body.append(h('div', { class: 'message__attachments' }, m.attachments.map(attachmentEl)));
+  // «Astra Итоги»: объявление бота — кнопка открывает итоги (ui/recap.js)
+  if (m.recap?.period) body.append(h('button', { type: 'button', class: 'btn btn--sm btn--primary recap-open-btn', dataset: { recapServer: m.recap.serverId, recapPeriod: m.recap.period } }, '📊 Открыть Итоги'));
   const mentioned = !m.system && author.id !== state.user?.id && (m.mentionEveryone || mentionsMe(m.content));
   const el = h('div', {
     class: 'message' + (grouped ? ' message--grouped' : '') + (m.system ? ' message--system' : '') + (mentioned ? ' message--mention' : ''),
