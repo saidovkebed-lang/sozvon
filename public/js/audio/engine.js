@@ -1,8 +1,14 @@
 // Звуковой движок «Astra» (docs/SPEC-v2.md §2).
-//  - вывод: каждый удалённый поток → MediaStreamSource → GainNode(userVolume×outputVolume) → шина → выход;
-//    элементы <audio class="remote-audio"> остаются (muted): Chromium не «прокачивает» удалённый
-//    WebRTC-поток в WebAudio, пока поток не привязан к медиа-элементу. Если WebAudio не работает
-//    (контекст не запущен) — звук идёт через сами элементы (громкость ≤100 %).
+//  - вывод: каждый удалённый поток играет РОВНО ОДНИМ путём:
+//      • обычно — своим элементом <audio class="remote-audio"> (громкость ≤ 100 %, setSinkId).
+//        Это «родной» путь WebRTC в Chromium: по нему эхоподавление (AEC) знает, что и в какое
+//        устройство играет, и вычитает голоса собеседников из микрофона. Раньше всё шло через
+//        WebAudio при заглушённых элементах — тогда AEC брал опорный сигнал не с того устройства
+//        (элементы оставались на «по умолчанию», а звук уходил в выбранное в настройках), эхо не
+//        вычиталось, и микрофон слушателя с колонками пересылал всем чужие голоса → «хор».
+//      • только при усилении > 100 % — через WebAudio (GainNode умеет больше 1), элемент заглушён.
+//    Параллельно каждый поток «прослушивается» в WebAudio (MediaStreamSource → GainNode, без выхода
+//    в динамики): уровень для QA и «свой звук» для фильтра звука экрана (createOwnAudioFilter).
 //  - ввод: MicChain (RNNoise / браузерное шумоподавление / гейт / рация), см. mic-chain.js.
 //  - настройки читаются только из prefs (подписка), UI вызывает лишь публичный API ниже.
 
@@ -13,6 +19,7 @@ import { MediaError, explainMediaError, ensureMediaApi } from '../voice/media.js
 import { MicChain } from './mic-chain.js';
 import { rnnoiseSupported, isRnnoiseLoaded } from './rnnoise.js';
 
+const DUCK_URL = new URL('./duck-worklet.js', import.meta.url);
 const MIC_RATE = 48000; // RNNoise рассчитан на 48 кГц (кадр 480 сэмплов = 10 мс)
 const hasCtxSink = () => typeof AudioContext !== 'undefined' && 'setSinkId' in AudioContext.prototype;
 const hasElSink = () => typeof HTMLMediaElement !== 'undefined' && 'setSinkId' in HTMLMediaElement.prototype;
@@ -33,7 +40,8 @@ class AudioEngine {
   constructor() {
     this.outCtx = null;
     this.micCtx = null;
-    this.outBus = null;          // общая шина вывода → destination | элемент с setSinkId
+    this.outBus = null;          // общая шина вывода (только усиленные > 100 % потоки) → destination | элемент с setSinkId
+    this.ownMix = null;          // всё, что «Astra» играет в динамики (без выхода) — опора фильтра звука экрана
     this.sinkEl = null;
     this.sinkDest = null;
     this.streamMuted = new Set(); // socketId: звук трансляции этого участника выключен у меня
@@ -66,6 +74,7 @@ class AudioEngine {
         this.outCtx = new AC({ latencyHint: 'interactive' });
         this.outBus = this.outCtx.createGain();
         this.outBus.connect(this.outCtx.destination);
+        this.ownMix = this.outCtx.createGain();
         this.outCtx.addEventListener?.('statechange', () => this.syncRemote());
         this.applySink();
       }
@@ -148,15 +157,14 @@ class AudioEngine {
 
   getUserGain(userId) {
     for (const r of this.remotes.values()) {
-      if (r.gain && this.userIdOf(r.socketId) === userId) return r.target;
+      if (r.kind === 'mic' && this.userIdOf(r.socketId) === userId) return r.target;
     }
     return this.computeGain(userId);
   }
 
   /**
-   * Отладка/QA: пиковая амплитуда (0..∞) звука собеседника ПОСЛЕ его GainNode — то, что реально уходит
-   * в динамики. Статистика inbound-rtp audioLevel при выводе через WebAudio всегда 0 (Chromium считает её
-   * по громкости элемента <audio>, а он заглушён), поэтому для проверок «звук идёт» — этот метод.
+   * Отладка/QA: пиковая амплитуда (0..∞) звука собеседника с учётом его громкости — то, что реально
+   * уходит в динамики (каким бы путём он ни играл). Статистика inbound-rtp audioLevel для этого не годится.
    */
   getUserLevel(userId) {
     let peak = 0;
@@ -193,20 +201,24 @@ class AudioEngine {
         const el = document.createElement('audio');
         el.className = 'remote-audio';
         el.autoplay = true;
-        el.muted = true;
+        el.muted = true; // включит updateGains — только если этот поток играет через элемент
         el.dataset.socketId = w.socketId;
         el.dataset.kind = w.kind;
         el.srcObject = w.stream;
         box?.append(el);
-        this.remotes.set(key, { el, stream: w.stream, socketId: w.socketId, kind: w.kind, src: null, gain: null, target: 1 });
+        this.remotes.set(key, { el, stream: w.stream, socketId: w.socketId, kind: w.kind, src: null, gain: null, target: 1, path: 'element', toBus: false });
+        this.applyElSink(el);
       }
     }
     for (const r of this.remotes.values()) {
-      if (this.webAudioOut && !r.src) {
+      if (this.outCtx && this.ownMix && !r.src) {
+        // «прослушка» потока в WebAudio: уровень, усиление > 100 %, опора фильтра звука экрана
         try {
           r.src = this.outCtx.createMediaStreamSource(r.stream);
           r.gain = this.outCtx.createGain();
-          r.src.connect(r.gain).connect(this.outBus);
+          r.gain.gain.value = 0;
+          r.src.connect(r.gain);
+          r.gain.connect(this.ownMix);
         } catch (e) {
           console.warn('[audio] удалённый поток мимо WebAudio', e);
           r.src = null; r.gain = null;
@@ -234,16 +246,108 @@ class AudioEngine {
         ? (this.streamMuted.has(r.socketId) ? 0 : this.computeStreamGain(uid))
         : this.computeGain(uid);
       r.target = g;
-      if (routed && r.gain) {
-        r.gain.gain.cancelScheduledValues(this.outCtx.currentTime);
-        r.gain.gain.setValueAtTime(r.gain.gain.value, this.outCtx.currentTime);
-        r.gain.gain.linearRampToValueAtTime(g, this.outCtx.currentTime + 0.03);
-        r.el.muted = true; // звук идёт через WebAudio, элемент только «держит» поток
+      // ровно один путь в динамики: элемент (≤ 100 %) или WebAudio (> 100 %, если контекст работает)
+      const viaWebAudio = routed && !!r.gain && g > 1;
+      r.path = viaWebAudio ? 'webaudio' : 'element';
+      if (r.gain) {
+        const t = this.outCtx.currentTime;
+        r.gain.gain.cancelScheduledValues(t);
+        r.gain.gain.setValueAtTime(r.gain.gain.value, t);
+        r.gain.gain.linearRampToValueAtTime(g, t + 0.03);
+        if (viaWebAudio !== r.toBus) {
+          try {
+            if (viaWebAudio) r.gain.connect(this.outBus); else r.gain.disconnect(this.outBus);
+          } catch { /* ignore */ }
+          r.toBus = viaWebAudio;
+        }
+      }
+      if (viaWebAudio) {
+        r.el.muted = true; // элемент только «держит» поток (без него Chromium не отдаёт его в WebAudio)
       } else {
-        // фолбэк: сам элемент (≤100 %)
-        r.el.volume = Math.min(1, g);
+        r.el.volume = Math.max(0, Math.min(1, g));
         r.el.muted = g === 0;
       }
+    }
+  }
+
+  /**
+   * QA: как играет каждый удалённый поток. paths — число путей, реально слышных в динамиках
+   * (элемент не заглушён и играет; GainNode подключён к шине и контекст работает). Должно быть ровно 1.
+   */
+  playbackPaths() {
+    return [...this.remotes.entries()].map(([key, r]) => {
+      const element = !r.el.muted && r.el.volume > 0 && !r.el.paused;
+      const webaudio = !!(r.toBus && this.webAudioOut);
+      return { key, kind: r.kind, path: r.path, target: r.target, element, webaudio, sinkId: r.el.sinkId ?? null, paths: (element ? 1 : 0) + (webaudio ? 1 : 0) };
+    });
+  }
+
+  /* ================= звук экрана без звука самого «Astra» ================= */
+
+  /**
+   * Приложение для ПК на Windows захватывает системный звук целиком — вместе с голосами звонка,
+   * которые «Astra» играет у стримера (Electron не умеет loopback без своего процесса, а констрейнт
+   * restrictOwnAudio он молча игнорирует). Зрители слышали каждого говорящего второй раз, с задержкой
+   * трансляции — «эхо / церковный хор». Фильтр: пока «Astra» играет звук звонка, звук экрана приглушается.
+   * → { track, stop(), ducked() } или null (WebAudio/AudioWorklet недоступны — отправляем как есть).
+   */
+  async createOwnAudioFilter(track, opts = {}) {
+    if (!track || !this.outCtx || !this.ownMix || !this.outCtx.audioWorklet || typeof AudioWorkletNode !== 'function') return null;
+    const ctx = this.outCtx;
+    // остановленный контекст выдал бы вместо звука экрана тишину — тогда лучше отправить как есть
+    if (ctx.state !== 'running') await Promise.race([ctx.resume().catch(() => {}), new Promise((r) => setTimeout(r, 300))]);
+    if (ctx.state !== 'running') return null;
+    try {
+      if (!this.duckModule) this.duckModule = ctx.audioWorklet.addModule(DUCK_URL.href).catch((e) => { this.duckModule = null; throw e; });
+      await this.duckModule;
+      const src = ctx.createMediaStreamSource(new MediaStream([track]));
+      const delay = ctx.createDelay(0.2);
+      delay.delayTime.value = 0.02; // небольшой запас: свой звук попадает в loopback чуть позже, чем мы его слышим
+      const node = new AudioWorkletNode(ctx, 'sozvon-duck', {
+        numberOfInputs: 2, numberOfOutputs: 1, outputChannelCount: [2],
+        processorOptions: { thresholdDb: opts.thresholdDb ?? -55, depth: opts.depth ?? 0.05, holdMs: opts.holdMs ?? 400 },
+      });
+      const dest = ctx.createMediaStreamDestination();
+      src.connect(delay).connect(node, 0, 0);
+      this.ownMix.connect(node, 0, 1);
+      // музыка бота (обычный <audio>) тоже попадает в системный звук — добавим её в опору, если можно
+      let musicSrc = null;
+      try {
+        const m = document.getElementById('music-audio');
+        const ms = m?.captureStream?.() || m?.mozCaptureStream?.();
+        if (ms) {
+          musicSrc = { ms, node: null };
+          const attach = () => {
+            if (musicSrc.node || !ms.getAudioTracks().length) return;
+            try { musicSrc.node = ctx.createMediaStreamSource(ms); musicSrc.node.connect(node, 0, 1); } catch { /* ignore */ }
+          };
+          attach();
+          ms.addEventListener?.('addtrack', attach);
+        }
+      } catch { /* ignore */ }
+      node.connect(dest);
+      const state = { ducked: false, refDb: -120, gain: 1 };
+      node.port.onmessage = (e) => { if (e.data?.type === 'duck') Object.assign(state, e.data); };
+      const out = dest.stream.getAudioTracks()[0];
+      const nativeStop = out.stop.bind(out);
+      let stopped = false;
+      const stop = () => {
+        if (stopped) return;
+        stopped = true;
+        for (const n of [src, delay, node, musicSrc?.node]) { try { n?.disconnect(); } catch { /* ignore */ } }
+        try { this.ownMix.disconnect(node); } catch { /* ignore */ }
+        try { node.port.postMessage('destroy'); } catch { /* ignore */ }
+        try { track.stop(); } catch { /* ignore */ }
+        nativeStop();
+      };
+      // трансляцию останавливают через track.stop() отправляемого трека — заодно освобождаем захват
+      out.stop = stop;
+      track.addEventListener('ended', stop);
+      this.duckFilters = (this.duckFilters || 0) + 1;
+      return { track: out, source: track, stop, state };
+    } catch (e) {
+      console.warn('[audio] фильтр звука экрана недоступен — звук экрана как есть', e);
+      return null;
     }
   }
 
@@ -258,7 +362,8 @@ class AudioEngine {
       try { if (el.sinkId !== sinkId) await el.setSinkId(sinkId); } catch (e) { console.warn('[audio] setSinkId', e); }
     };
     setEl(music);
-    for (const r of this.remotes.values()) if (!r.gain) setEl(r.el);
+    // все элементы — в выбранное устройство: по ним Chromium выбирает опорный сигнал эхоподавления
+    for (const r of this.remotes.values()) setEl(r.el);
     if (!this.outCtx || !this.outBus) return;
     if (hasCtxSink()) {
       try {
@@ -289,6 +394,13 @@ class AudioEngine {
     this.sinkEl.srcObject = this.sinkDest.stream;
     await setEl(this.sinkEl);
     this.sinkEl.play().catch(() => {});
+  }
+
+  applyElSink(el) {
+    if (!hasElSink()) return;
+    const id = prefs.get('audio.outputDeviceId');
+    const sinkId = !id || id === 'default' ? '' : id;
+    if (el.sinkId !== sinkId) el.setSinkId(sinkId).catch((e) => console.warn('[audio] setSinkId', e));
   }
 
   /* ================= ввод: голосовой канал ================= */
@@ -322,7 +434,7 @@ class AudioEngine {
     console.warn('[audio] RNNoise не загрузился — стандартное шумоподавление', err);
     if (this.rnnoiseWarned) return;
     this.rnnoiseWarned = true;
-    toast('ИИ-шумоподавление (RNNoise) не загрузилось — включено стандартное', '', 6000);
+    toast('Нейросетевое шумоподавление (RNNoise) не заработало — включено стандартное', '', 6000);
   }
 
   reportMicError(e) {
@@ -520,6 +632,7 @@ export const audioEngine = {
 export const audioDebug = {
   getUserGain: (userId) => engine.getUserGain(userId),
   getUserLevel: (userId) => engine.getUserLevel(userId),
+  playbackPaths: () => engine.playbackPaths(),
   getNoiseMode: () => engine.getNoiseMode(),
   isRnnoiseLoaded: () => isRnnoiseLoaded(),
   engine,

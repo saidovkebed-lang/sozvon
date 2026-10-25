@@ -102,6 +102,11 @@ export class MicChain {
 
   onPref(key) {
     if (this.stopped) return;
+    if (key === 'audio.noiseSuppression' && prefs.get(key) === 'rnnoise' && this.engine.rnnoiseDisabled) {
+      // пользователь снова выбрал нейросеть — даём ещё одну попытку (и снова предупредим, если не выйдет)
+      this.engine.rnnoiseDisabled = false;
+      this.engine.rnnoiseWarned = false;
+    }
     if (REBUILD_KEYS.has(key)) this.rebuild();
     else if (key === 'audio.inputVolume' && this.inGain) {
       const v = Math.max(0, Math.min(200, Number(prefs.get('audio.inputVolume')) || 0)) / 100;
@@ -162,6 +167,13 @@ export class MicChain {
     if (mode === 'rnnoise') {
       if (!this.ctx || !this.inGain) {
         mode = 'standard';
+      } else if (this.engine.rnnoiseDisabled) {
+        mode = 'standard'; // в этой сессии модель уже ломалась — не мучаем микрофон повторно
+      } else if (this.ctx.sampleRate !== 48000) {
+        // RNNoise обучен на 48 кГц (кадр 480 = 10 мс); браузер ресемплирует микрофон в частоту контекста,
+        // и если создать контекст на 48 кГц не дали — модель на другой частоте только испортит голос
+        this.engine.rnnoiseFailed(new Error(`AudioContext ${this.ctx.sampleRate} Гц вместо 48000`));
+        mode = 'standard';
       } else if (!rnnoiseSupported()) {
         this.engine.rnnoiseFailed(new Error('AudioWorklet/WebAssembly не поддерживаются'));
         mode = 'standard';
@@ -216,6 +228,7 @@ export class MicChain {
     }
 
     // перестроить голову графа
+    this.stopWatchdog();
     try { this.source?.disconnect(); } catch { /* ignore */ }
     if (this.rnnoise) { try { this.rnnoise.disconnect(); } catch { /* ignore */ } this.rnnoise.destroy(); }
     this.source = null;
@@ -226,6 +239,7 @@ export class MicChain {
         if (rn) {
           this.source.connect(rn).connect(this.inGain);
           this.rnnoise = rn;
+          this.startWatchdog(rn);
         } else {
           this.source.connect(this.inGain);
         }
@@ -241,6 +255,55 @@ export class MicChain {
     this.activeMode = mode;
     oldRaw?.getTracks().forEach((t) => t.stop());
     this.updateOutput();
+  }
+
+  /**
+   * Сторож RNNoise: worklet мог упасть (processorerror) или так и не загрузить модель внутри
+   * аудиопотока — тогда он молча отдаёт тишину, и собеседники вас не слышат. Если на входе звук есть,
+   * а на выходе модели — сплошные нули ~1,5 с, переключаемся на стандартное шумоподавление.
+   */
+  startWatchdog(rn) {
+    const ctx = this.ctx;
+    const fail = (why) => {
+      if (this.rnnoise !== rn || this.stopped) return;
+      this.stopWatchdog();
+      this.engine.rnnoiseDisabled = true;
+      this.engine.rnnoiseFailed(new Error(why));
+      this.rebuild();
+    };
+    rn.onprocessorerror = () => fail('ошибка в AudioWorklet RNNoise');
+    try {
+      const pre = ctx.createAnalyser();
+      const post = ctx.createAnalyser();
+      // окно ~0,7 с: короткие звуки между опросами не теряются
+      pre.fftSize = 32768; post.fftSize = 32768;
+      this.source.connect(pre);
+      rn.connect(post);
+      const a = new Float32Array(pre.fftSize);
+      const b = new Float32Array(post.fftSize);
+      let silent = 0; let checks = 0;
+      this.watch = { pre, post, timer: setInterval(() => {
+        if (ctx.state !== 'running') return;
+        pre.getFloatTimeDomainData(a);
+        post.getFloatTimeDomainData(b);
+        let inE = 0; let outMax = 0;
+        for (let i = 0; i < a.length; i++) { inE += a[i] * a[i]; outMax = Math.max(outMax, Math.abs(b[i])); }
+        const hasInput = inE / a.length > 1e-8; // > −80 дБFS
+        if (hasInput && outMax === 0) silent++; else if (hasInput) silent = 0;
+        if (silent >= 6) fail('RNNoise выдаёт тишину'); // ~1,5 с звука на входе и ни одного сэмпла на выходе
+        else if (++checks > 80 && silent === 0) this.stopWatchdog(); // ~20 с работы — модель исправна
+      }, 250) };
+    } catch (e) { console.warn('[audio] сторож RNNoise', e); }
+  }
+
+  stopWatchdog() {
+    const w = this.watch;
+    if (!w) return;
+    this.watch = null;
+    clearInterval(w.timer);
+    try { w.pre.disconnect(); w.post.disconnect(); } catch { /* ignore */ }
+    try { this.source?.disconnect(w.pre); } catch { /* ignore */ }
+    try { this.rnnoise?.disconnect(w.post); } catch { /* ignore */ }
   }
 
   /** Выбрать отправляемый трек и его enabled (mute / рация в режиме обхода). */
@@ -282,6 +345,7 @@ export class MicChain {
     this.stopped = true;
     this.unsub();
     clearInterval(this.meterTimer);
+    this.stopWatchdog();
     this.ctx?.removeEventListener?.('statechange', this.onCtxState);
     for (const n of [this.source, this.rnnoise, this.inGain, this.gate, this.gateGain, this.analyser]) {
       try { n?.disconnect(); } catch { /* ignore */ }
