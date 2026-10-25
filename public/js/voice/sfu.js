@@ -408,9 +408,10 @@ export class SfuClient {
   async debug() {
     const stat = async (t) => {
       if (!t || t.closed) return null;
-      const out = { state: t.connectionState, outVideo: [], inVideo: [] };
+      const out = { state: t.connectionState, outVideo: [], inVideo: [], inAudio: [] };
       (await t.getStats()).forEach((r) => {
         if (r.type === 'outbound-rtp' && r.kind === 'video') out.outVideo.push({ bytes: r.bytesSent || 0, frames: r.framesEncoded || 0, width: r.frameWidth || 0 });
+        if (r.type === 'inbound-rtp' && r.kind === 'audio') out.inAudio.push({ bytes: r.bytesReceived || 0 });
         if (r.type === 'inbound-rtp' && r.kind === 'video') out.inVideo.push({ bytes: r.bytesReceived || 0, frames: r.framesDecoded || 0, width: r.frameWidth || 0 });
       });
       return out;

@@ -861,6 +861,12 @@ function setupIpc() {
     if (!nativeCaptureOn()) return { ok: false, error: 'unavailable' };
     try { return await nativeCapture.start(e.sender, opts || {}); } catch (err) { return { ok: false, error: err?.message || String(err) }; }
   });
+  // звук экрана без звука самого приложения — независимо от галочки «Свой захват» (только Windows)
+  ipcMain.handle('desktop:native-audio-start', async (e) => {
+    if (!fromPage(e)) return { ok: false, error: 'forbidden' };
+    if (!(IS_WIN || process.env.SOZVON_CAPTURE_FAKE) || !nativeCapture.isAvailable()) return { ok: false, error: 'unavailable' };
+    try { return await nativeCapture.startAudio(e.sender); } catch (err) { return { ok: false, error: err?.message || String(err) }; }
+  });
   ipcMain.handle('desktop:native-capture-ctl', (e, { token, cmd, params } = {}) => (fromPage(e) ? nativeCapture.control(token, cmd, params) : { ok: false }));
   ipcMain.handle('desktop:select-source', async (e, { id, audio, audioOnly } = {}) => {
     if (!fromPage(e)) return false;

@@ -45,8 +45,8 @@ function launchHelper({ args, params, origin, log }) {
     const hc = helperCommand();
     if (!hc) { reject(new Error('помощник захвата не найден')); return; }
     const token = crypto.randomBytes(16).toString('hex');
-    const argv = [...hc.pre, ...args, '--max-width', String(params.maxWidth), '--max-height', String(params.maxHeight),
-      '--fps', String(params.fps), '--listen', '--token', token, '--origin', origin];
+    const size = params ? ['--max-width', String(params.maxWidth), '--max-height', String(params.maxHeight), '--fps', String(params.fps)] : [];
+    const argv = [...hc.pre, ...args, ...size, '--listen', '--token', token, '--origin', origin];
     const proc = spawn(hc.cmd, argv, { env: hc.env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
     let out = '';
     let done = false;
@@ -126,6 +126,29 @@ function createNativeCapture({ log = console.log } = {}) {
     }
   }
 
+  /**
+   * Звук экрана без звука самого приложения (WASAPI process loopback, Windows 11): голоса звонка, которые
+   * играет «Astra», в трансляцию не попадают — их не нужно приглушать. Исключается весь наш процесс с потомками
+   * (звук Chromium играет служебный процесс-потомок главного). {ok:false} — нет API (Windows 10) или устройства.
+   */
+  async function startAudio(wc) {
+    if (!isAvailable()) return { ok: false, error: 'unavailable' };
+    let origin;
+    try { origin = new URL(wc.getURL()).origin; } catch { return { ok: false, error: 'origin' }; }
+    const token = crypto.randomBytes(8).toString('hex');
+    const s = { token, wc, args: ['--audio-exclude-pid', String(process.pid)], origin, params: null, proc: null, paused: false, closed: false, audio: true, log: (m) => log(`[audio ${token}] ${m}`) };
+    try {
+      const { proc, url } = await launchHelper(s);
+      s.proc = proc;
+      sessions.set(token, s);
+      watch(s, proc);
+      return { ok: true, token, url };
+    } catch (e) {
+      s.log(e.message);
+      return { ok: false, error: e.message };
+    }
+  }
+
   async function control(token, cmd, params) {
     const s = sessions.get(String(token || ''));
     if (!s) return { ok: false };
@@ -134,7 +157,7 @@ function createNativeCapture({ log = console.log } = {}) {
       try { s.proc.stdin.write(`${cmd}\n`); } catch { /* ignore */ }
       return { ok: true };
     }
-    if (cmd === 'update') {
+    if (cmd === 'update' && !s.audio) {
       s.params = norm(params);
       const old = s.proc;
       try {
@@ -162,7 +185,7 @@ function createNativeCapture({ log = console.log } = {}) {
     sessions.clear();
   }
 
-  return { isAvailable, start, control, stopAll, get count() { return sessions.size; } };
+  return { isAvailable, start, startAudio, control, stopAll, get count() { return sessions.size; } };
 }
 
 module.exports = { createNativeCapture };

@@ -15,6 +15,12 @@
 //           Без --listen — в stdout. С --listen — по HTTP с 127.0.0.1 (страница читает fetch'ем, минуя
 //           главный процесс Electron): в stdout печатается "PORT n", кадры отдаются на GET /T одному
 //           клиенту (CORS — только для O); пока никто не подключился 20 с — выход с кодом 4.
+// Звук:     sozvon-capture.exe --audio-exclude-pid PID --listen --token T --origin O
+//           системный звук БЕЗ звука процесса PID и всех его потомков (WASAPI process loopback, Windows 11 /
+//           Windows 10 build 20348+): так в трансляцию не попадают голоса звонка, которые играет само приложение.
+//           Пакеты: заголовок 24 байта (u32 'SZA1', u32 sampleRate, u32 channels, u32 length, u64 timestamp µs),
+//           затем PCM s16 interleaved. Пока ничего не звучит — тишина в реальном темпе (дорожка не «засыпает»).
+//           Код выхода 4 — process loopback недоступен (старая Windows / нет устройства вывода).
 // stdin:    строки "pause" / "resume"; конец stdin — выход.
 // stderr:   журнал. Коды выхода: 0 — штатно, 2 — аргументы, 3 — окно закрыто, 4 — захват недоступен.
 
@@ -41,6 +47,9 @@
 #include <cstring>
 #include <vector>
 #include <algorithm>
+#include <mmdeviceapi.h>
+#include <audioclient.h>
+#include <audioclientactivationparams.h>
 
 #ifdef _MSC_VER
 #pragma comment(lib, "d3d11.lib")
@@ -50,6 +59,8 @@
 #pragma comment(lib, "gdi32.lib")
 #pragma comment(lib, "winmm.lib")
 #pragma comment(lib, "ws2_32.lib")
+#pragma comment(lib, "ole32.lib")
+#pragma comment(lib, "mmdevapi.lib")
 #endif
 
 // ---------------------------------------------------------------- утилиты
@@ -497,6 +508,7 @@ struct Gdi {
 
 // ---------------------------------------------------------------- main
 struct Args {
+  DWORD audioPid = 0;  // режим «звук без процесса»
   bool hasMonitor = false;
   RECT monitor = {};
   HWND hwnd = nullptr;
@@ -520,6 +532,7 @@ static bool parseArgs(int argc, char** argv, Args& a) {
     else if (!strcmp(k, "--max-height") && v) { a.maxH = atoi(v); i++; }
     else if (!strcmp(k, "--fps") && v) { a.fps = atoi(v); i++; }
     else if (!strcmp(k, "--no-cursor")) a.cursor = false;
+    else if (!strcmp(k, "--audio-exclude-pid") && v) { a.audioPid = (DWORD)strtoul(v, nullptr, 10); i++; }
     else if (!strcmp(k, "--listen")) a.listen = true;
     else if (!strcmp(k, "--token") && v) { a.token = v; i++; }
     else if (!strcmp(k, "--origin") && v) { a.origin = v; i++; }
@@ -529,8 +542,133 @@ static bool parseArgs(int argc, char** argv, Args& a) {
   a.maxH = std::min(std::max(a.maxH, 90), 2160);
   a.fps = std::min(std::max(a.fps, 1), 60);
   if (a.listen && (a.token.size() < 16 || a.origin.empty() || a.origin.find_first_of("\r\n") != std::string::npos)) return false;
-  return a.hasMonitor || a.hwnd;
+  return a.hasMonitor || a.hwnd || a.audioPid;
 }
+
+// ---------------------------------------------------------------- звук без своего процесса
+// ActivateAudioInterfaceAsync завершается колбэком в другом потоке — ждём его событием
+class ActivateHandler final : public IActivateAudioInterfaceCompletionHandler, public IAgileObject {
+  LONG ref_ = 1;
+ public:
+  HANDLE done = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+  HRESULT hr = E_FAIL;
+  IAudioClient* client = nullptr;
+  ~ActivateHandler() { if (done) CloseHandle(done); }
+  STDMETHODIMP QueryInterface(REFIID riid, void** ppv) override {
+    if (riid == __uuidof(IUnknown) || riid == __uuidof(IActivateAudioInterfaceCompletionHandler)) *ppv = static_cast<IActivateAudioInterfaceCompletionHandler*>(this);
+    else if (riid == __uuidof(IAgileObject)) *ppv = static_cast<IAgileObject*>(this);
+    else { *ppv = nullptr; return E_NOINTERFACE; }
+    AddRef();
+    return S_OK;
+  }
+  STDMETHODIMP_(ULONG) AddRef() override { return (ULONG)InterlockedIncrement(&ref_); }
+  STDMETHODIMP_(ULONG) Release() override {
+    LONG r = InterlockedDecrement(&ref_);
+    if (!r) delete this;
+    return (ULONG)r;
+  }
+  STDMETHODIMP ActivateCompleted(IActivateAudioInterfaceAsyncOperation* op) override {
+    HRESULT act = E_FAIL;
+    IUnknown* unk = nullptr;
+    HRESULT h = op->GetActivateResult(&act, &unk);
+    if (SUCCEEDED(h) && SUCCEEDED(act) && unk) {
+      h = unk->QueryInterface(__uuidof(IAudioClient), (void**)&client);
+      hr = SUCCEEDED(h) && client ? S_OK : E_NOINTERFACE;
+    } else {
+      hr = FAILED(h) ? h : act;
+    }
+    if (unk) unk->Release();
+    SetEvent(done);
+    return S_OK;
+  }
+};
+
+static const UINT32 A_RATE = 48000, A_CH = 2, A_BLOCK = A_CH * 2;
+struct AudioCap {
+  Com<IAudioClient> client;
+  Com<IAudioCaptureClient> cap;
+  HANDLE ev = nullptr;
+  ~AudioCap() { if (client) client->Stop(); if (ev) CloseHandle(ev); }
+  // 0 — готово; 4 — недоступно. Вызывается ДО открытия порта: приложение сразу узнаёт, что нужен запасной путь
+  int init(DWORD pid) {
+    const UINT32 RATE = A_RATE, CH = A_CH, BLOCK = A_BLOCK;
+    AUDIOCLIENT_ACTIVATION_PARAMS ap = {};
+    ap.ActivationType = AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK;
+    ap.ProcessLoopbackParams.TargetProcessId = pid;
+    ap.ProcessLoopbackParams.ProcessLoopbackMode = PROCESS_LOOPBACK_MODE_EXCLUDE_TARGET_PROCESS_TREE;
+    PROPVARIANT pv = {};
+    pv.vt = VT_BLOB;
+    pv.blob.cbSize = sizeof ap;
+    pv.blob.pBlobData = reinterpret_cast<BYTE*>(&ap);
+    ActivateHandler* handler = new ActivateHandler();
+    IActivateAudioInterfaceAsyncOperation* op = nullptr;
+    HRESULT hr = ActivateAudioInterfaceAsync(VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK, __uuidof(IAudioClient), &pv, handler, &op);
+    if (SUCCEEDED(hr) && WaitForSingleObject(handler->done, 5000) != WAIT_OBJECT_0) hr = HRESULT_FROM_WIN32(WAIT_TIMEOUT);
+    else if (SUCCEEDED(hr)) hr = handler->hr;
+    if (SUCCEEDED(hr)) { client.p = handler->client; handler->client = nullptr; }
+    if (op) op->Release();
+    handler->Release();
+    if (FAILED(hr) || !client) { logf("process loopback недоступен (0x%08lx)", (unsigned long)hr); return 4; }
+
+    WAVEFORMATEX wf = {};
+    wf.wFormatTag = WAVE_FORMAT_PCM;
+    wf.nChannels = (WORD)CH;
+    wf.nSamplesPerSec = RATE;
+    wf.wBitsPerSample = 16;
+    wf.nBlockAlign = (WORD)BLOCK;
+    wf.nAvgBytesPerSec = RATE * BLOCK;
+    hr = client->Initialize(AUDCLNT_SHAREMODE_SHARED,
+                            AUDCLNT_STREAMFLAGS_LOOPBACK | AUDCLNT_STREAMFLAGS_EVENTCALLBACK | AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM,
+                            200000 /* 20 мс */, 0, &wf, nullptr);
+    if (FAILED(hr)) { logf("IAudioClient::Initialize 0x%08lx", (unsigned long)hr); return 4; }
+    ev = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    if (FAILED(client->SetEventHandle(ev)) || FAILED(client->GetService(__uuidof(IAudioCaptureClient), (void**)cap.put())) || FAILED(client->Start())) {
+      logf("захват звука не запустился");
+      return 4;
+    }
+    logf("звук: системный без процесса %lu, %u Гц, %u кан.", (unsigned long)pid, RATE, CH);
+    return 0;
+  }
+
+  int loop(Sink& out) {
+    const UINT32 RATE = A_RATE, CH = A_CH, BLOCK = A_BLOCK;
+
+    const uint64_t t0 = nowUs();
+    uint64_t sent = 0;  // отправлено кадров (сэмплов на канал) — для тишины в реальном темпе
+    std::vector<uint8_t> pkt;
+    auto emit = [&](const uint8_t* pcm, UINT32 frames) -> bool {
+      uint32_t len = frames * BLOCK;
+      uint32_t hdr[6] = { 0x31415A53 /* 'SZA1' */, RATE, CH, len, 0, 0 };
+      uint64_t ts = t0 + sent * 1000000ull / RATE;
+      memcpy(&hdr[4], &ts, 8);
+      pkt.resize(sizeof hdr + len);
+      memcpy(pkt.data(), hdr, sizeof hdr);
+      if (pcm) memcpy(pkt.data() + sizeof hdr, pcm, len); else memset(pkt.data() + sizeof hdr, 0, len);
+      sent += frames;
+      return out.write(pkt.data(), pkt.size());
+    };
+    bool alive = true;
+    while (alive && !g_quit) {
+      WaitForSingleObject(ev, 10);
+      UINT32 n = 0;
+      while (alive && SUCCEEDED(cap->GetNextPacketSize(&n)) && n) {
+        BYTE* data = nullptr;
+        UINT32 frames = 0;
+        DWORD flags = 0;
+        if (FAILED(cap->GetBuffer(&data, &frames, &flags, nullptr, nullptr))) break;
+        if (!g_paused && frames) alive = emit((flags & AUDCLNT_BUFFERFLAGS_SILENT) ? nullptr : data, frames);
+        cap->ReleaseBuffer(frames);
+      }
+      // ничего не играет — Windows пакетов не шлёт; добиваем тишиной, если отстали больше чем на 30 мс
+      uint64_t due = (nowUs() - t0) * RATE / 1000000ull;
+      if (alive && due > sent + RATE * 30 / 1000) {
+        if (g_paused) sent = due;  // на паузе ничего не шлём, только двигаем часы
+        else while (alive && due > sent + RATE / 100) alive = emit(nullptr, RATE / 100);
+      }
+    }
+    return 0;
+  }
+};
 
 static void fitSize(int sw, int sh, int maxW, int maxH, int& dw, int& dh) {
   double k = std::min(1.0, std::min((double)maxW / sw, (double)maxH / sh));
@@ -548,7 +686,7 @@ static RECT monitorRect(HMONITOR m) {
 int main(int argc, char** argv) {
   Args a;
   if (!parseArgs(argc, argv, a)) {
-    fprintf(stderr, "usage: sozvon-capture (--monitor X,Y,W,H | --hwnd N) [--max-width W] [--max-height H] [--fps F] [--no-cursor] [--listen --token T --origin O]\n");
+    fprintf(stderr, "usage: sozvon-capture (--monitor X,Y,W,H | --hwnd N | --audio-exclude-pid PID) [--max-width W] [--max-height H] [--fps F] [--no-cursor] [--listen --token T --origin O]\n");
     return 2;
   }
   // физические пиксели во всех API (позиция курсора, рамка окна, координаты мониторов)
@@ -560,9 +698,19 @@ int main(int argc, char** argv) {
   CreateThread(nullptr, 0, stdinThread, nullptr, 0, nullptr);
   Sink out;
   out.h = GetStdHandle(STD_OUTPUT_HANDLE);
+  AudioCap audioCap;
+  if (a.audioPid) {
+    if (FAILED(CoInitializeEx(nullptr, COINIT_MULTITHREADED))) { logf("COM недоступен"); return 4; }
+    if (int rc = audioCap.init(a.audioPid)) return rc;
+  }
   if (a.listen) {
     out.s = acceptClient(a.token, a.origin);
     if (out.s == INVALID_SOCKET) return g_quit ? 0 : 4;
+  }
+  if (a.audioPid) {
+    int rc = audioCap.loop(out);
+    timeEndPeriod(1);
+    return rc;
   }
 
   Dda dda;

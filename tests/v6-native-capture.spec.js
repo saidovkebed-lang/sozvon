@@ -93,6 +93,7 @@ test.describe('v6: свой захват экрана (приложение дл
   test('кадры помощника доходят до зрителя; без зрителей — пауза; остановка завершает помощник', async ({ makePage }) => {
     const { app, win, errors, readLog, pb } = await setup(makePage);
     try {
+      await win.evaluate(() => import('/js/prefs.js').then((m) => m.prefs.set('stream.audio', false))); // здесь — только видео
       expect(await win.evaluate(() => window.sozvonDesktop.nativeCapture)).toBe(true);
       await startShare(win);
       await expect.poll(() => kindOfMyScreen(win), { timeout: 15000 }).toBe('MediaStreamTrackGenerator');
@@ -167,6 +168,7 @@ test.describe('v6: свой захват экрана (приложение дл
   test('по умолчанию — штатный захват Windows/Chromium: помощник не запускается, трансляция идёт', async ({ makePage }) => {
     const { app, win, readLog, pb } = await setup(makePage, {}, null);
     try {
+      await win.evaluate(() => import('/js/prefs.js').then((m) => m.prefs.set('stream.audio', false))); // здесь — только видео
       expect(await win.evaluate(() => window.sozvonDesktop.nativeCapture)).toBe(false);
       await startShare(win);
       await expect.poll(() => kindOfMyScreen(win), { timeout: 20000 }).toBe('MediaStreamTrack');
@@ -199,6 +201,51 @@ test.describe('v6: свой захват экрана (приложение дл
         return best;
       });
       expect(w).toBeGreaterThanOrEqual(1280); // было 480×300 из-за медленного старта битрейта и maintain-framerate
+    } finally {
+      await app.close().catch(() => {});
+    }
+  });
+
+  test('звук экрана без звука самого приложения: помощник исключает процесс Astra, приглушения нет, зритель слышит', async ({ makePage }) => {
+    const { app, win, readLog, pb } = await setup(makePage, {}, null);
+    try {
+      await win.evaluate(() => import('/js/prefs.js').then((m) => m.prefs.set('stream.audio', true)));
+      await startShare(win);
+      const pid = await app.evaluate(() => process.pid);
+      await expect.poll(() => win.evaluate(() => !!window.__sozvon.rtc.local.screen), { timeout: 15000 }).toBe(true);
+      await expect.poll(() => readLog(), { timeout: 10000 }).toContain(`audio-start exclude=${pid}`);
+      const info = await win.evaluate(() => {
+        const s = window.__sozvon.rtc.local.screen;
+        const a = s.getAudioTracks()[0];
+        return { excluded: !!s.ownAudioExcluded, kind: a?.constructor.name, n: s.getAudioTracks().length };
+      });
+      expect(info).toEqual({ excluded: true, kind: 'MediaStreamTrackGenerator', n: 1 });
+      await watchScreen(pb);
+      // зритель получает звук трансляции
+      await expect.poll(() => pb.evaluate(async () => {
+        let bytes = 0;
+        for (const p of window.__sozvon.rtc.peers.values()) (await p.pc.getStats()).forEach((x) => { if (x.type === 'inbound-rtp' && x.kind === 'audio') bytes += x.bytesReceived || 0; });
+        for (const a of (await window.__sozvon.rtc.sfu?.debug?.())?.recv?.inAudio || []) bytes += a.bytes; // через SFU
+        return bytes;
+      }), { timeout: 20000 }).toBeGreaterThan(5000);
+      // остановка демонстрации завершает и звук
+      await win.locator('#ctrl-screen').click();
+      await expect.poll(() => /audio-start[\s\S]*exit (stdin-end|client-closed)/.test(readLog()), { timeout: 10000 }).toBe(true);
+      expect(await win.evaluate(() => window.__sozvon.state.streaming)).toBe(false);
+    } finally {
+      await app.close().catch(() => {});
+    }
+  });
+
+  test('нет такого API (Windows 10) → звук экрана как раньше, демонстрация идёт', async ({ makePage }) => {
+    const { app, win, readLog, pb } = await setup(makePage, { SOZVON_CAPTURE_FAKE_AUDIO: 'unavailable' }, null);
+    try {
+      await win.evaluate(() => import('/js/prefs.js').then((m) => m.prefs.set('stream.audio', true)));
+      await startShare(win);
+      await expect.poll(() => readLog(), { timeout: 10000 }).toContain('audio-unavailable');
+      expect(await win.evaluate(() => !!window.__sozvon.rtc.local.screen?.ownAudioExcluded)).toBe(false);
+      await watchScreen(pb);
+      await expect.poll(() => pb.locator('.tile--screen video').evaluate((v) => v.videoWidth), { timeout: 20000 }).toBeGreaterThan(0);
     } finally {
       await app.close().catch(() => {});
     }

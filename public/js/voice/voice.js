@@ -4,6 +4,7 @@ import { emit, emitAck, socketId } from '../socket.js';
 import { rtc } from './rtc.js';
 import { getScreen, getScreenAudio, getCamera, stopStream, screenAudioNeedsOwnFilter } from './media.js';
 import { nativeCaptureSupported, startNativeCapture } from './native-capture.js';
+import { startNativeAudio } from './native-audio.js';
 import { engine as audio } from '../audio/engine.js';
 import { toast, toastError } from '../ui/toasts.js';
 import { music } from '../music.js';
@@ -26,6 +27,7 @@ function nativeParams(q) {
 }
 
 let native = null;        // сессия своего захвата экрана (native-capture.js)
+let nativeAudio = null;   // звук экрана без звука «Astra» (native-audio.js, Windows 11)
 let viewersTimer = null;
 
 // Никто не смотрит трансляцию — помощник захвата спит (не тратит процессор/видеокарту)
@@ -189,11 +191,16 @@ export async function startScreen({ quality = prefs.get('stream.quality'), audio
   try {
     const D = window.sozvonDesktop;
     let stream = null;
+    // Windows 11: системный звук без звука самого «Astra» — голоса звонка в трансляцию не попадают,
+    // приглушать звук экрана не нужно. Нет такой возможности — обычный системный звук ниже.
+    const na = withAudio && sourceId ? await startNativeAudio() : null;
+    nativeAudio = na;
+    const sysAudio = withAudio && !na;
     if (sourceId && nativeCaptureSupported()) {
       const nat = await startNativeCapture(sourceId, nativeParams(quality));
       if (nat) {
         stream = new MediaStream([nat.track]);
-        if (withAudio && D?.platform === 'win32') { // системный звук в Electron — только Windows
+        if (sysAudio && D?.platform === 'win32') { // системный звук в Electron — только Windows
           const at = await getScreenAudio(sourceId);
           if (at) stream.addTrack(at); else stream.audioFallback = true;
         }
@@ -212,15 +219,19 @@ export async function startScreen({ quality = prefs.get('stream.quality'), audio
     }
     if (!stream) {
       if (sourceId && D?.selectScreenSource) {
-        const ok = await D.selectScreenSource(sourceId, { audio: !!withAudio });
+        const ok = await D.selectScreenSource(sourceId, { audio: !!sysAudio });
         if (ok === false) { toast('Не удалось выбрать источник — попробуйте ещё раз'); return false; }
       }
-      stream = await getScreen({ video: Q.video, audio: !!withAudio });
+      stream = await getScreen({ video: Q.video, audio: !!sysAudio });
+    }
+    if (na) {
+      stream.addTrack(na.track);
+      stream.ownAudioExcluded = true;
     }
     if (!state.myVoice) { stopNative(); stopStream(stream); return false; }
     // системный звук без изоляции (приложение для ПК на Windows): в нём и голоса звонка — приглушаем их,
     // иначе зрители слышат каждого второй раз с задержкой трансляции («эхо», «хор»)
-    if (screenAudioNeedsOwnFilter(stream)) {
+    if (!stream.ownAudioExcluded && screenAudioNeedsOwnFilter(stream)) {
       const raw = stream.getAudioTracks()[0];
       const f = await audio.createOwnAudioFilter(raw);
       if (f) {
@@ -250,6 +261,8 @@ export async function startScreen({ quality = prefs.get('stream.quality'), audio
 }
 
 function stopNative() {
+  nativeAudio?.stop();
+  nativeAudio = null;
   clearTimeout(viewersTimer);
   const n = native;
   native = null;

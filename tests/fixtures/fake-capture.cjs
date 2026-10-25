@@ -4,6 +4,8 @@
 // Журнал действий — в файл SOZVON_CAPTURE_FAKE_LOG (start/pause/resume/exit). С --listen — как настоящий:
 // "PORT n" в stdout, кадры по HTTP на GET /token.
 // SOZVON_CAPTURE_FAKE_MODE: silent — не слать кадры; exit3 — через 2 с выйти с кодом 3 («окно закрыто»).
+// --audio-exclude-pid PID: режим «звук без процесса» — пакеты 'SZA1' (48 кГц, стерео, s16): синус 440 Гц.
+//   SOZVON_CAPTURE_FAKE_AUDIO=unavailable — как старая Windows: выход с кодом 4 до "PORT".
 const fs = require('node:fs');
 const http = require('node:http');
 
@@ -15,6 +17,12 @@ const fps = Number(arg('--fps', 30));
 const mode = process.env.SOZVON_CAPTURE_FAKE_MODE || '';
 const logFile = process.env.SOZVON_CAPTURE_FAKE_LOG;
 const log = (s) => { if (logFile) fs.appendFileSync(logFile, `${Date.now()} ${s}\n`); };
+const audioPid = arg('--audio-exclude-pid', null);
+if (audioPid && process.env.SOZVON_CAPTURE_FAKE_AUDIO === 'unavailable') {
+  log(`audio-unavailable ${audioPid}`);
+  process.stderr.write('[capture] process loopback недоступен (0x80070057)\n');
+  process.exit(4);
+}
 
 let w = Math.min(maxW, 1920) & ~1;
 let h = Math.min(maxH, Math.round((w * 9) / 16)) & ~1;
@@ -63,8 +71,24 @@ function makeFrame() {
   return Buffer.concat([header, frame]);
 }
 
+if (audioPid) {
+  log(`audio-start exclude=${audioPid}`);
+  const RATE = 48000; const F = 480; let t = 0;
+  const pkt = Buffer.alloc(24 + F * 4);
+  setInterval(() => {
+    if (paused || !out) return;
+    pkt.writeUInt32LE(0x31415a53, 0); pkt.writeUInt32LE(RATE, 4); pkt.writeUInt32LE(2, 8); pkt.writeUInt32LE(F * 4, 12);
+    pkt.writeBigUInt64LE(BigInt(Math.round((t / RATE) * 1e6)), 16);
+    for (let i = 0; i < F; i++, t++) {
+      const v = Math.round(Math.sin((2 * Math.PI * 440 * t) / RATE) * 12000);
+      pkt.writeInt16LE(v, 24 + i * 4); pkt.writeInt16LE(v, 26 + i * 4);
+    }
+    out.write(Buffer.from(pkt));
+  }, 10);
+}
+
 setInterval(() => {
-  if (paused || mode === 'silent' || !out) return;
+  if (audioPid || paused || mode === 'silent' || !out) return;
   if (out.writableLength > 8 * frame.length) return; // клиент не успевает — пропуск (как блокирующая запись)
   out.write(makeFrame());
 }, Math.round(1000 / fps));

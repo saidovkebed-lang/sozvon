@@ -55,6 +55,8 @@ if (allowed) {
       maxHeight: Number(opts.maxHeight) || undefined,
       fps: Number(opts.fps) || undefined,
     } : {}, { ok: false, error: 'ipc' }),
+    // звук экрана без звука самого приложения (Windows 11): {ok, token, url} или {ok:false}
+    startNativeAudio: () => invoke('desktop:native-audio-start', {}, { ok: false, error: 'ipc' }),
     nativeCaptureControl: (token, cmd, params) => invoke('desktop:native-capture-ctl', {
       token: String(token || ''), cmd: String(cmd || ''),
       params: params && typeof params === 'object' ? { maxWidth: Number(params.maxWidth) || undefined, maxHeight: Number(params.maxHeight) || undefined, fps: Number(params.fps) || undefined } : undefined,
