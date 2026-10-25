@@ -18,6 +18,8 @@ Object.assign(process.env, {
   // Web API не используем: недостижимые адреса, чтобы случайные ключи из окружения не увели в сеть
   SPOTIFY_API_BASE: 'http://127.0.0.1:9', SPOTIFY_ACCOUNTS_BASE: 'http://127.0.0.1:9',
   // «Смотреть вместе» (tests/v14-watch): маленькие лимиты, чтобы проверить отказ по размеру, LRU и уборку
+  // «Astra Итоги» (tests/v18-recap): тестовые часы статистики POST /api/__test/stats
+  SOZVON_TEST_HOOKS: '1',
   WATCH_MAX_MB: '2', WATCH_CACHE_GB: '0.001', WATCH_IDLE_SEC: '3',
 });
 delete process.env.SPOTIFY_CLIENT_ID; delete process.env.SPOTIFY_CLIENT_SECRET;

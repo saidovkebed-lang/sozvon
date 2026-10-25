@@ -164,6 +164,7 @@ export function publicMessage(m) {
   };
   if (m.system) out.system = true;
   if (m.mentionEveryone) out.mentionEveryone = true;
+  if (m.recap) out.recap = { serverId: m.recap.serverId, period: m.recap.period }; // «Astra Итоги»
   return out;
 }
 

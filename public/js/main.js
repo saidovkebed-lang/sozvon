@@ -12,6 +12,7 @@ import { initMembers } from './ui/members.js';
 import { initStage } from './ui/voice-stage.js';
 import { initMusicPlayer } from './ui/music-player.js';
 import { initWatch } from './ui/watch.js';
+import { initRecap } from './ui/recap.js';
 import { toast } from './ui/toasts.js';
 import { selectServer, selectChannel, restoreLast, revalidateSelection, reportView, initReadTracking } from './nav.js';
 import { initDms } from './ui/dms.js';
@@ -62,6 +63,7 @@ function initUi() {
   initStage();
   initMusicPlayer(sock.on);
   initWatch(sock.on);
+  initRecap(); // «Astra Итоги»
   initVoiceSocket(sock.on);
   initSounds();
   initNotifications(sock.on);

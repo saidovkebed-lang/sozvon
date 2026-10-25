@@ -21,6 +21,7 @@ import {
   livePushSubs, removePushSub, forgetMessage, dropPushSubsForSessions,
 } from './inbox.js';
 import { sendPush, pushPublicKey } from './push.js';
+import { observeStats, noteMemberJoined, startStats } from './stats.js';
 
 const serverRoom = (id) => `server:${id}`;
 const userRoom = (id) => `user:${id}`;
@@ -67,6 +68,7 @@ export function attachRealtime(io, { uploadsDir, dataDir = path.dirname(uploadsD
   // ---------- рассылки с учётом прав ----------
   /** Событие участникам сервера, которые видят канал. except — socketId отправителя. */
   function emitToViewers(channelId, event, payload, serverIdHint, { except } = {}) {
+    observeStats(channelId, event, payload, serverIdHint); // «Astra Итоги» (server/stats.js): только счётчики
     const channel = findChannel(channelId);
     const server = findServer(channel?.serverId || serverIdHint);
     if (!server) return;
@@ -141,6 +143,16 @@ export function attachRealtime(io, { uploadsDir, dataDir = path.dirname(uploadsD
     const msg = addMessage({ channelId: channel.id, authorId: bot.id, content, system: true });
     emitToViewers(channel.id, 'message:new', { message: publicMessage(msg) });
   }
+
+  // «Astra Итоги»: объявление «📊 Итоги … готовы — открыть» (системное сообщение с кнопкой)
+  startStats({
+    post(server, channel, content, recap) {
+      const msg = addMessage({ channelId: channel.id, authorId: getBotUser().id, content, system: true });
+      msg.recap = recap;
+      save();
+      emitToViewers(channel.id, 'message:new', { message: publicMessage(msg) });
+    },
+  });
 
   // ---------- уведомления: «Входящие» и push ----------
   const userSocketsOf = (userId) => [...(io.sockets.adapter.rooms.get(userRoom(userId)) || [])]
@@ -377,6 +389,7 @@ export function attachRealtime(io, { uploadsDir, dataDir = path.dirname(uploadsD
       if (!server.memberIds.includes(user.id)) {
         server.memberIds.push(user.id);
         save();
+        noteMemberJoined(server.id);
       }
       io.in(userRoom(user.id)).socketsJoin(serverRoom(server.id));
       emitServerUpdated(server);
