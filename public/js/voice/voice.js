@@ -2,7 +2,7 @@
 import { state, notify, getChannel, applyNetConfig } from '../state.js';
 import { emit, emitAck, socketId } from '../socket.js';
 import { rtc } from './rtc.js';
-import { getScreen, getScreenAudio, getCamera, stopStream } from './media.js';
+import { getScreen, getScreenAudio, getCamera, stopStream, screenAudioNeedsOwnFilter } from './media.js';
 import { nativeCaptureSupported, startNativeCapture } from './native-capture.js';
 import { engine as audio } from '../audio/engine.js';
 import { toast, toastError } from '../ui/toasts.js';
@@ -218,6 +218,17 @@ export async function startScreen({ quality = prefs.get('stream.quality'), audio
       stream = await getScreen({ video: Q.video, audio: !!withAudio });
     }
     if (!state.myVoice) { stopNative(); stopStream(stream); return false; }
+    // системный звук без изоляции (приложение для ПК на Windows): в нём и голоса звонка — приглушаем их,
+    // иначе зрители слышат каждого второй раз с задержкой трансляции («эхо», «хор»)
+    if (screenAudioNeedsOwnFilter(stream)) {
+      const raw = stream.getAudioTracks()[0];
+      const f = await audio.createOwnAudioFilter(raw);
+      if (f) {
+        stream.removeTrack(raw);
+        stream.addTrack(f.track);
+      }
+      if (!state.myVoice) { stopNative(); stopStream(stream); return false; }
+    }
     if (stream.audioFallback) toast('Звук экрана недоступен на этом компьютере — трансляция идёт без звука. Совет: показывайте отдельное окно или вкладку браузера со звуком.', '', 7000);
     const vt = stream.getVideoTracks()[0];
     if (vt) {

@@ -35,7 +35,17 @@ export const audioEngine = {
 };
 ```
 Поведение:
-- **Громкость собеседника** 0–200 % через WebAudio GainNode (не `<audio>.volume`, он ≤100 %):
+- **Вывод (v16)**: каждый удалённый поток играет РОВНО одним путём — своим `<audio class="remote-audio">`
+  (`volume` = gain при gain ≤ 1, `setSinkId` = выбранное устройство) или, только при gain > 1, через
+  WebAudio GainNode → шина (элемент muted). Причина: эхоподавление Chromium берёт опорный сигнал по
+  WebRTC-элементам (их устройство вывода); при выводе только через WebAudio и элементах на «по умолчанию»
+  эхо из колонок не вычиталось → микрофон слушателя пересылал всем чужие голоса («церковный хор»).
+  WebAudio-«прослушка» каждого потока (MediaStreamSource → GainNode без выхода) — для
+  `getUserLevel` и опоры фильтра звука экрана. QA: `window.__sozvon.audio.playbackPaths()`.
+- **Звук экрана без своего звука (v16)**: в приложении для ПК (Electron отдаёт только системный
+  `loopback`, `restrictOwnAudio` игнорирует) звук экрана проходит `engine.createOwnAudioFilter`
+  (`audio/duck-worklet.js`): пока «Astra» играет звук звонка — приглушение ≈ −26 дБ, hold 400 мс.
+- **Громкость собеседника** 0–200 % (≤ 100 % — `<audio>.volume`, выше — WebAudio GainNode):
   итог = userVolume × outputVolume. `userMuted` — локально 0. Применяется на лету по
   подписке на prefs. Касается голоса (mic). Звук демонстрации экрана — отдельная громкость не
   нужна, использовать ту же громкость пользователя. Музыка бота — `audio.musicVolume` (music.js у ui).
@@ -46,6 +56,9 @@ export const audioEngine = {
   `public/vendor/`, например `@sapphi-red/web-noise-suppressor` (MIT) или аналог; без сборщика,
   без CDN — сервер в РФ, всё отдаём сами; проверить лицензию), при этом браузерный
   noiseSuppression выключен; `standard` — браузерный noiseSuppression; `off` — ничего.
+  (v16) Контекст микрофона — 48 кГц (иначе RNNoise не включается); задержка worklet 640 сэмплов ≈ 13 мс;
+  сторож: `processorerror` или ~1,5 с нулей на выходе при звуке на входе → `standard` + тост,
+  повторная попытка — когда пользователь снова выбирает «Нейросеть».
   echoCancellation/autoGain — констрейнты getUserMedia. Смена режима/устройства на лету —
   пересобрать граф и `RTCRtpSender.replaceTrack` у всех пиров, БЕЗ перезахода в канал.
 - **Цепочка микрофона**: getUserMedia → [RNNoise] → GainNode(inputVolume) → шумовой гейт

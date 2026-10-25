@@ -56,7 +56,23 @@ function screenAudioConstraints() {
   return a;
 }
 
-export const screenAudioIsolated = () => !!navigator.mediaDevices?.getSupportedConstraints?.().restrictOwnAudio;
+// Приложение для ПК (Electron): обработчик getDisplayMedia умеет только 'loopback' — системный звук
+// ЦЕЛИКОМ, вместе со звуком самого «Astra»; restrictOwnAudio Electron принимает, но молча игнорирует
+// (Chromium-овский 'loopbackWithoutChrome' через его API не выбрать). Поэтому там звук экрана не изолирован.
+export const screenAudioIsolated = () => !window.sozvonDesktop?.isDesktop
+  && !!navigator.mediaDevices?.getSupportedConstraints?.().restrictOwnAudio;
+
+/**
+ * Нужно ли «вычищать» звук звонка из звука экрана: системный звук (не вкладка) без изоляции —
+ * приложение для ПК на Windows или старый браузер без restrictOwnAudio при захвате всего экрана.
+ */
+export function screenAudioNeedsOwnFilter(stream) {
+  if (!stream?.getAudioTracks().length) return false;
+  if (window.sozvonDesktop?.isDesktop) return true;
+  if (screenAudioIsolated()) return false;
+  const surface = stream.getVideoTracks()[0]?.getSettings?.().displaySurface;
+  return surface === 'monitor';
+}
 
 export async function getScreen({ video = { frameRate: { ideal: 30 } }, audio = true } = {}) {
   ensureApi('getDisplayMedia');
