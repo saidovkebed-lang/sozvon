@@ -32,7 +32,9 @@ export const DEFAULTS = Object.freeze({
   'appearance.fontScale': 100,       // 80..130 %
   'appearance.compact': false,       // компактные сообщения
   'appearance.reduceMotion': 'system', // 'system' | 'on' | 'off'
-  'appearance.animatedBg': true,     // «Анимированный фон» — живое звёздное небо (Astra 2.0)
+  'appearance.animatedBg': true,
+  'appearance.bgLevel': 40,          // яркость звёздного фона, 0..100 %
+  'appearance.bgBlur': true,         // мягкое размытие звёзд     // «Анимированный фон» — живое звёздное небо (Astra 2.0)
 
   // --- Уведомления ---
   'notifications.sounds': true,          // общий выключатель звуков

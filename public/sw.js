@@ -7,7 +7,7 @@
 // клик по уведомлению открывает нужный чат в уже открытом окне или в новом.
 // При изменении списка/логики — поднять VERSION: старые кэши удалятся при activate.
 
-const VERSION = 'v4-astra-2.0';
+const VERSION = 'v4-astra-2.0.1';
 const CACHE = `sozvon-shell-${VERSION}`;
 
 const SHELL = [

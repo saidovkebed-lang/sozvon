@@ -16,6 +16,10 @@
   var rm = p['appearance.reduceMotion'];
   if (rm === 'on' || rm === 'off') html.setAttribute('data-reduce-motion', rm);
   if (p['appearance.animatedBg'] === false) html.setAttribute('data-anim-bg', 'off');
+  var lvl = Number(p['appearance.bgLevel']);
+  if (!isFinite(lvl) || lvl < 0 || lvl > 100) lvl = 40;
+  html.style.setProperty('--bg-level', String(lvl / 100));
+  if (p['appearance.bgBlur'] !== false) html.setAttribute('data-bg-blur', 'on');
   var colors = { dark: '#0c0e21', light: '#f2f3f5', amoled: '#000000' };
   var meta = document.querySelector('meta[name="theme-color"]');
   if (meta) meta.setAttribute('content', colors[theme]);

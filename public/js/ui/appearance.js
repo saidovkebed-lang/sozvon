@@ -23,6 +23,11 @@ export function applyAppearance() {
   else delete html.dataset.reduceMotion;
   if (prefs.get('appearance.animatedBg') === false) html.dataset.animBg = 'off';
   else delete html.dataset.animBg;
+  let lvl = Number(prefs.get('appearance.bgLevel'));
+  if (!Number.isFinite(lvl)) lvl = 40;
+  html.style.setProperty('--bg-level', String(Math.max(0, Math.min(100, lvl)) / 100));
+  if (prefs.get('appearance.bgBlur') !== false) html.dataset.bgBlur = 'on';
+  else delete html.dataset.bgBlur;
   document.querySelector('meta[name="theme-color"]')?.setAttribute('content', THEME_COLORS[theme]);
   document.querySelector('meta[name="color-scheme"]')?.setAttribute('content', theme === 'light' ? 'light' : 'dark');
 }

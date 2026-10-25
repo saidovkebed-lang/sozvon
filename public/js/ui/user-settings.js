@@ -883,6 +883,8 @@ function buildAppearance() {
       switchRow('appearance.compact', 'Компактный режим сообщений', 'Без аватаров, больше сообщений на экране.')),
     section('Анимации',
       switchRow('appearance.animatedBg', 'Анимированный фон', 'Живое звёздное небо за интерфейсом. Само замирает, когда окно в фоне, идёт трансляция или включено уменьшение движения.'),
+      sliderField('appearance.bgLevel', 'Яркость фона', { min: 0, max: 100, step: 5, marks: [0, 40, 100] }),
+      switchRow('appearance.bgBlur', 'Размытие фона', 'Звёзды и туманность мягко размыты и не отвлекают от чата.'),
       choiceGroup('appearance.reduceMotion', 'Уменьшение движения', [
         { value: 'system', label: 'Как в системе', hint: 'Следовать настройке «уменьшить движение» вашей ОС' },
         { value: 'on', label: 'Уменьшить', hint: 'Выключить анимации и пульсацию' },

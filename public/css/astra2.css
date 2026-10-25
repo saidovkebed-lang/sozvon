@@ -16,9 +16,13 @@
   --sb-3: var(--nebula-3);
   --sb-extra: linear-gradient(transparent, transparent);
   --sb-base: var(--bg-0);
+  --bg-level: 0.4;   /* «Яркость фона» в настройках (0..1) */
 }
 body {
+  /* верхний слой приглушает туманность: чем ниже яркость фона, тем плотнее «вуаль» цвета основы */
+  --bg-veil: color-mix(in srgb, var(--sb-base) calc((1 - var(--bg-level)) * 75%), transparent);
   background:
+    linear-gradient(var(--bg-veil), var(--bg-veil)),
     var(--sb-extra),
     radial-gradient(1100px 720px at 8% -12%, var(--sb-1), transparent 62%),
     radial-gradient(900px 640px at 108% 18%, var(--sb-2), transparent 62%),
@@ -37,14 +41,17 @@ body::before {
   top: -512px; left: -512px; right: 0; bottom: 0;
   background-image: url("/assets/cosmos/stars-far.svg");
   background-size: 512px 512px;
-  opacity: calc(0.8 * var(--cosmos-opacity));
+  opacity: calc(0.8 * var(--cosmos-opacity) * var(--bg-level));
 }
 body::after {
   top: -768px; left: -768px; right: 0; bottom: 0;
   background-image: url("/assets/cosmos/stars-near.svg");
   background-size: 768px 768px;
-  opacity: var(--cosmos-opacity);
+  opacity: calc(var(--cosmos-opacity) * var(--bg-level));
 }
+/* «Размытие фона»: звёзды мягкие, не режут глаз под текстом */
+:root[data-bg-blur="on"] body::before { filter: blur(1.4px); }
+:root[data-bg-blur="on"] body::after { filter: blur(1px); }
 /* Анимация (и отдельный слой компоновщика) существует только пока фон «живой»: в паузе это обычная
    статичная картинка — ни кадров, ни текстур. При возобновлении звёзды начинают дрейф с исходной точки. */
 :root[data-cosmos="live"] body::before { animation: cosmos-drift-far 360s linear infinite; will-change: transform; }
