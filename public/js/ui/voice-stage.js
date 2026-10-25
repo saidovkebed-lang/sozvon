@@ -59,9 +59,9 @@ function fillTile(entry, d) {
   el.setAttribute('aria-label', kind === 'screen' ? `Экран: ${m.username}` : m.username);
 
   const u = { ...m, ...(findUser(m.userId) || {}), id: m.userId };
-  const avatarSig = `${u.avatar}|${u.avatarAnimated}|${u.color}`;
+  const avatarSig = `${u.avatar}|${u.avatarAnimated}|${u.color}|${u.avatarFrame || ''}`;
   const name = displayName(u);
-  const sig = [stream?.id || '', hasStream?.id || '', watching ? 1 : 0, stream?.getAudioTracks().length || 0, name, u.color, u.avatar, u.avatarAnimated, m.muted, m.deafened, m.serverMute, m.serverDeafen, kind, m.streaming, m.isBot].join('|');
+  const sig = [stream?.id || '', hasStream?.id || '', watching ? 1 : 0, stream?.getAudioTracks().length || 0, name, u.color, u.avatar, u.avatarAnimated, m.muted, m.deafened, m.serverMute, m.serverDeafen, kind, m.streaming, m.isBot, u.avatarFrame].join('|');
   if (entry.sig === sig && entry.streamRef === stream) return;
   entry.sig = sig;
 

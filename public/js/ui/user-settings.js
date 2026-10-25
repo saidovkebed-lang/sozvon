@@ -13,6 +13,7 @@ import { canNotify, requestDesktopPermission } from './notifications.js';
 import { pushSupport, pushActive, enablePush, disablePush } from '../push.js';
 import { api } from '../api.js';
 import { profileCard } from './profile.js';
+import { cosmeticsSettings, syncCosmetics } from './cosmetics.js';
 import { openCropper } from './cropper.js';
 import { renderDownloads } from '../download.js';
 
@@ -444,7 +445,7 @@ function buildAccount() {
 let draft = null;          // несохранённые текстовые поля профиля
 let profileBusy = false;
 
-const PROFILE_KEYS = ['displayName', 'pronouns', 'about', 'bannerColor', 'profileTheme'];
+const PROFILE_KEYS = ['displayName', 'pronouns', 'about', 'bannerColor', 'profileTheme', 'avatarFrame', 'bannerPreset'];
 
 function profileDraftFromUser() {
   const u = state.user || {};
@@ -454,6 +455,8 @@ function profileDraftFromUser() {
     about: u.about || '',
     bannerColor: u.bannerColor || null,
     profileTheme: u.profileTheme ? { ...u.profileTheme } : null,
+    avatarFrame: u.avatarFrame || null,
+    bannerPreset: u.bannerPreset || null,
   };
 }
 
@@ -478,6 +481,7 @@ function renderProfilePreview() {
     b.classList.toggle('is-selected', on);
     b.setAttribute('aria-checked', String(on));
   });
+  syncCosmetics(dlg(), draft);
   const themeOn = !!draft.profileTheme;
   const tsw = $('#profile-theme-on');
   if (tsw) tsw.checked = themeOn;
@@ -608,6 +612,7 @@ function buildProfile() {
         bannerInput),
       h('span', { class: 'field__label' }, 'Цвет баннера (если нет картинки)'),
       bannerSwatches),
+    section('Оформление профиля', ...cosmeticsSettings(() => draft, state.user || {}, renderProfilePreview)),
     section('О себе',
       text('profile-display-name', 'Отображаемое имя', 32, state.user?.username || '', 'displayName', 'Видно вместо имени пользователя. @имя для входа не меняется.'),
       text('profile-pronouns', 'Местоимения', 40, 'он/его, она/её…', 'pronouns'),
@@ -877,6 +882,7 @@ function buildAppearance() {
       sliderField('appearance.fontScale', 'Размер шрифта', { min: 80, max: 130, step: 5, marks: [80, 100, 130] }),
       switchRow('appearance.compact', 'Компактный режим сообщений', 'Без аватаров, больше сообщений на экране.')),
     section('Анимации',
+      switchRow('appearance.animatedBg', 'Анимированный фон', 'Живое звёздное небо за интерфейсом. Само замирает, когда окно в фоне, идёт трансляция или включено уменьшение движения.'),
       choiceGroup('appearance.reduceMotion', 'Уменьшение движения', [
         { value: 'system', label: 'Как в системе', hint: 'Следовать настройке «уменьшить движение» вашей ОС' },
         { value: 'on', label: 'Уменьшить', hint: 'Выключить анимации и пульсацию' },

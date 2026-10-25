@@ -5,6 +5,7 @@ import { db, save, newId } from './db.js';
 import {
   migrateServer, computeChannel, computeBase, has, PERMS,
 } from './permissions.js';
+import { computeBadges, publicServerTheme, cleanChoice, AVATAR_FRAMES, BANNER_PRESETS } from './cosmetics.js';
 
 export const BOT_USERNAME = 'DJ Бот';
 export const MAX_MESSAGES_PER_CHANNEL = 2000;
@@ -99,6 +100,7 @@ export function publicUser(u, { self = false } = {}) {
       id: 'deleted', username: 'Удалённый пользователь', displayName: null, color: '#747f8d', isBot: false, online: false,
       avatar: null, avatarAnimated: null, banner: null, bannerAnimated: null, bannerColor: null, about: '', pronouns: '',
       status: 'offline', customStatus: null, profileTheme: null, createdAt: null,
+      avatarFrame: null, bannerPreset: null, badges: [],
     };
   }
   const connected = isOnline(u.id);
@@ -113,6 +115,10 @@ export function publicUser(u, { self = false } = {}) {
     customStatus: activeCustomStatus(u),
     profileTheme: u.profileTheme ?? null,
     createdAt: u.createdAt ?? null,
+    // Astra 2.0: рамка аватара, анимированный баннер, автоматические значки
+    avatarFrame: cleanChoice(u.avatarFrame, AVATAR_FRAMES) || null,
+    bannerPreset: cleanChoice(u.bannerPreset, BANNER_PRESETS) || null,
+    badges: computeBadges(u),
   };
 }
 
@@ -148,6 +154,7 @@ export function publicServer(s, viewerId) {
     id: s.id, name: s.name, ownerId: s.ownerId,
     inviteCode: has(base, PERMS.CREATE_INVITE) ? s.inviteCode : null,
     icon: s.icon ?? null, banner: s.banner ?? null, description: s.description ?? '',
+    theme: publicServerTheme(s),
     channels: channels.map(publicChannel),
     members: s.memberIds.map((id) => publicUser(findUser(id), { self: id === viewerId })),
     roles: (s.roles || []).map((r) => ({ ...r })),

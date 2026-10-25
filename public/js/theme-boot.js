@@ -15,7 +15,8 @@
   if (p['appearance.compact'] === true) html.setAttribute('data-compact', 'true');
   var rm = p['appearance.reduceMotion'];
   if (rm === 'on' || rm === 'off') html.setAttribute('data-reduce-motion', rm);
-  var colors = { dark: '#12151b', light: '#f2f3f5', amoled: '#000000' };
+  if (p['appearance.animatedBg'] === false) html.setAttribute('data-anim-bg', 'off');
+  var colors = { dark: '#0c0e21', light: '#f2f3f5', amoled: '#000000' };
   var meta = document.querySelector('meta[name="theme-color"]');
   if (meta) meta.setAttribute('content', colors[theme]);
   var cs = document.querySelector('meta[name="color-scheme"]');

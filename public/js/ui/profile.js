@@ -7,6 +7,7 @@ import { openModal, closeModal } from './modals.js';
 import { toastError } from './toasts.js';
 import { capabilities, toggleMemberRole, assignableRoles, kickMember, banMember, setServerMute } from './mod-actions.js';
 import { statusDot } from './members.js';
+import { badgeRow, validPreset } from './cosmetics.js';
 
 const MONTHS = ['янв.', 'февр.', 'мар.', 'апр.', 'мая', 'июн.', 'июл.', 'авг.', 'сент.', 'окт.', 'нояб.', 'дек.'];
 const fmtSince = (ms) => { const d = new Date(ms); return `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()} г.`; };
@@ -16,7 +17,13 @@ function bannerEl(u, { animate }) {
   const stat = safeMediaUrl(u.banner);
   const anim = safeMediaUrl(u.bannerAnimated);
   const color = /^#[0-9a-f]{6}$/i.test(u.bannerColor || '') ? u.bannerColor : safeColor(u.color);
-  const el = h('div', { class: 'profile-popup__banner' + (stat || anim ? ' has-img' : ''), style: { '--banner': color } });
+  // Astra 2.0: анимированный пресет (туманность и т.п.) — если нет своей картинки
+  const preset = !stat && !anim ? validPreset(u.bannerPreset) : null;
+  const el = h('div', {
+    class: 'profile-popup__banner' + (stat || anim ? ' has-img' : '') + (preset ? ' profile-banner-preset' : ''),
+    style: { '--banner': color },
+    dataset: preset ? { preset } : null,
+  });
   if (stat || anim) {
     el.append(h('img', { src: animate && anim && !motionReduced() ? anim : (stat || anim), alt: '', draggable: 'false' }));
   }
@@ -48,6 +55,8 @@ export function profileCard(u, { server = null, preview = false, onAction = null
   const sub = h('div', { class: 'profile-popup__sub' }, h('span', { class: 'profile-popup__username' }, `@${u.username || ''}`));
   if (u.pronouns) sub.append(h('span', { class: 'profile-popup__dotsep', 'aria-hidden': 'true' }, '•'), h('span', { class: 'profile-popup__pronouns' }, u.pronouns));
   body.append(sub);
+  const badges = badgeRow(u, server || (!preview ? getServer() : null));
+  if (badges) body.append(badges);
   const cs = activeCustomStatus(u);
   if (cs) {
     body.append(h('div', { class: 'profile-popup__status' },

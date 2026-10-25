@@ -1,0 +1,697 @@
+/* ============================================================
+   Astra 2.0 — «космос»: живой фон, стекло, движение, профили 2.0, темы серверов.
+   Подключается после app.css/watch.css и переопределяет только внешний вид — разметка и
+   селекторы остаются прежними. Токены — в tokens.css. Описание системы — docs/DESIGN.md.
+   ============================================================ */
+
+/* ============================================================
+   1. Живой фон: туманность (фон body) + два слоя звёзд (body::before / body::after).
+   Анимации — только transform/opacity (их ведёт компоновщик, главный поток не занят).
+   <html data-cosmos="live"> ставит js/ui/cosmos.js; без него (и при паузе) кадр замирает.
+   ============================================================ */
+:root {
+  /* туманность фона; темы серверов подменяют эти четыре слоя */
+  --sb-1: var(--nebula-1);
+  --sb-2: var(--nebula-2);
+  --sb-3: var(--nebula-3);
+  --sb-extra: linear-gradient(transparent, transparent);
+  --sb-base: var(--bg-0);
+}
+body {
+  background:
+    var(--sb-extra),
+    radial-gradient(1100px 720px at 8% -12%, var(--sb-1), transparent 62%),
+    radial-gradient(900px 640px at 108% 18%, var(--sb-2), transparent 62%),
+    radial-gradient(1100px 760px at 62% 122%, var(--sb-3), transparent 60%),
+    var(--sb-base);
+}
+body::before,
+body::after {
+  content: "";
+  position: fixed;
+  z-index: -1;            /* под оболочкой, над фоном body */
+  pointer-events: none;
+  background-repeat: repeat;
+}
+body::before {
+  top: -512px; left: -512px; right: 0; bottom: 0;
+  background-image: url("/assets/cosmos/stars-far.svg");
+  background-size: 512px 512px;
+  opacity: calc(0.8 * var(--cosmos-opacity));
+}
+body::after {
+  top: -768px; left: -768px; right: 0; bottom: 0;
+  background-image: url("/assets/cosmos/stars-near.svg");
+  background-size: 768px 768px;
+  opacity: var(--cosmos-opacity);
+}
+/* Анимация (и отдельный слой компоновщика) существует только пока фон «живой»: в паузе это обычная
+   статичная картинка — ни кадров, ни текстур. При возобновлении звёзды начинают дрейф с исходной точки. */
+:root[data-cosmos="live"] body::before { animation: cosmos-drift-far 360s linear infinite; will-change: transform; }
+:root[data-cosmos="live"] body::after { animation: cosmos-drift-near 240s linear infinite; will-change: transform; }
+/* полноэкранные настройки закрывают небо целиком — не двигаем то, чего не видно */
+:root:has(dialog.settings[open]) body::before,
+:root:has(dialog.settings[open]) body::after { animation: none; will-change: auto; }
+/* светлая тема: звёзд нет, остаётся мягкая «утренняя» дымка */
+:root[data-theme="light"] body::before,
+:root[data-theme="light"] body::after { display: none; }
+
+@keyframes cosmos-drift-far { from { transform: translate3d(0, 0, 0); } to { transform: translate3d(512px, 512px, 0); } }
+@keyframes cosmos-drift-near { from { transform: translate3d(0, 0, 0); } to { transform: translate3d(768px, 384px, 0); } }
+
+/* ---- Космические фоны серверов (server.theme.background) ---- */
+[data-server-bg="nebula"], [data-bg="nebula"] {
+  --sb-1: rgba(150, 70, 255, 0.44);
+  --sb-2: rgba(255, 80, 190, 0.22);
+  --sb-3: rgba(80, 120, 255, 0.26);
+  --sb-extra: radial-gradient(700px 420px at 70% 40%, rgba(190, 120, 255, 0.10), transparent 70%);
+}
+[data-server-bg="aurora"], [data-bg="aurora"] {
+  --sb-1: rgba(40, 220, 160, 0.30);
+  --sb-2: rgba(60, 190, 255, 0.26);
+  --sb-3: rgba(130, 90, 255, 0.22);
+  --sb-extra: linear-gradient(168deg, transparent 8%, rgba(52, 224, 161, 0.12) 26%, rgba(63, 208, 255, 0.07) 38%, transparent 56%);
+}
+[data-server-bg="galaxy"], [data-bg="galaxy"] {
+  --sb-1: rgba(255, 190, 110, 0.20);
+  --sb-2: rgba(120, 90, 255, 0.32);
+  --sb-3: rgba(60, 140, 255, 0.24);
+  --sb-extra: radial-gradient(640px 260px at 52% 46%, rgba(255, 222, 170, 0.13), rgba(150, 110, 255, 0.07) 45%, transparent 72%);
+}
+[data-server-bg="eclipse"], [data-bg="eclipse"] {
+  --sb-1: rgba(255, 140, 60, 0.20);
+  --sb-2: rgba(255, 90, 60, 0.12);
+  --sb-3: rgba(60, 40, 130, 0.30);
+  --sb-extra: radial-gradient(circle at 86% 14%, transparent 64px, rgba(255, 200, 130, 0.42) 69px, rgba(255, 140, 60, 0.12) 92px, transparent 210px);
+}
+[data-server-bg="deep"], [data-bg="deep"] {
+  --sb-1: rgba(40, 60, 170, 0.20);
+  --sb-2: rgba(20, 40, 120, 0.14);
+  --sb-3: rgba(70, 40, 160, 0.14);
+  --sb-base: #03040c;
+}
+/* в тёмной теме на сервере с фоном оболочка чуть прозрачнее — фон заметнее */
+:root[data-theme="dark"][data-server-bg] {
+  --shell-main: rgba(15, 18, 41, 0.76);
+  --shell-side: rgba(11, 13, 32, 0.72);
+  --shell-header: rgba(15, 18, 41, 0.6);
+}
+:root[data-theme="light"] {
+  --sb-1: var(--nebula-1);
+  --sb-2: var(--nebula-2);
+  --sb-3: var(--nebula-3);
+  --sb-extra: linear-gradient(transparent, transparent);
+  --sb-base: var(--bg-0);
+}
+
+/* ---- Акцент сервера (server.theme.accent): производные токены из --accent ---- */
+:root[data-server-accent] {
+  --accent-hover: color-mix(in oklab, var(--accent) 86%, #000);
+  --accent-active: color-mix(in oklab, var(--accent) 74%, #000);
+  --accent-text: color-mix(in oklab, var(--accent) 55%, #fff);
+  --accent-soft: color-mix(in srgb, var(--accent) 16%, transparent);
+  --accent-soft-strong: color-mix(in srgb, var(--accent) 28%, transparent);
+  --accent-glow: color-mix(in srgb, var(--accent) 45%, transparent);
+  --accent-gradient: linear-gradient(135deg, color-mix(in oklab, var(--accent) 78%, #fff) 0%, color-mix(in oklab, var(--accent) 84%, #000) 100%);
+}
+:root[data-theme="light"][data-server-accent] { --accent-text: color-mix(in oklab, var(--accent) 62%, #000); }
+
+/* ============================================================
+   2. Оболочка: полупрозрачные панели поверх неба
+   ============================================================ */
+.app { background: transparent; }
+.servers { background: var(--shell-rail); border-right: 1px solid var(--border); }
+.sidebar { background: var(--shell-side); }
+.main { background: var(--shell-main); }
+.main__header {
+  background: var(--shell-header);
+  box-shadow: none;
+  border-bottom-color: var(--border);
+}
+.members { background: var(--shell-side); }
+.user-panel { background: var(--shell-panel); }
+.voice-panel { background: var(--shell-panel); }
+.sidebar__header { box-shadow: none; }
+
+/* мобильное выезжающее меню — непрозрачное, иначе под ним просвечивает чат */
+@media (max-width: 639.98px) {
+  .servers { background: var(--bg-0); }
+  .sidebar { background: var(--bg-1); }
+}
+
+/* ============================================================
+   3. Примитивы
+   ============================================================ */
+/* кольцо фокуса: контур + мягкое свечение (только у кнопок/ссылок, у полей — своё) */
+:is(button, a, [role="button"], [role="tab"], [role="radio"], summary):focus-visible {
+  outline: 2px solid var(--accent-text);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 5px var(--accent-soft);
+}
+.input:focus-visible { box-shadow: 0 0 0 3px var(--accent-soft-strong); }
+
+.btn { border-radius: var(--r-md); letter-spacing: 0.005em; }
+.btn--primary {
+  background: var(--accent-gradient);
+  color: var(--text-on-accent);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 1px 2px rgba(2, 3, 12, 0.3);
+}
+.btn--primary:hover:not(:disabled) {
+  background: var(--accent-gradient);
+  filter: brightness(1.08);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2), 0 6px 20px -6px var(--accent-glow);
+}
+.btn--primary:active:not(:disabled) { filter: brightness(0.94); transform: translateY(1px) scale(0.99); }
+.btn--ghost:hover:not(:disabled) { background: var(--hover-tint); box-shadow: inset 0 0 0 1px var(--border-strong); }
+.icon-btn:hover:not(:disabled) { background: color-mix(in srgb, var(--bg-4) 80%, transparent); }
+
+.input, select.input, textarea.input {
+  background: color-mix(in srgb, var(--bg-0) 78%, transparent);
+  border-color: var(--border-strong);
+}
+:root[data-theme="light"] .input, :root[data-theme="light"] select.input, :root[data-theme="light"] textarea.input { background: var(--bg-2); }
+
+.badge--bot { background: var(--accent-gradient); color: var(--text-on-accent); }
+.avatar { transition: box-shadow var(--dur) var(--ease), transform var(--dur-fast) var(--ease); }
+
+/* ============================================================
+   4. Вход и регистрация
+   ============================================================ */
+.auth {
+  background:
+    radial-gradient(640px 420px at 50% 36%, color-mix(in srgb, var(--accent) 22%, transparent), transparent 70%),
+    transparent;
+}
+.auth::before {
+  /* «орбита» вокруг карточки */
+  background-image: none;
+  width: min(760px, 160vw); height: min(760px, 160vw);
+  inset: auto;
+  left: 50%; top: 50%;
+  translate: -50% -50%;
+  border-radius: 50%;
+  border: 1px solid rgba(170, 180, 255, 0.09);
+  box-shadow: 0 0 0 90px rgba(170, 180, 255, 0.015), inset 0 0 120px rgba(106, 69, 255, 0.08);
+  mask-image: none;
+}
+:root[data-theme="light"] .auth::before { border-color: rgba(16, 24, 40, 0.08); box-shadow: none; }
+.auth__card {
+  background: var(--glass-sheen), var(--glass);
+  border-color: var(--border-strong);
+  border-radius: var(--r-2xl);
+  box-shadow: var(--shadow-lg), 0 0 80px -30px var(--accent-glow);
+  backdrop-filter: blur(var(--glass-blur)) saturate(1.2);
+  animation: astra-rise 520ms var(--ease-out) both;
+}
+.auth__logo {
+  width: 64px; height: 64px;
+  border-radius: 20px;
+  filter: none;
+  box-shadow: 0 0 0 6px rgba(255, 255, 255, 0.04), 0 12px 36px -8px var(--accent-glow), 0 0 60px -10px rgba(255, 233, 191, 0.35);
+  animation: astra-glow 5s ease-in-out infinite alternate;
+}
+:root[data-theme="light"] .auth__logo { box-shadow: 0 10px 28px -10px rgba(16, 24, 40, 0.35); animation: none; }
+.auth__title {
+  font-size: calc(28px * var(--font-scale));
+  letter-spacing: -0.03em;
+  background: linear-gradient(180deg, var(--text) 30%, color-mix(in srgb, var(--accent-text) 70%, var(--text)));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.auth__subtitle { margin-bottom: var(--sp-6); }
+.auth .input { min-height: 46px; }
+.auth__download {
+  background: var(--glass-sheen), var(--glass);
+  backdrop-filter: blur(12px);
+}
+@keyframes astra-rise { from { opacity: 0; transform: translateY(14px) scale(0.985); } to { opacity: 1; transform: none; } }
+@keyframes astra-glow {
+  from { box-shadow: 0 0 0 6px rgba(255, 255, 255, 0.04), 0 12px 36px -8px var(--accent-glow), 0 0 50px -14px rgba(255, 233, 191, 0.25); }
+  to { box-shadow: 0 0 0 6px rgba(255, 255, 255, 0.05), 0 12px 40px -6px var(--accent-glow), 0 0 70px -8px rgba(255, 233, 191, 0.4); }
+}
+
+/* ============================================================
+   5. Колонка серверов
+   ============================================================ */
+.servers { gap: 10px; }
+.servers__sep {
+  width: 28px; height: 1px;
+  background: linear-gradient(90deg, transparent, var(--border-strong), transparent);
+}
+.server-icon {
+  background: color-mix(in srgb, var(--bg-3) 88%, transparent);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+.server-icon:hover { background: var(--accent-gradient); color: var(--text-on-accent); transform: translateY(-1px); }
+.server-icon.is-active {
+  background: var(--accent-gradient);
+  color: var(--text-on-accent);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08) inset, 0 8px 22px -8px var(--accent-glow);
+}
+.server-icon:has(img).is-active { box-shadow: 0 0 0 2px var(--accent), 0 8px 22px -8px var(--accent-glow); }
+.servers__item::before {
+  background: linear-gradient(180deg, var(--star), var(--accent-text));
+  box-shadow: 0 0 10px var(--accent-glow);
+}
+:root[data-theme="light"] .servers__item::before { background: var(--text); box-shadow: none; }
+.servers__item--home .server-icon { box-shadow: 0 6px 18px -8px rgba(255, 255, 255, 0.35); }
+.server-icon--add { color: var(--ok); }
+.server-icon--add:hover { background: var(--ok-strong); color: #fff; }
+
+/* ============================================================
+   6. Сайдбар каналов
+   ============================================================ */
+.sidebar__title { letter-spacing: -0.01em; }
+.sidebar__invite {
+  background: linear-gradient(135deg, var(--accent-soft), transparent);
+  border: 1px solid color-mix(in srgb, var(--accent-text) 28%, transparent);
+  border-radius: var(--r-md);
+}
+.channel { transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease); }
+.channel:hover { background: var(--hover-tint); box-shadow: inset 0 0 0 1px var(--border); }
+.channel.is-active {
+  background: linear-gradient(90deg, var(--accent-soft-strong), var(--accent-soft) 60%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-text) 16%, transparent);
+}
+.channel.is-active::before {
+  content: "";
+  position: absolute;
+  left: -8px; top: 8px; bottom: 8px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--accent-text);
+  box-shadow: 0 0 8px var(--accent-glow);
+}
+:root[data-theme="light"] .channel.is-active { background: var(--accent-soft); }
+.channel-group__header { color: var(--text-faint); }
+.voice-user.is-speaking .avatar { box-shadow: 0 0 0 2px var(--bg-1), 0 0 0 4px var(--speaking), 0 0 12px 2px var(--speaking-glow); }
+.voice-panel__status { text-shadow: 0 0 12px var(--speaking-glow); }
+
+/* ============================================================
+   7. Чат
+   ============================================================ */
+.message { transition: background var(--dur-fast) var(--ease); }
+.message:last-child { animation: astra-msg-in 360ms var(--ease-out) both; }
+.message__author { letter-spacing: -0.005em; }
+.chat__empty > .icon {
+  background: var(--accent-gradient);
+  color: var(--text-on-accent);
+  box-shadow: 0 0 0 8px var(--accent-soft), 0 14px 40px -12px var(--accent-glow);
+}
+.chat__empty h3 { letter-spacing: -0.03em; }
+.composer {
+  background: color-mix(in srgb, var(--bg-3) 86%, transparent);
+  border-color: var(--border-strong);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-sm);
+}
+.composer:focus-within {
+  border-color: color-mix(in srgb, var(--accent-text) 45%, transparent);
+  box-shadow: 0 0 0 4px var(--accent-soft), 0 8px 30px -14px var(--accent-glow);
+}
+#btn-send:not(:disabled) { color: var(--accent-text); }
+#btn-send:hover:not(:disabled) { background: var(--accent-gradient); color: var(--text-on-accent); }
+.message__image { border-radius: var(--r-lg); box-shadow: var(--shadow-sm); }
+.file-card { background: color-mix(in srgb, var(--bg-3) 88%, transparent); }
+@keyframes astra-msg-in { from { opacity: 0; transform: translateY(8px) scale(0.995); } to { opacity: 1; transform: none; } }
+
+/* ============================================================
+   8. Главная и пустые состояния
+   ============================================================ */
+.home {
+  background: radial-gradient(760px 460px at 50% 8%, color-mix(in srgb, var(--accent) 18%, transparent), transparent 70%);
+}
+:root[data-theme="light"] .home { background: radial-gradient(700px 400px at 50% 0%, var(--accent-soft), transparent 70%), var(--bg-2); }
+.home__card { position: relative; animation: astra-rise 520ms var(--ease-out) both; }
+.home__logo {
+  border-radius: 28px;
+  filter: none;
+  box-shadow: 0 0 0 10px rgba(255, 255, 255, 0.03), 0 18px 50px -12px var(--accent-glow), 0 0 90px -20px rgba(255, 233, 191, 0.35);
+}
+.home__card::before {
+  /* орбита вокруг знака */
+  content: "";
+  position: absolute;
+  left: 50%; top: -32px;
+  width: 152px; height: 152px;
+  translate: -50% 0;
+  border-radius: 50%;
+  border: 1px dashed color-mix(in srgb, var(--accent-text) 30%, transparent);
+  pointer-events: none;
+  animation: astra-spin 60s linear infinite;
+}
+:root[data-theme="light"] .home__card::before { display: none; }
+.stage__join > .icon,
+.empty-state > .icon {
+  background: radial-gradient(circle at 30% 30%, var(--bg-4), var(--bg-3));
+  box-shadow: 0 0 0 1px var(--border-strong), 0 0 0 10px var(--accent-soft), 0 16px 40px -12px var(--accent-glow);
+  color: var(--accent-text);
+}
+@keyframes astra-spin { to { transform: rotate(360deg); } }
+
+/* ============================================================
+   9. Участники
+   ============================================================ */
+.member { transition: background var(--dur-fast), color var(--dur-fast), opacity var(--dur), transform var(--dur-fast) var(--ease); }
+.member:hover { background: var(--hover-tint); box-shadow: inset 0 0 0 1px var(--border); }
+.member:hover .avatar__status { border-color: var(--bg-2); }
+.member .avatar[data-frame] { margin: 2px; }
+
+/* ============================================================
+   10. Голосовая сцена
+   ============================================================ */
+.stage {
+  background: radial-gradient(1200px 640px at 50% 118%, color-mix(in srgb, var(--accent) 14%, transparent), transparent 62%);
+}
+:root[data-theme="light"] .stage { background: radial-gradient(1200px 600px at 50% 120%, var(--accent-soft), transparent 60%), var(--bg-0); }
+:root[data-theme="amoled"] .stage { background: transparent; }
+.main:has(> #voice-view:not([hidden])) { background: color-mix(in srgb, var(--shell-main) 55%, transparent); }
+:root[data-theme="light"] .main:has(> #voice-view:not([hidden])) { background: var(--bg-2); }
+.tile {
+  background:
+    radial-gradient(120% 90% at 50% 0%, rgba(255, 255, 255, 0.05), transparent 60%),
+    color-mix(in srgb, var(--bg-3) 82%, transparent);
+  border-radius: var(--r-xl);
+  box-shadow: var(--shadow-md);
+  transition: box-shadow var(--dur) var(--ease), transform var(--dur) var(--ease);
+}
+:root[data-theme="light"] .tile { background: var(--bg-3); }
+.tile::after { box-shadow: inset 0 0 0 1px var(--border-strong); }
+.tile.is-speaking {
+  box-shadow: 0 0 0 2px var(--speaking), 0 0 28px -2px var(--speaking-glow), var(--shadow-md);
+}
+.tile.is-speaking::after { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06); }
+.tile::before {
+  /* мягкое свечение говорящего: пульсирует opacity (дёшево) */
+  content: "";
+  position: absolute; inset: 0;
+  z-index: 0;
+  border-radius: inherit;
+  background: radial-gradient(60% 70% at 50% 55%, var(--speaking-glow), transparent 70%);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur-slow) var(--ease);
+}
+.tile.is-speaking:not(.tile--video)::before { opacity: 0.5; } /* без бесконечной анимации: в голосовом каждый кадр на счету */
+.tile.is-speaking > .avatar { box-shadow: 0 0 0 4px var(--bg-3), 0 0 0 7px var(--speaking), 0 0 30px 6px var(--speaking-glow); }
+.tile:hover { transform: translateY(-1px); }
+.tile--focused:hover, .tile--screen:hover, .tile--video:hover { transform: none; }
+.tile__label { background: rgba(5, 6, 18, 0.66); backdrop-filter: blur(6px); border-radius: var(--r-pill); padding: 0 10px; }
+.stage__controls {
+  align-self: center;
+  margin: 0 auto var(--sp-4);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-pill);
+  background: var(--glass-sheen), color-mix(in srgb, var(--bg-elevated) 82%, transparent);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-lg);
+}
+:root[data-theme="light"] .stage__controls { background: var(--bg-elevated); }
+.ctrl { box-shadow: inset 0 0 0 1px var(--border); }
+#ctrl-camera.is-on, #ctrl-screen.is-on { background: var(--accent-gradient); color: var(--text-on-accent); box-shadow: 0 6px 18px -6px var(--accent-glow); }
+
+/* ============================================================
+   11. Музыкальный плеер
+   ============================================================ */
+.music-player {
+  background:
+    radial-gradient(140% 90% at 0% 0%, color-mix(in srgb, var(--accent) 24%, transparent), transparent 60%),
+    var(--glass-sheen),
+    color-mix(in srgb, var(--bg-elevated) 92%, transparent);
+  border-radius: var(--r-xl);
+  box-shadow: var(--shadow-lg), 0 0 60px -30px var(--accent-glow);
+  backdrop-filter: blur(var(--glass-blur));
+}
+.music-player__art { border-radius: var(--r-lg); color: var(--text-on-accent); }
+.progress__bar { background: linear-gradient(90deg, var(--accent), var(--accent-text), var(--star)); box-shadow: 0 0 10px var(--accent-glow); }
+
+/* ============================================================
+   12. Модалки, поповеры, тосты
+   ============================================================ */
+.modal {
+  background: var(--glass-sheen), var(--bg-elevated);
+  border-color: var(--border-strong);
+  border-radius: var(--r-xl);
+  box-shadow: var(--shadow-lg), 0 0 0 1px rgba(255, 255, 255, 0.02);
+}
+.modal[open] { animation: astra-modal-in 320ms var(--ease-out) both; }
+.modal::backdrop { background: var(--bg-overlay); backdrop-filter: none; } /* без размытия: под ним может двигаться небо */
+.modal.settings { background: var(--bg-2); }
+.modal.settings[open] { animation: settings-in var(--dur-slow) var(--ease-out) both; }
+.toast {
+  background: var(--glass-sheen), color-mix(in srgb, var(--bg-elevated) 94%, transparent);
+  backdrop-filter: blur(12px);
+  border-radius: var(--r-lg);
+}
+.toast::before { background: var(--accent-gradient); }
+.profile-popup { box-shadow: var(--shadow-lg), 0 0 60px -30px var(--accent-glow); }
+@keyframes astra-modal-in {
+  from { opacity: 0; transform: translateY(10px) scale(0.97); }
+  60% { opacity: 1; }
+  to { opacity: 1; transform: none; }
+}
+
+/* ============================================================
+   13. Настройки
+   ============================================================ */
+.settings__tab { transition: background var(--dur-fast), color var(--dur-fast), box-shadow var(--dur-fast); }
+.settings__tab:hover { background: var(--hover-tint); }
+.settings__tab.is-active {
+  background: linear-gradient(90deg, var(--accent-soft-strong), var(--accent-soft));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-text) 18%, transparent);
+}
+:root[data-theme="light"] .settings__tab.is-active { background: var(--accent-soft); }
+.theme-card { border-radius: var(--r-lg); }
+.theme-card--dark .theme-card__preview {
+  --p0: #070817; --p1: #0c0e21; --p2: #10132a; --pl: #2a305e; --pt: #8086b0;
+  background: url("/assets/cosmos/stars-far.svg") 0 0 / 160px 160px, radial-gradient(120px 70px at 80% 0%, rgba(106, 69, 255, 0.35), transparent 70%), var(--p2);
+}
+.switch:checked { background: var(--accent-gradient); }
+
+/* ============================================================
+   14. Профили 2.0: рамки аватаров, анимированные баннеры, значки
+   ============================================================ */
+.avatar[data-frame]::after {
+  content: "";
+  position: absolute;
+  inset: calc(var(--size) * -0.1);
+  z-index: 1;
+  border-radius: 50%;
+  background: center / 100% 100% no-repeat;
+  pointer-events: none;
+}
+.avatar__status { z-index: 2; }
+.avatar[data-frame="orbit"]::after { background-image: url("/assets/frames/orbit.svg"); }
+.avatar[data-frame="nova"]::after { background-image: url("/assets/frames/nova.svg"); }
+.avatar[data-frame="comet"]::after { background-image: url("/assets/frames/comet.svg"); }
+.avatar[data-frame="aurora"]::after { background-image: url("/assets/frames/aurora.svg"); }
+.avatar[data-frame="eclipse"]::after { background-image: url("/assets/frames/eclipse.svg"); }
+.avatar[data-frame="constellation"]::after { background-image: url("/assets/frames/constellation.svg"); }
+/* в карточке профиля рамки «живые» (вращаются медленно) */
+.profile-popup__avatar[data-frame="orbit"]::after,
+.profile-popup__avatar[data-frame="comet"]::after { animation: astra-spin 14s linear infinite; }
+.profile-popup__avatar[data-frame="aurora"]::after,
+.profile-popup__avatar[data-frame="constellation"]::after { animation: astra-spin 40s linear infinite; }
+.profile-popup__avatar[data-frame="nova"]::after { animation: astra-pulse 2.8s ease-in-out infinite alternate; }
+.profile-popup__avatar[data-frame] { box-shadow: 0 0 0 6px var(--pp-bg), 0 10px 30px -10px rgba(2, 3, 12, 0.6); }
+@keyframes astra-pulse { from { transform: scale(1); opacity: 0.85; } to { transform: scale(1.035); opacity: 1; } }
+
+/* анимированные пресеты баннера (туманность и т.п.) */
+.profile-banner-preset {
+  --bp-base: #0d1030;
+  --bp-a: rgba(130, 80, 255, 0.85);
+  --bp-b: rgba(255, 90, 200, 0.6);
+  --bp-c: rgba(60, 170, 255, 0.55);
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  background: var(--bp-base);
+}
+.profile-banner-preset::before {
+  content: "";
+  position: absolute;
+  inset: -40%;
+  z-index: -1;
+  background:
+    radial-gradient(38% 46% at 26% 42%, var(--bp-a), transparent 70%),
+    radial-gradient(34% 40% at 72% 30%, var(--bp-b), transparent 70%),
+    radial-gradient(40% 44% at 60% 76%, var(--bp-c), transparent 72%);
+  animation: astra-nebula 22s ease-in-out infinite alternate;
+}
+.profile-banner-preset::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: url("/assets/cosmos/stars-far.svg") 0 0 / 256px 256px;
+  opacity: 0.9;
+}
+.profile-banner-preset[data-preset="aurora"] { --bp-base: #04131f; --bp-a: rgba(52, 224, 161, 0.75); --bp-b: rgba(63, 208, 255, 0.6); --bp-c: rgba(139, 107, 255, 0.55); }
+.profile-banner-preset[data-preset="galaxy"] { --bp-base: #0a0820; --bp-a: rgba(255, 214, 150, 0.55); --bp-b: rgba(130, 90, 255, 0.75); --bp-c: rgba(70, 120, 255, 0.55); }
+.profile-banner-preset[data-preset="sunrise"] { --bp-base: #1b0c26; --bp-a: rgba(255, 150, 80, 0.8); --bp-b: rgba(255, 90, 140, 0.65); --bp-c: rgba(255, 210, 120, 0.5); }
+.profile-banner-preset[data-preset="deep"] { --bp-base: #03040c; --bp-a: rgba(40, 70, 190, 0.6); --bp-b: rgba(80, 50, 170, 0.45); --bp-c: rgba(30, 100, 160, 0.35); }
+@keyframes astra-nebula {
+  from { transform: translate3d(-4%, -2%, 0) rotate(0deg) scale(1); }
+  to { transform: translate3d(4%, 3%, 0) rotate(8deg) scale(1.08); }
+}
+
+/* значки */
+.astra-badges { display: flex; flex-wrap: wrap; gap: 4px; margin-top: var(--sp-2); }
+.astra-badge {
+  --b: var(--accent-text);
+  display: inline-flex; align-items: center; gap: 5px;
+  height: 24px;
+  padding: 0 9px 0 7px;
+  border-radius: var(--r-pill);
+  background: color-mix(in srgb, var(--b) 13%, transparent);
+  border: 1px solid color-mix(in srgb, var(--b) 30%, transparent);
+  color: var(--b);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  line-height: 1;
+  white-space: nowrap;
+}
+.astra-badge .icon { width: 14px; height: 14px; }
+.astra-badge--founder { --b: #ffc85a; }
+.astra-badge--veteran { --b: #b9a9ff; }
+.astra-badge--melomane { --b: #4fe3b0; }
+.astra-badge--streamer { --b: #ff7a8a; }
+.astra-badge--bot { --b: var(--accent-text); }
+:root[data-theme="light"] .astra-badge--founder { --b: #8f5600; }
+:root[data-theme="light"] .astra-badge--veteran { --b: #4a26d6; }
+:root[data-theme="light"] .astra-badge--melomane { --b: #13733f; }
+:root[data-theme="light"] .astra-badge--streamer { --b: #c42b3a; }
+
+/* выбор рамки / баннера / фона (настройки профиля и сервера) */
+.cosmo-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: var(--sp-2);
+}
+.cosmo-grid--banners { grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); }
+.cosmo-pick {
+  position: relative;
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  min-width: 0;
+  padding: 14px 8px 10px;
+  border-radius: var(--r-lg);
+  background: color-mix(in srgb, var(--bg-3) 90%, transparent);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  transition: background var(--dur-fast), border-color var(--dur-fast), transform var(--dur-fast) var(--ease), box-shadow var(--dur-fast);
+}
+.cosmo-pick:hover:not(:disabled) { background: var(--bg-4); color: var(--text); transform: translateY(-1px); }
+.cosmo-pick:active:not(:disabled) { transform: scale(0.98); }
+.cosmo-pick:disabled { opacity: 0.55; }
+.cosmo-pick.is-selected {
+  border-color: var(--accent);
+  color: var(--text);
+  box-shadow: 0 0 0 3px var(--accent-soft), 0 10px 26px -14px var(--accent-glow);
+}
+.cosmo-pick .avatar { --size: 48px; font-size: 19px; }
+.cosmo-pick__label { max-width: 100%; font-size: var(--fs-xs); font-weight: var(--fw-semibold); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cosmo-pick--banner { padding: 8px 8px 10px; }
+.cosmo-pick__swatch {
+  display: block;
+  width: 100%; height: 46px;
+  border-radius: var(--r-md);
+  background: var(--bg-0);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+.cosmo-pick .profile-banner-preset::before { animation: none; }
+.cosmo-pick__swatch--none {
+  background: repeating-linear-gradient(135deg, transparent 0 8px, var(--hover-tint) 8px 16px), var(--bg-0);
+}
+.server-bg-swatch {
+  background:
+    var(--sb-extra),
+    radial-gradient(90% 120% at 10% 0%, var(--sb-1), transparent 70%),
+    radial-gradient(80% 100% at 100% 30%, var(--sb-2), transparent 70%),
+    radial-gradient(90% 120% at 60% 120%, var(--sb-3), transparent 70%),
+    url("/assets/cosmos/stars-far.svg") 0 0 / 200px 200px,
+    var(--sb-base);
+}
+
+/* предпросмотр темы сервера */
+.ss-theme-preview {
+  --pv-accent: var(--accent);
+  --pv-on-accent: var(--text-on-accent);
+  position: relative;
+  height: 132px;
+  border-radius: var(--r-lg);
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+}
+.ss-theme-preview__sky {
+  position: absolute; inset: 0;
+  background:
+    var(--sb-extra),
+    radial-gradient(70% 110% at 10% 0%, var(--sb-1), transparent 70%),
+    radial-gradient(60% 100% at 100% 20%, var(--sb-2), transparent 70%),
+    radial-gradient(70% 110% at 60% 120%, var(--sb-3), transparent 70%),
+    url("/assets/cosmos/stars-far.svg") 0 0 / 256px 256px,
+    var(--sb-base);
+}
+:root[data-theme="light"] .ss-theme-preview__sky { --sb-base: #0c0e21; }
+.ss-theme-preview__ui {
+  position: absolute; left: 16px; bottom: 16px; right: 16px;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+}
+.ss-theme-preview__chan {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 30px; padding: 0 12px;
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--pv-accent) 26%, rgba(10, 12, 30, 0.7));
+  color: #fff;
+  font-size: var(--fs-sm); font-weight: var(--fw-semibold);
+}
+.ss-theme-preview__btn {
+  display: inline-flex; align-items: center;
+  height: 30px; padding: 0 14px;
+  border-radius: var(--r-md);
+  background: var(--pv-accent);
+  color: var(--pv-on-accent);
+  font-size: var(--fs-sm); font-weight: var(--fw-semibold);
+  box-shadow: 0 6px 18px -6px color-mix(in srgb, var(--pv-accent) 60%, transparent);
+}
+.ss-theme-preview__link { color: color-mix(in oklab, var(--pv-accent) 55%, #fff); font-size: var(--fs-sm); text-decoration: underline; }
+.swatch--custom.is-selected { background: var(--c, transparent); box-shadow: 0 0 0 2px var(--bg-2), 0 0 0 4px var(--text); }
+
+/* ============================================================
+   15. Уменьшение движения: живые части фона и декоративные циклы — стоп
+   ============================================================ */
+:root[data-reduce-motion="on"] body::before,
+:root[data-reduce-motion="on"] body::after,
+:root[data-anim-bg="off"] body::before,
+:root[data-anim-bg="off"] body::after { animation: none; }
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-reduce-motion="off"]) body::before,
+  :root:not([data-reduce-motion="off"]) body::after,
+  :root:not([data-reduce-motion="off"]) .home__card::before,
+  :root:not([data-reduce-motion="off"]) .auth__logo,
+  :root:not([data-reduce-motion="off"]) .profile-banner-preset::before,
+  :root:not([data-reduce-motion="off"]) .avatar[data-frame]::after,
+  :root:not([data-reduce-motion="off"]) .tile::before { animation: none !important; }
+  :root:not([data-reduce-motion="off"]) .tile:hover { transform: none; }
+}
+:root[data-reduce-motion="on"] .home__card::before,
+:root[data-reduce-motion="on"] .auth__logo,
+:root[data-reduce-motion="on"] .profile-banner-preset::before,
+:root[data-reduce-motion="on"] .avatar[data-frame]::after,
+:root[data-reduce-motion="on"] .tile::before { animation: none !important; }
+:root[data-reduce-motion="on"] .tile:hover,
+:root[data-reduce-motion="on"] .server-icon:hover,
+:root[data-reduce-motion="on"] .cosmo-pick:hover { transform: none; }
+
+/* ============================================================
+   16. Мобильная раскладка (≤ 639 px): ничего не шире экрана
+   ============================================================ */
+@media (max-width: 639.98px) {
+  .auth::before { width: 140vw; height: 140vw; }
+  .home__card::before { width: 128px; height: 128px; top: -20px; }
+  .stage__controls { margin-bottom: var(--sp-2); padding: 6px var(--sp-2); max-width: calc(100% - 16px); }
+  .cosmo-grid { grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); }
+  .cosmo-grid--banners { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .channel.is-active::before { left: -6px; }
+}

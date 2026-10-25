@@ -16,6 +16,7 @@ import { Limiter, exempt, waitText } from './rate-limit.js';
 import { syncLibrary, hasYtDlp, addUploadedFile, MUSIC_MAX_BYTES, fixMulterName, sanitizeFileName, getMusicDir, findTrackRec, deleteTrack } from './music-library.js';
 import { importFromUrl, resolveInput, fetchPending, similarTracks } from './music-sources.js';
 import { createPlaylistRouter } from './music-playlists.js';
+import { tracksAddedBy, BADGE_RULES } from './cosmetics.js';
 
 const limitMb = Number(process.env.UPLOAD_LIMIT_MB);
 export const ATTACHMENT_LIMIT_MB = Number.isFinite(limitMb) && limitMb > 0 ? limitMb : 100;
@@ -278,13 +279,21 @@ export function createApiRouter({
     res.json({ ok: true, track });
   }));
 
+  // значок «Меломан»: как только добавивший набрал порог треков — разослать обновлённый профиль
+  const melomaneCheck = (username) => {
+    const u = username ? findUserByName(username) : null;
+    if (u && !u.isBot && tracksAddedBy(u.username) === BADGE_RULES.melomaneTracks) onUserUpdated(u);
+  };
+
   router.post('/music/upload', requireAuth, musicUpload.single('file'), wrap(async (req, res) => {
     const track = await addUploadedFile(req.file, req.user.username);
+    melomaneCheck(req.user.username);
     res.json({ track });
   }));
 
   router.post('/music/import', requireAuth, wrap(async (req, res) => {
     const track = await importFromUrl(req.body?.url, addedByOf(req));
+    melomaneCheck(addedByOf(req));
     res.json({ track });
   }));
 
