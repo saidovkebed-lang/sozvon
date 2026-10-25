@@ -1,46 +1,46 @@
-/* Astra — дизайн-токены */
+/* Astra — дизайн-токены (Astra 2.0: тёмная тема «Космос» — глубокий синий с фиолетовым, звёздные акценты) */
 :root {
   color-scheme: dark;
 
-  /* ---- Фоны: графит с холодным оттенком (от глубокого к поднятому) ---- */
-  --bg-0: #0b0d11;      /* колонка серверов, подложка */
-  --bg-1: #12151b;      /* сайдбар, участники */
-  --bg-2: #171a21;      /* основная область */
-  --bg-3: #1e222b;      /* поля, карточки, тайлы */
-  --bg-4: #262b35;      /* hover */
-  --bg-5: #2f3542;      /* active / pressed */
-  --bg-elevated: #1b1f27; /* модалки, плеер, поповеры */
-  --bg-overlay: rgba(5, 6, 9, 0.66);
+  /* ---- Фоны: ночное небо (от глубокого к поднятому) ---- */
+  --bg-0: #070817;      /* колонка серверов, подложка, «космос» */
+  --bg-1: #0c0e21;      /* сайдбар, участники */
+  --bg-2: #10132a;      /* основная область */
+  --bg-3: #171b38;      /* поля, карточки, тайлы */
+  --bg-4: #20254b;      /* hover */
+  --bg-5: #2a305e;      /* active / pressed */
+  --bg-elevated: #131733; /* модалки, плеер, поповеры */
+  --bg-overlay: rgba(3, 4, 14, 0.62);
 
-  --user-panel-bg: #0f1217;
-  --hover-tint: rgba(255, 255, 255, 0.025);  /* подсветка строки сообщения */
-  --footer-tint: rgba(0, 0, 0, 0.18);        /* подвал модалки */
-  --glass: rgba(27, 31, 39, 0.86);           /* карточка входа */
-  --glass-2: rgba(23, 26, 33, 0.88);         /* drag&drop */
-  --scroll-thumb-hover: #3d4453;
+  --user-panel-bg: #0a0c1d;
+  --hover-tint: rgba(170, 180, 255, 0.035);  /* подсветка строки сообщения */
+  --footer-tint: rgba(3, 4, 14, 0.28);       /* подвал модалки */
+  --glass: rgba(19, 23, 51, 0.78);           /* карточка входа */
+  --glass-2: rgba(16, 19, 42, 0.86);         /* drag&drop */
+  --scroll-thumb-hover: #3c4378;
   --track: rgba(255, 255, 255, 0.14);        /* дорожка слайдеров/прогресса */
   --thumb: #ffffff;
   --inverse: #ffffff;                         /* «инверсные» кнопки (ctrl.is-on, ▶) */
   --inverse-hover: #e6e8ee;
   --on-inverse: #11131a;
 
-  --border: rgba(255, 255, 255, 0.06);
-  --border-strong: rgba(255, 255, 255, 0.11);
+  --border: rgba(170, 180, 255, 0.075);
+  --border-strong: rgba(170, 180, 255, 0.14);
 
-  /* ---- Текст ---- */
-  --text: #e7e9ef;
-  --text-muted: #a2a8b6;
-  --text-faint: #6e7585;
+  /* ---- Текст (faint на bg-2 ≥ 4.5:1) ---- */
+  --text: #eceefb;
+  --text-muted: #a9aed0;
+  --text-faint: #8086b0;
   --text-on-accent: #ffffff;
-  --text-message: #dcdfe6;
-  --input-hover-border: rgba(255, 255, 255, 0.18);
+  --text-message: #dde0f2;
+  --input-hover-border: rgba(170, 180, 255, 0.26);
 
   /* ---- Фирменный акцент: электрик-фиолетовый ----
      #6a45ff + белый текст = 5.4:1 (AA) */
   --accent: #6a45ff;
   --accent-hover: #5c37f2;
   --accent-active: #4f2bdc;
-  --accent-text: #b4a4ff;            /* акцент как текст на тёмном фоне (8:1) */
+  --accent-text: #b9a9ff;            /* акцент как текст на тёмном фоне (8:1) */
   --accent-soft: rgba(106, 69, 255, 0.16);
   --accent-soft-strong: rgba(106, 69, 255, 0.28);
   --accent-glow: rgba(106, 69, 255, 0.45);
@@ -59,6 +59,22 @@
   --warn: #f5b14c;
   --offline: #5d6474;
   --live: #e8384a;
+
+  /* ---- Космос (Astra 2.0) ---- */
+  --star: #ffe9bf;                 /* тёплая звезда: значки, «игла» */
+  --star-cool: #bcd2ff;            /* холодная звезда */
+  --nebula-1: rgba(106, 69, 255, 0.30);   /* фиолетовая туманность */
+  --nebula-2: rgba(47, 160, 255, 0.16);   /* голубая */
+  --nebula-3: rgba(214, 72, 200, 0.13);   /* пурпурная */
+  --cosmos-opacity: 1;             /* яркость звёзд */
+  /* Оболочка полупрозрачна — за ней видно звёздное небо (body::before/after в astra2.css) */
+  --shell-rail: rgba(7, 8, 23, 0.62);
+  --shell-side: rgba(11, 13, 32, 0.80);
+  --shell-main: rgba(15, 18, 41, 0.86);
+  --shell-header: rgba(15, 18, 41, 0.72);
+  --shell-panel: rgba(10, 12, 29, 0.86);   /* панель пользователя/голоса */
+  --glass-blur: 18px;
+  --glass-sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0) 40%);
 
   /* ---- Типографика ---- */
   --font: "Inter", "Inter var", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
@@ -91,17 +107,17 @@
   /* ---- Радиусы ---- */
   --r-xs: 4px;
   --r-sm: 6px;
-  --r-md: 8px;
-  --r-lg: 12px;
-  --r-xl: 16px;
-  --r-2xl: 20px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --r-xl: 18px;
+  --r-2xl: 24px;
   --r-pill: 999px;
   --r-squircle: 16px; /* server-icon в hover/active */
 
-  /* ---- Тени ---- */
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
-  --shadow-md: 0 6px 18px rgba(0, 0, 0, 0.35), 0 1px 3px rgba(0, 0, 0, 0.3);
-  --shadow-lg: 0 18px 48px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.35);
+  /* ---- Тени (подкрашены в синий ночного неба) ---- */
+  --shadow-sm: 0 1px 2px rgba(2, 3, 12, 0.45);
+  --shadow-md: 0 8px 22px rgba(2, 3, 12, 0.45), 0 1px 3px rgba(2, 3, 12, 0.35);
+  --shadow-lg: 0 24px 60px rgba(2, 3, 12, 0.6), 0 2px 10px rgba(2, 3, 12, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.04);
   --ring-focus: 0 0 0 2px var(--bg-2), 0 0 0 4px var(--accent-text);
 
   /* ---- Размеры раскладки ---- */
@@ -124,6 +140,7 @@
   --dur-fast: 120ms;
   --dur: 180ms;
   --dur-slow: 280ms;
+  --dur-cosmos: 1;                 /* множитель длительности фоновых анимаций */
   --ease: cubic-bezier(0.2, 0, 0, 1);
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
@@ -207,6 +224,19 @@
   --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.1);
   --shadow-md: 0 6px 18px rgba(16, 24, 40, 0.12), 0 1px 3px rgba(16, 24, 40, 0.08);
   --shadow-lg: 0 18px 48px rgba(16, 24, 40, 0.18), 0 2px 8px rgba(16, 24, 40, 0.08);
+
+  /* звёзд в светлой теме нет — оболочка непрозрачная */
+  --shell-rail: var(--bg-0);
+  --shell-side: var(--bg-1);
+  --shell-main: var(--bg-2);
+  --shell-header: var(--bg-2);
+  --shell-panel: var(--user-panel-bg);
+  --glass-sheen: none;
+  --star: #b7791f;
+  --star-cool: #4a6fd6;
+  --nebula-1: rgba(91, 54, 240, 0.10);
+  --nebula-2: rgba(47, 160, 255, 0.08);
+  --nebula-3: rgba(214, 72, 200, 0.06);
 }
 
 /* ---- AMOLED: чистый чёрный для OLED-экранов ---- */
@@ -225,5 +255,22 @@
   --glass-2: rgba(0, 0, 0, 0.88);
   --border: rgba(255, 255, 255, 0.08);
   --border-strong: rgba(255, 255, 255, 0.14);
+  --text: #e7e9ef;
+  --text-muted: #a2a8b6;
   --text-faint: #7b8292;
+  --text-message: #dcdfe6;
+  --hover-tint: rgba(255, 255, 255, 0.03);
+  --scroll-thumb-hover: #3d4453;
+  /* AMOLED: чёрные пиксели — оболочка непрозрачная, звёзды видны только на входе, «Главной» и в голосовом */
+  --shell-rail: #000000;
+  --shell-side: #000000;
+  --shell-main: #000000;
+  --shell-header: #000000;
+  --shell-panel: #000000;
+  --glass-sheen: none;
+  --nebula-1: rgba(106, 69, 255, 0.16);
+  --nebula-2: rgba(47, 160, 255, 0.07);
+  --nebula-3: rgba(214, 72, 200, 0.06);
+  --cosmos-opacity: 0.75;
+  --shadow-lg: 0 18px 48px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.06);
 }

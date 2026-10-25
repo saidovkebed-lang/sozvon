@@ -1,8 +1,11 @@
 // Внешний вид: тема, масштаб шрифта, компактный режим, анимации. Применяется по подписке на prefs.
 // Первичное применение (до отрисовки) делает /js/theme-boot.js — логика должна совпадать.
 import { prefs } from '../prefs.js';
+import { initCosmos } from './cosmos.js';
+import { initServerTheme } from './server-theme.js';
+import { initMotion } from './motion.js';
 
-const THEME_COLORS = { dark: '#12151b', light: '#f2f3f5', amoled: '#000000' };
+const THEME_COLORS = { dark: '#0c0e21', light: '#f2f3f5', amoled: '#000000' };
 
 export function applyAppearance() {
   const html = document.documentElement;
@@ -18,6 +21,8 @@ export function applyAppearance() {
   const rm = prefs.get('appearance.reduceMotion');
   if (rm === 'on' || rm === 'off') html.dataset.reduceMotion = rm;
   else delete html.dataset.reduceMotion;
+  if (prefs.get('appearance.animatedBg') === false) html.dataset.animBg = 'off';
+  else delete html.dataset.animBg;
   document.querySelector('meta[name="theme-color"]')?.setAttribute('content', THEME_COLORS[theme]);
   document.querySelector('meta[name="color-scheme"]')?.setAttribute('content', theme === 'light' ? 'light' : 'dark');
 }
@@ -25,4 +30,7 @@ export function applyAppearance() {
 export function initAppearance() {
   applyAppearance();
   prefs.subscribe('appearance.', applyAppearance);
+  initCosmos(); // Astra 2.0: живой фон (звёзды) — пауза в фоне/при трансляциях/по настройке
+  initServerTheme(); // Astra 2.0: акцент и фон открытого сервера
+  initMotion();      // Astra 2.0: переход при смене канала
 }

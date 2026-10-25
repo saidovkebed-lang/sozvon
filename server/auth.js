@@ -5,6 +5,7 @@ import crypto from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import { db, save, newId } from './db.js';
 import { findUser, findUserByName, getBotUser, randomColor, publicUser, BOT_USERNAME, migrateUser, USER_STATUSES } from './model.js';
+import { cleanChoice, AVATAR_FRAMES, BANNER_PRESETS } from './cosmetics.js';
 
 let botToken = null;
 
@@ -182,6 +183,18 @@ export function updateProfile(user, body) {
       patch.profileTheme = { primary, accent };
     }
   }
+  // Astra 2.0: рамка аватара и анимированный баннер — из фиксированных списков (null — без них)
+  if ('avatarFrame' in body) {
+    const v = cleanChoice(body.avatarFrame, AVATAR_FRAMES);
+    if (v === undefined) throw new HttpError(400, 'Неизвестная рамка аватара');
+    patch.avatarFrame = v;
+  }
+  if ('bannerPreset' in body) {
+    const v = cleanChoice(body.bannerPreset, BANNER_PRESETS);
+    if (v === undefined) throw new HttpError(400, 'Неизвестный фон баннера');
+    patch.bannerPreset = v;
+  }
+  if ('badges' in body) throw new HttpError(400, 'Значки выдаются автоматически');
   if (Object.keys(patch).length === 0) throw new HttpError(400, 'Нет полей для изменения');
   const prevStatus = user.status;
   Object.assign(user, patch);

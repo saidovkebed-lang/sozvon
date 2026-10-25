@@ -17,6 +17,7 @@ import { act, applyServerFromAck, kickMember, banMember, unbanMember, toggleMemb
 import { openMenuFor } from './context-menu.js';
 import { openCropper } from './cropper.js';
 import { AVATAR_PALETTE } from './palette.js';
+import { themePanel, renderThemePanel } from './server-theme.js';
 
 const MOBILE = '(max-width: 639.98px)';
 const dlg = () => $('#modal-settings');
@@ -31,6 +32,7 @@ const SECTIONS = [
   { id: 'members', title: 'Участники', icon: 'i-users', show: (s) => can(s, 'MANAGE_ROLES') || can(s, 'KICK_MEMBERS') || can(s, 'BAN_MEMBERS') },
   { id: 'bans', title: 'Баны', icon: 'i-ban', show: (s) => can(s, 'BAN_MEMBERS') },
   { id: 'channels', title: 'Каналы', icon: 'i-hash', show: (s) => can(s, 'MANAGE_CHANNELS') },
+  { id: 'appearance', title: 'Оформление', icon: 'i-palette', show: (s) => can(s, 'MANAGE_SERVER') },
 ];
 
 const srv = () => getServer(serverId);
@@ -898,7 +900,7 @@ async function saveChannelPerms() {
 /* ============================================================
    Каркас модалки
    ============================================================ */
-const PANELS = { overview: overviewPanel, roles: rolesPanel, members: membersPanel, bans: bansPanel, channels: channelsPanel };
+const PANELS = { overview: overviewPanel, roles: rolesPanel, members: membersPanel, bans: bansPanel, channels: channelsPanel, appearance: themePanel };
 
 function build() {
   if (built) return;
@@ -982,6 +984,7 @@ function render() {
   if (current === 'members') renderMembers();
   if (current === 'bans') renderBans();
   if (current === 'channels') renderChannelsList();
+  if (current === 'appearance') renderThemePanel(s.id);
 }
 
 function showSection(id, { focusPanel = false } = {}) {

@@ -188,8 +188,9 @@ test.describe('v11: трансляции через SFU', () => {
     await startScreenShare(pa, '720p30');
     await expect.poll(async () => (await sfuInfo(pa)).producing, { timeout: 15000 }).toBe(true);
     // C (не в канале) не может смотреть, даже зная id продюсера
-    const producerId = await pa.evaluate(() => window.__sozvon.rtc.sfu.producers.video?.id);
-    expect(producerId).toBeTruthy();
+    // producing выставляется раньше, чем появляется producers.video, — ждём сам id
+    let producerId = null;
+    await expect.poll(async () => (producerId = await pa.evaluate(() => window.__sozvon.rtc.sfu.producers.video?.id || null)), { timeout: 15000 }).toBeTruthy();
     const steal = await wsAck(pc, 'sfu:consume', { producerId, rtpCapabilities: {} });
     expect(steal.ok).toBe(false);
     await watchScreen(pb);

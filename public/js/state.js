@@ -129,7 +129,8 @@ export function musicElapsed(ms) {
 }
 
 export const PROFILE_FIELDS = ['username', 'color', 'displayName', 'avatar', 'avatarAnimated', 'banner', 'bannerAnimated',
-  'bannerColor', 'about', 'pronouns', 'status', 'customStatus', 'profileTheme', 'createdAt'];
+  'bannerColor', 'about', 'pronouns', 'status', 'customStatus', 'profileTheme', 'createdAt',
+  'avatarFrame', 'bannerPreset', 'badges'];
 
 function mergeProfile(target, user) {
   for (const k of PROFILE_FIELDS) if (k in user) target[k] = user[k];
@@ -152,7 +153,7 @@ export function applyUserUpdate(user) {
   }
   for (const list of Object.values(state.voice)) {
     for (const m of list || []) {
-      if (m.userId === user.id) for (const k of ['username', 'color', 'displayName', 'avatar', 'avatarAnimated']) if (k in user) m[k] = user[k];
+      if (m.userId === user.id) for (const k of ['username', 'color', 'displayName', 'avatar', 'avatarAnimated', 'avatarFrame']) if (k in user) m[k] = user[k];
     }
   }
   for (const list of Object.values(state.messages)) for (const msg of list || []) pick(msg.author);

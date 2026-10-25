@@ -22,6 +22,7 @@ import {
 } from './inbox.js';
 import { sendPush, pushPublicKey } from './push.js';
 import { observeStats, noteMemberJoined, startStats } from './stats.js';
+import { cleanServerTheme, markStreamed } from './cosmetics.js';
 
 const serverRoom = (id) => `server:${id}`;
 const userRoom = (id) => `user:${id}`;
@@ -442,6 +443,10 @@ export function attachRealtime(io, { uploadsDir, dataDir = path.dirname(uploadsD
         else patch[key] = p[key];
       }
       if (p.regenerateInvite === true) patch.inviteCode = generateInviteCode();
+      // Astra 2.0: тема сервера — акцент #rrggbb и космический фон из пресетов (null — по умолчанию)
+      if ('theme' in p) {
+        try { patch.theme = cleanServerTheme(p.theme); } catch (e) { fail(e.message); }
+      }
       if (!Object.keys(patch).length) fail('Нет изменений');
       const old = { icon: server.icon, banner: server.banner };
       Object.assign(server, patch);
@@ -896,6 +901,11 @@ export function attachRealtime(io, { uploadsDir, dataDir = path.dirname(uploadsD
       const server = ch && findServer(ch.serverId);
       const allowStream = !!server && has(computeChannel(server, ch.id, user.id), PERMS.STREAM);
       voice.updateState(socket, payload, { allowStream });
+      // значок «Стример»: первая трансляция экрана
+      if (payload.streaming === true && allowStream && markStreamed(findUser(user.id))) {
+        save();
+        emitUserUpdated(findUser(user.id));
+      }
     });
     socket.on('voice:signal', (payload) => { if (isObj(payload)) voice.signal(socket, payload); });
     socket.on('voice:speaking', (payload) => { if (isObj(payload)) voice.speaking(socket, payload.speaking); });

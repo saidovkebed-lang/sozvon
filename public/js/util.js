@@ -92,6 +92,9 @@ export function avatar(user, size = '', { animate = false } = {}) {
     'aria-hidden': 'true',
   }, firstLetter(user?.username));
   setAvatarImage(el, user, { animate });
+  // Astra 2.0: рамка аватара (рисует CSS по data-frame; на мелких аватарах не показываем)
+  const frame = user?.avatarFrame;
+  if (size !== 'sm' && typeof frame === 'string' && /^[a-z]{3,20}$/.test(frame)) el.dataset.frame = frame;
   return el;
 }
 
