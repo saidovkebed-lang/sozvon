@@ -21,6 +21,12 @@
 //           Пакеты: заголовок 24 байта (u32 'SZA1', u32 sampleRate, u32 channels, u32 length, u64 timestamp µs),
 //           затем PCM s16 interleaved. Пока ничего не звучит — тишина в реальном темпе (дорожка не «засыпает»).
 //           Код выхода 4 — process loopback недоступен (старая Windows / нет устройства вывода).
+// Клавиши:  sozvon-capture.exe --keys [--watch VK,VK…]  — рация без перехватчиков ввода: Raw Input (RIDEV_INPUTSINK)
+//           только СЛУШАЕТ клавиатуру (как Discord) — в отличие от WH_KEYBOARD_LL/WH_MOUSE_LL ввод игр через нас
+//           не проходит и не задерживается (античиты соревновательных игр к хукам ввода относятся враждебно).
+//           stdout: строки "d VK" / "u VK" (десятичный виртуальный код) только для отслеживаемых клавиш;
+//           Enter цифрового блока — 256+VK_RETURN; цифры блока при выключенном NumLock приводятся к VK_NUMPAD*.
+//           stdin: "watch VK,VK…" — сменить список.
 // stdin:    строки "pause" / "resume"; конец stdin — выход.
 // stderr:   журнал. Коды выхода: 0 — штатно, 2 — аргументы, 3 — окно закрыто, 4 — захват недоступен.
 
@@ -88,6 +94,19 @@ static void logf(const char* fmt, ...) {
 
 static volatile LONG g_quit = 0;
 static volatile LONG g_paused = 0;
+static volatile LONG g_watch[512] = {};  // режим --keys: какие виртуальные коды сообщать
+
+static void setWatch(const std::string& list) {
+  for (int i = 0; i < 512; i++) InterlockedExchange(&g_watch[i], 0);
+  const char* p = list.c_str();
+  while (*p) {
+    char* end = nullptr;
+    long v = strtol(p, &end, 0);
+    if (end == p) { p++; continue; }
+    if (v > 0 && v < 512) InterlockedExchange(&g_watch[v], 1);
+    p = end;
+  }
+}
 
 static DWORD WINAPI stdinThread(LPVOID) {
   HANDLE in = GetStdHandle(STD_INPUT_HANDLE);
@@ -103,7 +122,8 @@ static DWORD WINAPI stdinThread(LPVOID) {
         if (s == "pause") InterlockedExchange(&g_paused, 1);
         else if (s == "resume") InterlockedExchange(&g_paused, 0);
         else if (s == "quit") { InterlockedExchange(&g_quit, 1); return 0; }
-      } else if (line.size() < 64) {
+        else if (s.rfind("watch", 0) == 0) setWatch(s.substr(5));
+      } else if (line.size() < 2048) {
         line.push_back(buf[i]);
       }
     }
@@ -508,6 +528,7 @@ struct Gdi {
 
 // ---------------------------------------------------------------- main
 struct Args {
+  bool keys = false;   // режим «клавиши рации» (Raw Input)
   DWORD audioPid = 0;  // режим «звук без процесса»
   bool hasMonitor = false;
   RECT monitor = {};
@@ -532,6 +553,8 @@ static bool parseArgs(int argc, char** argv, Args& a) {
     else if (!strcmp(k, "--max-height") && v) { a.maxH = atoi(v); i++; }
     else if (!strcmp(k, "--fps") && v) { a.fps = atoi(v); i++; }
     else if (!strcmp(k, "--no-cursor")) a.cursor = false;
+    else if (!strcmp(k, "--keys")) a.keys = true;
+    else if (!strcmp(k, "--watch") && v) { setWatch(v); i++; }
     else if (!strcmp(k, "--audio-exclude-pid") && v) { a.audioPid = (DWORD)strtoul(v, nullptr, 10); i++; }
     else if (!strcmp(k, "--listen")) a.listen = true;
     else if (!strcmp(k, "--token") && v) { a.token = v; i++; }
@@ -542,7 +565,73 @@ static bool parseArgs(int argc, char** argv, Args& a) {
   a.maxH = std::min(std::max(a.maxH, 90), 2160);
   a.fps = std::min(std::max(a.fps, 1), 60);
   if (a.listen && (a.token.size() < 16 || a.origin.empty() || a.origin.find_first_of("\r\n") != std::string::npos)) return false;
-  return a.hasMonitor || a.hwnd || a.audioPid;
+  return a.hasMonitor || a.hwnd || a.audioPid || a.keys;
+}
+
+// ---------------------------------------------------------------- клавиши рации (Raw Input)
+// Нормализация как у браузера: левый/правый Ctrl/Shift/Alt, Enter цифрового блока, цифры блока без NumLock
+static int normVk(const RAWKEYBOARD& k) {
+  int vk = k.VKey;
+  bool e0 = (k.Flags & RI_KEY_E0) != 0;
+  if (vk == VK_SHIFT) return (int)MapVirtualKeyW(k.MakeCode, MAPVK_VSC_TO_VK_EX);
+  if (vk == VK_CONTROL) return e0 ? VK_RCONTROL : VK_LCONTROL;
+  if (vk == VK_MENU) return e0 ? VK_RMENU : VK_LMENU;
+  if (vk == VK_RETURN && e0) return 256 + VK_RETURN;
+  if (!e0) {  // без E0 «навигационные» коды приходят от цифрового блока с выключенным NumLock
+    switch (vk) {
+      case VK_INSERT: return VK_NUMPAD0;
+      case VK_END: return VK_NUMPAD1;
+      case VK_DOWN: return VK_NUMPAD2;
+      case VK_NEXT: return VK_NUMPAD3;
+      case VK_LEFT: return VK_NUMPAD4;
+      case VK_CLEAR: return VK_NUMPAD5;
+      case VK_RIGHT: return VK_NUMPAD6;
+      case VK_HOME: return VK_NUMPAD7;
+      case VK_UP: return VK_NUMPAD8;
+      case VK_PRIOR: return VK_NUMPAD9;
+      case VK_DELETE: return VK_DECIMAL;
+    }
+  }
+  return vk;
+}
+
+static int runKeys() {
+  HWND wnd = CreateWindowExW(0, L"STATIC", L"sozvon-keys", 0, 0, 0, 0, 0, HWND_MESSAGE, nullptr, GetModuleHandleW(nullptr), nullptr);
+  RAWINPUTDEVICE rid = { 0x01 /* Generic Desktop */, 0x06 /* Keyboard */, RIDEV_INPUTSINK, wnd };
+  if (!wnd || !RegisterRawInputDevices(&rid, 1, sizeof rid)) { logf("Raw Input недоступен (%lu)", GetLastError()); return 4; }
+  logf("клавиши: Raw Input (без перехвата ввода)");
+  printf("READY\n");
+  fflush(stdout);
+  bool down[512] = {};
+  std::vector<uint8_t> buf(256);
+  while (!g_quit) {
+    MsgWaitForMultipleObjects(0, nullptr, FALSE, 200, QS_ALLINPUT);
+    MSG msg;
+    while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
+      if (msg.message == WM_INPUT) {
+        UINT size = 0;
+        GetRawInputData((HRAWINPUT)msg.lParam, RID_INPUT, nullptr, &size, sizeof(RAWINPUTHEADER));
+        if (size && size <= 4096) {
+          if (buf.size() < size) buf.resize(size);
+          if (GetRawInputData((HRAWINPUT)msg.lParam, RID_INPUT, buf.data(), &size, sizeof(RAWINPUTHEADER)) != (UINT)-1) {
+            const RAWINPUT* ri = reinterpret_cast<const RAWINPUT*>(buf.data());
+            if (ri->header.dwType == RIM_TYPEKEYBOARD && ri->data.keyboard.VKey && ri->data.keyboard.VKey != 0xFF) {
+              int vk = normVk(ri->data.keyboard);
+              bool isDown = !(ri->data.keyboard.Flags & RI_KEY_BREAK);
+              if (vk > 0 && vk < 512 && down[vk] != isDown) {
+                down[vk] = isDown;
+                if (g_watch[vk]) { printf("%c %d\n", isDown ? 'd' : 'u', vk); fflush(stdout); }
+              }
+            }
+          }
+        }
+      }
+      TranslateMessage(&msg);
+      DispatchMessageW(&msg);
+    }
+  }
+  DestroyWindow(wnd);
+  return 0;
 }
 
 // ---------------------------------------------------------------- звук без своего процесса
@@ -686,13 +775,17 @@ static RECT monitorRect(HMONITOR m) {
 int main(int argc, char** argv) {
   Args a;
   if (!parseArgs(argc, argv, a)) {
-    fprintf(stderr, "usage: sozvon-capture (--monitor X,Y,W,H | --hwnd N | --audio-exclude-pid PID) [--max-width W] [--max-height H] [--fps F] [--no-cursor] [--listen --token T --origin O]\n");
+    fprintf(stderr, "usage: sozvon-capture (--monitor X,Y,W,H | --hwnd N | --audio-exclude-pid PID | --keys [--watch VK,…]) [--max-width W] [--max-height H] [--fps F] [--no-cursor] [--listen --token T --origin O]\n");
     return 2;
   }
   // физические пиксели во всех API (позиция курсора, рамка окна, координаты мониторов)
   typedef BOOL(WINAPI * SetCtx)(HANDLE);
   if (auto f = (SetCtx)(void*)GetProcAddress(GetModuleHandleA("user32.dll"), "SetProcessDpiAwarenessContext")) f((HANDLE)-4 /* PER_MONITOR_AWARE_V2 */);
   else SetProcessDPIAware();
+  if (a.keys) {  // текстовый режим: stdin-команды и строки d/u в stdout
+    CreateThread(nullptr, 0, stdinThread, nullptr, 0, nullptr);
+    return runKeys();
+  }
   _setmode(_fileno(stdout), _O_BINARY);
   timeBeginPeriod(1);
   CreateThread(nullptr, 0, stdinThread, nullptr, 0, nullptr);

@@ -99,8 +99,32 @@ function runAudio() {
   });
 }
 
+// Клавиши рации через Raw Input: READY, затем нажатие V (SendInput через PowerShell) → "d 86" / "u 86"
+function runKeys() {
+  return new Promise((resolve) => {
+    const p = spawn(EXE, ['--keys', '--watch', '86']);
+    let out = '';
+    let err = '';
+    p.stderr.on('data', (c) => { err += c; });
+    p.stdout.on('data', (c) => {
+      out += c;
+      if (out.includes('READY') && !out.includes('#sent')) {
+        out += '#sent';
+        spawn('powershell', ['-NoProfile', '-Command', "(New-Object -ComObject WScript.Shell).SendKeys('v')"], { stdio: 'ignore' });
+      }
+    });
+    setTimeout(() => { p.stdin.end(); }, 6000);
+    p.on('exit', (code) => resolve({ code, ready: out.includes('READY'), down: /d 86/.test(out), up: /u 86/.test(out), err }));
+  });
+}
+
 (async () => {
   let ok = true;
+  const k = await runKeys();
+  console.log(`== keys: код ${k.code}, READY ${k.ready}, нажатие ${k.down}, отпускание ${k.up}`);
+  console.log(k.err.trim().split('\n').map((l) => `   ${l}`).join('\n'));
+  if (!k.ready || k.code !== 0) ok = false;
+  if (k.ready && !(k.down && k.up)) console.log('   (нажатие не дошло — на сервере CI нет активного рабочего стола? Raw Input всё равно запущен)');
   const a = await runAudio();
   console.log(`== audio: код ${a.code}, пакетов ${a.packets}, ${a.rate} Гц, ~${(a.frames / (a.rate || 48000)).toFixed(2)} с звука`);
   console.log(a.err.trim().split('\n').map((l) => `   ${l}`).join('\n'));

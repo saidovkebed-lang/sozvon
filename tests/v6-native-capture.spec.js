@@ -251,6 +251,36 @@ test.describe('v6: свой захват экрана (приложение дл
     }
   });
 
+  test('рация без перехвата ввода: клавиша — через Raw Input помощника, uiohook не запускается', async () => {
+    const { app, win, readLog } = await launch({ SOZVON_CAPTURE_FAKE_KEYS: '86', SOZVON_CAPTURE_FAKE_KEYS_DELAY: '5000' }, null);
+    try {
+      await createServerUI(win, 'Рация');
+      await win.evaluate(async () => {
+        const { prefs } = await import('/js/prefs.js');
+        prefs.set('audio.inputMode', 'ptt');
+        prefs.set('audio.pttKey', 'KeyV');
+        window.__ptt = [];
+        window.sozvonDesktop.onPttChange((p) => window.__ptt.push(p));
+      });
+      const logs = [];
+      app.process().stdout.on('data', (d) => logs.push(String(d)));
+      await joinVoiceUI(win);
+      await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().forEach((w) => w.blur())); // в фокусе «игра»
+      await expect.poll(() => readLog(), { timeout: 10000 }).toContain('keys-start watch=86');
+      // нажали и отпустили V, пока Astra не в фокусе
+      await expect.poll(() => win.evaluate(() => window.__ptt.join(',')), { timeout: 15000 }).toBe('true,false');
+      expect(logs.join('')).not.toContain('перехват клавиши рации включён'); // старый перехватчик (uiohook) не запускался
+      // смена клавиши — на лету, без перезапуска помощника
+      await win.evaluate(async () => (await import('/js/prefs.js')).prefs.set('audio.pttKey', 'KeyB'));
+      await expect.poll(() => readLog(), { timeout: 10000 }).toContain('keys-watch 66');
+      // режим «Голосовая активация» — помощник клавиш закрывается
+      await win.evaluate(async () => (await import('/js/prefs.js')).prefs.set('audio.inputMode', 'voice'));
+      await expect.poll(() => readLog(), { timeout: 10000 }).toContain('exit keys');
+    } finally {
+      await app.close().catch(() => {});
+    }
+  });
+
   test('помощник не прислал кадров → обычный захват Chromium (демонстрация всё равно идёт)', async ({ makePage }) => {
     const { app, win, readLog, pb } = await setup(makePage, { SOZVON_CAPTURE_FAKE_MODE: 'silent' });
     try {

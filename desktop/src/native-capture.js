@@ -188,4 +188,4 @@ function createNativeCapture({ log = console.log } = {}) {
   return { isAvailable, start, startAudio, control, stopAll, get count() { return sessions.size; } };
 }
 
-module.exports = { createNativeCapture };
+module.exports = { createNativeCapture, helperCommand };

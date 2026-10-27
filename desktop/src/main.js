@@ -9,7 +9,8 @@ const {
 const { pathToFileURL } = require('node:url');
 const path = require('node:path');
 const fs = require('node:fs');
-const { buildCodeMap, parseCombo, comboToAccelerator } = require('./keymap');
+const { buildCodeMap, parseCombo, comboToAccelerator, codeToVks } = require('./keymap');
+const { createKeyWatch } = require('./key-watch');
 const { createUpdater } = require('./updater');
 const { createNativeCapture } = require('./native-capture');
 
@@ -219,6 +220,18 @@ let deafenCombo = null;
 let pttDownSent = false;
 const heldKeys = new Set();
 
+// Windows: клавиша рации — Raw Input через помощник (без хуков ввода); uiohook — только запасной путь
+let keyWatchFailed = false;
+const pttVks = new Set();
+const keyWatch = createKeyWatch({
+  helperCommand: () => require('./native-capture').helperCommand(),
+  onDown: (vk) => { if (pttVks.has(vk) && !pttDownSent && !windowFocused()) { pttDownSent = true; sendToPage('desktop:ptt', true); } },
+  onUp: (vk) => { if (pttVks.has(vk)) releasePtt(); },
+  onFail: () => { keyWatchFailed = true; releasePtt(); applyHotkeys(); },
+  log: (m) => console.log(m),
+});
+const useKeyWatch = () => (IS_WIN || !!process.env.SOZVON_CAPTURE_FAKE) && !keyWatchFailed && !!require('./native-capture').helperCommand();
+
 function loadHook() {
   if (hook !== null) return hook;
   try {
@@ -256,6 +269,15 @@ function applyGlobalShortcuts() {
 function applyHotkeys() {
   applyGlobalShortcuts();
   const needHook = hotkeys.pttEnabled && voiceState.inVoice;
+  if (useKeyWatch()) {
+    if (hook && hook.running) { try { hook.mod.uIOhook.stop(); } catch { /* ignore */ } hook.running = false; }
+    const vks = needHook ? (codeToVks(hotkeys.pttKey) || []) : [];
+    pttVks.clear();
+    for (const v of vks) pttVks.add(v);
+    if (vks.length) keyWatch.start(vks);
+    else if (keyWatch.running) { keyWatch.stop(); releasePtt(); }
+    return;
+  }
   const h = needHook ? loadHook() : hook;
   if (!h) return;
   pttCodes = new Set(hotkeys.pttEnabled ? (codeMap[hotkeys.pttKey] || []) : []);
@@ -928,6 +950,7 @@ app.on('will-quit', () => {
   try { globalShortcut.unregisterAll(); } catch { /* ignore */ }
   nativeCapture.stopAll();
   try { if (hook && hook.running) hook.mod.uIOhook.stop(); } catch { /* ignore */ }
+  keyWatch.stop();
 });
 
 // Smoke-тест (SOZVON_SMOKE=1): после загрузки страницы печатаем в stdout, что выдал бы обработчик демонстрации экрана

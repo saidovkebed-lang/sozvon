@@ -32,6 +32,31 @@ function buildCodeMap(K) {
   return m;
 }
 
+/**
+ * KeyboardEvent.code → виртуальные коды Windows для режима «клавиши рации» помощника (Raw Input, см.
+ * desktop/native/capture/capture.cpp: левый/правый модификаторы различаются, Enter цифрового блока = 256+13,
+ * цифры блока без NumLock помощник сам приводит к VK_NUMPAD*). null — клавиша не поддерживается.
+ */
+const VK_NAMED = {
+  Backspace: 0x08, Tab: 0x09, Enter: 0x0d, NumpadEnter: 0x10d, CapsLock: 0x14, Escape: 0x1b, Space: 0x20,
+  PageUp: 0x21, PageDown: 0x22, End: 0x23, Home: 0x24, ArrowLeft: 0x25, ArrowUp: 0x26, ArrowRight: 0x27, ArrowDown: 0x28,
+  PrintScreen: 0x2c, Insert: 0x2d, Delete: 0x2e, NumLock: 0x90, ScrollLock: 0x91,
+  NumpadMultiply: 0x6a, NumpadAdd: 0x6b, NumpadSubtract: 0x6d, NumpadDecimal: 0x6e, NumpadDivide: 0x6f,
+  Semicolon: 0xba, Equal: 0xbb, Comma: 0xbc, Minus: 0xbd, Period: 0xbe, Slash: 0xbf, Backquote: 0xc0,
+  BracketLeft: 0xdb, Backslash: 0xdc, BracketRight: 0xdd, Quote: 0xde, IntlBackslash: 0xe2,
+  ShiftLeft: 0xa0, ShiftRight: 0xa1, ControlLeft: 0xa2, ControlRight: 0xa3, AltLeft: 0xa4, AltRight: 0xa5,
+  MetaLeft: 0x5b, MetaRight: 0x5c, OSLeft: 0x5b, OSRight: 0x5c,
+};
+function codeToVks(code) {
+  if (!code) return null;
+  let m;
+  if ((m = /^Key([A-Z])$/.exec(code))) return [m[1].charCodeAt(0)];
+  if ((m = /^Digit(\d)$/.exec(code))) return [0x30 + Number(m[1])];
+  if ((m = /^Numpad(\d)$/.exec(code))) return [0x60 + Number(m[1])];
+  if ((m = /^F(\d{1,2})$/.exec(code)) && Number(m[1]) >= 1 && Number(m[1]) <= 24) return [0x6f + Number(m[1])];
+  return VK_NAMED[code] ? [VK_NAMED[code]] : null;
+}
+
 // Обратное к codeLabel() из keybinds.js
 const LABEL_TO_CODE = {
   'пробел': 'Space', enter: 'Enter', esc: 'Escape', backspace: 'Backspace', tab: 'Tab',
@@ -117,4 +142,4 @@ function comboToAccelerator(str) {
   return [...mods, key].join('+');
 }
 
-module.exports = { buildCodeMap, parseCombo, labelToCode, codeToAccelKey, comboToAccelerator };
+module.exports = { codeToVks, buildCodeMap, parseCombo, labelToCode, codeToAccelKey, comboToAccelerator };

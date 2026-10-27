@@ -6,6 +6,8 @@
 // SOZVON_CAPTURE_FAKE_MODE: silent — не слать кадры; exit3 — через 2 с выйти с кодом 3 («окно закрыто»).
 // --audio-exclude-pid PID: режим «звук без процесса» — пакеты 'SZA1' (48 кГц, стерео, s16): синус 440 Гц.
 //   SOZVON_CAPTURE_FAKE_AUDIO=unavailable — как старая Windows: выход с кодом 4 до "PORT".
+// --keys --watch VK,…: режим «клавиши рации» — "READY", затем по SOZVON_CAPTURE_FAKE_KEYS=VK: через 1,5 с "d VK",
+//   ещё через 1 с "u VK" (как настоящее нажатие, пока в фокусе игра); stdin "watch …" — в журнал.
 const fs = require('node:fs');
 const http = require('node:http');
 
@@ -18,6 +20,25 @@ const mode = process.env.SOZVON_CAPTURE_FAKE_MODE || '';
 const logFile = process.env.SOZVON_CAPTURE_FAKE_LOG;
 const log = (s) => { if (logFile) fs.appendFileSync(logFile, `${Date.now()} ${s}\n`); };
 const audioPid = arg('--audio-exclude-pid', null);
+if (argv.includes('--keys')) {
+  log(`keys-start watch=${arg('--watch', '')}`);
+  process.stdout.write('READY\n');
+  const vk = process.env.SOZVON_CAPTURE_FAKE_KEYS;
+  if (vk) {
+    const at = Number(process.env.SOZVON_CAPTURE_FAKE_KEYS_DELAY) || 1500;
+    setTimeout(() => process.stdout.write(`d ${vk}\n`), at);
+    setTimeout(() => process.stdout.write(`u ${vk}\n`), at + 1000);
+  }
+  let kb = '';
+  process.stdin.setEncoding('utf8');
+  process.stdin.on('data', (d) => {
+    kb += d;
+    let i;
+    while ((i = kb.indexOf('\n')) >= 0) { log(`keys-${kb.slice(0, i).trim()}`); kb = kb.slice(i + 1); }
+  });
+  process.stdin.on('end', () => { log('exit keys'); process.exit(0); });
+  return;
+}
 if (audioPid && process.env.SOZVON_CAPTURE_FAKE_AUDIO === 'unavailable') {
   log(`audio-unavailable ${audioPid}`);
   process.stderr.write('[capture] process loopback недоступен (0x80070057)\n');
