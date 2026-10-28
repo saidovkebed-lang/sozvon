@@ -30,9 +30,11 @@ export function checkBotToken(token) {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
-export class HttpError extends Error {
-  constructor(status, message) { super(message); this.status = status; }
-}
+export { HttpError } from './http-error.js';
+import { HttpError } from './http-error.js';
+import { createLoginChallenge, requireUserCode } from './totp.js';
+// Двухфакторная защита (server/totp.js): помощники для других модулей (админ-панель и т. п.)
+export { verifyUserTotp, requireRecent2FA } from './totp.js';
 
 export function validateUsername(raw) {
   if (typeof raw !== 'string') throw new HttpError(400, 'Введите имя пользователя');
@@ -49,7 +51,7 @@ function validatePassword(raw) {
   return raw;
 }
 
-function createSession(userId) {
+export function createSession(userId) {
   const token = crypto.randomBytes(24).toString('hex');
   db.data.sessions[token] = { userId, createdAt: Date.now() };
   save();
@@ -83,6 +85,8 @@ export async function login(body) {
   if (!user || user.isBot || !user.passwordHash || !(await bcrypt.compare(password, user.passwordHash))) {
     throw new HttpError(401, 'Неверное имя пользователя или пароль');
   }
+  // 2FA: пароль верен, но сессию выдаём только после второго шага (POST /api/login/2fa)
+  if (user.totpEnabled) return { twoFactor: true, challenge: createLoginChallenge(user), methods: ['totp', 'recovery'] };
   return { token: createSession(user.id), user: publicUser(user, { self: true }) };
 }
 
@@ -208,7 +212,7 @@ export function updateColor(user, body) {
 }
 
 /** Смена пароля: все сессии, кроме текущей (keepToken), удаляются. Возвращает удалённые токены. */
-export async function changePassword(user, keepToken, body) {
+export async function changePassword(user, keepToken, body, { ip } = {}) {
   const oldPassword = typeof body?.oldPassword === 'string' ? body.oldPassword : '';
   if (!oldPassword) throw new HttpError(400, 'Введите текущий пароль');
   if (typeof body?.newPassword !== 'string' || !body.newPassword) throw new HttpError(400, 'Введите новый пароль');
@@ -217,6 +221,7 @@ export async function changePassword(user, keepToken, body) {
     throw new HttpError(400, 'Неверный текущий пароль');
   }
   if (oldPassword === newPassword) throw new HttpError(400, 'Новый пароль совпадает с текущим');
+  requireUserCode(user, body?.code, ip); // при включённой 2FA — свежий код
   user.passwordHash = await bcrypt.hash(newPassword, 10);
   const revoked = [];
   for (const [token, s] of Object.entries(db.data.sessions)) {
