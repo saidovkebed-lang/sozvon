@@ -119,6 +119,8 @@ export function publicUser(u, { self = false } = {}) {
     avatarFrame: cleanChoice(u.avatarFrame, AVATAR_FRAMES) || null,
     bannerPreset: cleanChoice(u.bannerPreset, BANNER_PRESETS) || null,
     badges: computeBadges(u),
+    // 2FA: только флаг и только самому владельцу (секрет и коды восстановления никогда не уходят клиенту)
+    ...(self ? { totpEnabled: !!u.totpEnabled } : {}),
   };
 }
 

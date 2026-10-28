@@ -46,6 +46,17 @@
         <button class="btn btn--primary btn--block" id="auth-submit" type="submit">Войти</button>
         <p class="auth__switch"><span id="auth-switch-text">Нет аккаунта?</span> <a href="#" id="auth-toggle">Зарегистрироваться</a></p>
       </form>
+      <!-- 2FA: второй шаг входа (public/js/ui/auth.js) -->
+      <form id="auth-2fa-form" class="form" novalidate hidden>
+        <div class="field">
+          <label class="field__label" for="auth-2fa-code" id="auth-2fa-label">Код из приложения-аутентификатора</label>
+          <input class="input" id="auth-2fa-code" name="one-time-code" type="text" inputmode="numeric" autocomplete="one-time-code"
+                 maxlength="12" spellcheck="false" autocapitalize="off" required>
+        </div>
+        <p class="form__error" id="auth-2fa-error" role="alert"></p>
+        <button class="btn btn--primary btn--block" id="auth-2fa-submit" type="submit">Подтвердить</button>
+        <p class="auth__switch"><a href="#" id="auth-2fa-recovery">Использовать код восстановления</a> · <a href="#" id="auth-2fa-back">Назад</a></p>
+      </form>
     </div>
     <a class="auth__download" id="btn-download-app" href="/download" data-hide-desktop hidden>
       <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-monitor"/></svg>

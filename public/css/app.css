@@ -3619,3 +3619,18 @@ body.has-lightbox { overflow: hidden; }
 }
 .music-player__autoplay.is-on { color: var(--accent-text); background: var(--accent-soft); }
 @media (max-width: 1023.98px) { #btn-music-to-playlist { display: none; } }
+
+/* ===== Двухфакторная защита (js/ui/two-factor.js) ===== */
+.twofa { display: flex; flex-direction: column; gap: var(--sp-3); }
+.twofa-step { display: flex; flex-direction: column; gap: var(--sp-3); }
+.twofa-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); justify-content: flex-end; }
+.twofa-qr { align-self: flex-start; width: 200px; max-width: 100%; padding: 0; border-radius: var(--r-md); overflow: hidden; background: #fff; line-height: 0; }
+.twofa-qr svg { width: 100%; height: auto; display: block; }
+.twofa-secret { align-self: flex-start; padding: var(--sp-2) var(--sp-3); border-radius: var(--r-md); background: var(--bg-4); font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--fs-base); letter-spacing: 0.04em; user-select: all; word-break: break-all; }
+.twofa-uri summary { cursor: pointer; color: var(--text-muted); font-size: var(--fs-sm); }
+.twofa-uri .input { margin-top: var(--sp-2); font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--fs-sm); }
+.twofa-codes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-2) var(--sp-4); margin: 0; padding: var(--sp-3) var(--sp-3) var(--sp-3) calc(var(--sp-3) + 1.5em); border-radius: var(--r-md); background: var(--bg-4); }
+.twofa-codes code { font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--fs-base); user-select: all; }
+.twofa-warn { color: var(--warning, var(--danger)); }
+#auth-2fa-form .auth__switch a { white-space: nowrap; }
+@media (max-width: 639.98px) { .twofa-codes { grid-template-columns: 1fr; } .twofa-actions { justify-content: stretch; } .twofa-actions .btn { flex: 1 1 auto; } }
