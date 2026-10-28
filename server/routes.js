@@ -17,6 +17,7 @@ import { syncLibrary, hasYtDlp, addUploadedFile, MUSIC_MAX_BYTES, fixMulterName,
 import { importFromUrl, resolveInput, fetchPending, similarTracks } from './music-sources.js';
 import { createPlaylistRouter } from './music-playlists.js';
 import { tracksAddedBy, BADGE_RULES } from './cosmetics.js';
+import { createTwoFactorRouter } from './twofa-routes.js';
 
 const limitMb = Number(process.env.UPLOAD_LIMIT_MB);
 export const ATTACHMENT_LIMIT_MB = Number.isFinite(limitMb) && limitMb > 0 ? limitMb : 100;
@@ -212,10 +213,12 @@ export function createApiRouter({
 
   router.post('/me/password', requireAuth, wrap(async (req, res) => {
     if (req.isBot) throw new HttpError(403, 'Недоступно для бота');
-    const revoked = await changePassword(req.user, req.token, req.body);
+    const revoked = await changePassword(req.user, req.token, req.body, { ip: req.ip });
     onSessionsRevoked(req.user.id, revoked);
     res.json({ ok: true });
   }));
+
+  router.use(createTwoFactorRouter({ onUserUpdated, onSessionsRevoked })); // 2FA: /login/2fa, /me/2fa/*
 
   router.get('/config', wrap(async (_req, res) => {
     res.set('Cache-Control', 'no-store');
@@ -338,7 +341,10 @@ export function createApiRouter({
     }
     if (err?.type === 'entity.parse.failed') return res.status(400).json({ error: 'Некорректный JSON в запросе' });
     if (err?.type === 'entity.too.large') return res.status(413).json({ error: 'Слишком большой запрос' });
-    if (err instanceof HttpError) return res.status(err.status).json({ error: err.message });
+    if (err instanceof HttpError) {
+      if (err.retryAfter) res.set('Retry-After', String(err.retryAfter));
+      return res.status(err.status).json(err.code ? { error: err.message, code: err.code } : { error: err.message });
+    }
     console.error('[api]', err);
     res.status(500).json({ error: 'Внутренняя ошибка сервера' });
   });

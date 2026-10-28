@@ -7,7 +7,7 @@ export const getToken = () => lsGet(TOKEN_KEY);
 export const setToken = (t) => lsSet(TOKEN_KEY, t);
 
 export class ApiError extends Error {
-  constructor(message, status) { super(message); this.status = status; }
+  constructor(message, status, code) { super(message); this.status = status; if (code) this.code = code; }
 }
 
 async function request(method, path, body, { auth = true } = {}) {
@@ -27,7 +27,7 @@ async function request(method, path, body, { auth = true } = {}) {
   try { data = await res.json(); } catch { /* не JSON */ }
   if (!res.ok) {
     const msg = data?.error || (res.status === 413 ? 'Файл слишком большой' : `Ошибка сервера (${res.status})`);
-    throw new ApiError(msg, res.status);
+    throw new ApiError(msg, res.status, data?.code);
   }
   return data;
 }
@@ -35,6 +35,7 @@ async function request(method, path, body, { auth = true } = {}) {
 export const api = {
   register: (username, password) => request('POST', '/api/register', { username, password }, { auth: false }),
   login: (username, password) => request('POST', '/api/login', { username, password }, { auth: false }),
+  login2fa: (challenge, code) => request('POST', '/api/login/2fa', { challenge, code }, { auth: false }),
   me: () => request('GET', '/api/me'),
   config: () => request('GET', '/api/config', undefined, { auth: false }),
   uploadAttachment(file) {

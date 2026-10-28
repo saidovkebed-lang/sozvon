@@ -16,6 +16,7 @@ import { profileCard } from './profile.js';
 import { cosmeticsSettings, syncCosmetics } from './cosmetics.js';
 import { openCropper } from './cropper.js';
 import { renderDownloads } from '../download.js';
+import { twoFactorBlocks, refresh as refreshTwoFactor } from './two-factor.js';
 
 export const APP_VERSION = '3.0.0';
 const GITHUB_URL = 'https://github.com/saidovkebed-lang/sozvon';
@@ -323,6 +324,8 @@ function renderAccountCard() {
   if (!bu && u.bannerColor) card.style.setProperty('--c', u.bannerColor);
   $('.account-card__name', card).textContent = displayName(u);
   $('.account-card__tag', card).textContent = `@${u.username} · имя пользователя изменить нельзя`;
+  const pw2fa = $('#settings-password-2fa');
+  if (pw2fa) pw2fa.hidden = !u.totpEnabled; // 2FA: смена пароля требует свежий код
   $$('[data-color]', dlg()).forEach((b) => {
     const on = b.dataset.color.toLowerCase() === color.toLowerCase();
     b.classList.toggle('is-selected', on);
@@ -380,6 +383,7 @@ function buildAccount() {
     colorTimer = setTimeout(() => setColor(c, { silent: true }), 400);
   });
 
+  const twofa = twoFactorBlocks();
   const pwForm = h('form', { class: 'form password-form', id: 'form-password', novalidate: true },
     h('input', { type: 'text', name: 'username', autocomplete: 'username', hidden: true, value: state.user?.username || '' }),
     h('div', { class: 'field' },
@@ -392,6 +396,9 @@ function buildAccount() {
       h('div', { class: 'field' },
         h('label', { class: 'field__label', for: 'settings-confirm-password' }, 'Повторите новый пароль'),
         h('input', { class: 'input', id: 'settings-confirm-password', type: 'password', autocomplete: 'new-password', required: true }))),
+    h('div', { class: 'field', id: 'settings-password-2fa', hidden: !state.user?.totpEnabled },
+      h('label', { class: 'field__label', for: 'settings-password-code' }, 'Код двухфакторной защиты'),
+      h('input', { class: 'input', id: 'settings-password-code', type: 'text', inputmode: 'numeric', autocomplete: 'one-time-code', maxlength: '12', placeholder: '000000 или код восстановления' })),
     h('p', { class: 'form__error', id: 'settings-password-error', role: 'alert' }),
     h('div', { class: 'form__actions' },
       h('button', { type: 'submit', class: 'btn btn--primary' }, 'Сменить пароль')));
@@ -407,11 +414,14 @@ function buildAccount() {
     if (newPassword.length < 4) return fail('Новый пароль должен быть не короче 4 символов', $('#settings-new-password'));
     if (newPassword !== confirm) return fail('Пароли не совпадают', $('#settings-confirm-password'));
     if (newPassword === oldPassword) return fail('Новый пароль совпадает с текущим', $('#settings-new-password'));
+    const need2fa = !!state.user?.totpEnabled;
+    const code = need2fa ? $('#settings-password-code').value.trim() : undefined;
+    if (need2fa && !code) return fail('Введите код двухфакторной защиты', $('#settings-password-code'));
     err.textContent = '';
     const btn = pwForm.querySelector('[type=submit]');
     btn.disabled = true;
     try {
-      await meRequest('POST', '/api/me/password', { oldPassword, newPassword });
+      await meRequest('POST', '/api/me/password', code ? { oldPassword, newPassword, code } : { oldPassword, newPassword });
       pwForm.reset();
       toastOk('Пароль изменён. Другие сеансы завершены');
     } catch (ex) {
@@ -432,6 +442,8 @@ function buildAccount() {
       palette,
       h('p', { class: 'form__error', id: 'settings-color-error', role: 'alert' })),
     section('Пароль', pwForm),
+    section('Двухфакторная защита', twofa.twofa),
+    section('Сеансы', twofa.sessions),
     section('',
       h('div', { class: 'setting setting--danger' },
         h('div', { class: 'setting__text' },
@@ -1166,7 +1178,7 @@ function showSection(id, { focusPanel = false } = {}) {
   root.classList.add('is-section-open');
   $('.settings__scroll', root).scrollTop = 0;
   if (id === 'voice') { refreshDevices(); updateRnnoise(); }
-  if (id === 'account') renderAccountCard();
+  if (id === 'account') { renderAccountCard(); refreshTwoFactor(); }
   if (id === 'profile') fillProfileForm();
   if (id === 'about') { const dl = $('#about-download'); if (dl && !dl.dataset.loaded) { dl.dataset.loaded = '1'; renderDownloads(dl); } }
   if (id === 'about') $('#about-features')?.refresh?.();

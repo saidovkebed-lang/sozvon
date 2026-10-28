@@ -7,7 +7,7 @@
 // клик по уведомлению открывает нужный чат в уже открытом окне или в новом.
 // При изменении списка/логики — поднять VERSION: старые кэши удалятся при activate.
 
-const VERSION = 'v4-astra-2.0.1';
+const VERSION = 'v4-astra-2.0.2';
 const CACHE = `sozvon-shell-${VERSION}`;
 
 const SHELL = [
@@ -31,7 +31,7 @@ const SHELL = [
   '/js/ping.js',
   '/js/desktop.js',
   '/js/download.js',
-  '/js/ui/auth.js',
+  '/js/ui/auth.js', '/js/ui/two-factor.js', '/js/qr.js', // 2FA
   '/js/ui/chat.js', '/js/ui/lightbox.js', '/js/ui/dms.js', '/js/ui/inbox.js', '/js/push.js',
   '/js/ui/members.js',
   '/js/ui/modals.js',
