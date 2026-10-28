@@ -23,6 +23,7 @@ import {
 import { sendPush, pushPublicKey } from './push.js';
 import { observeStats, noteMemberJoined, startStats } from './stats.js';
 import { cleanServerTheme, markStreamed } from './cosmetics.js';
+import { createAdminOps } from './admin/ops.js';
 
 const serverRoom = (id) => `server:${id}`;
 const userRoom = (id) => `user:${id}`;
@@ -1083,6 +1084,9 @@ export function attachRealtime(io, { uploadsDir, dataDir = path.dirname(uploadsD
     botSocket?.emit('bot:music-settings', { serverId, ...settings });
   }
 
-  return { isBotOnline, emitUserUpdated, disconnectSessions, emitServerUpdated, emitMusicPlaylists, emitMusicSettings, watch };
+  // Админ-панель экземпляра (server/admin/): действия над любым сервером/пользователем с рассылками
+  const adminOps = createAdminOps({ io, voice, removeMember, permsChanged, emitServerUpdated, emitToViewers, forgetNotifications, mediaInUse });
+
+  return { isBotOnline, emitUserUpdated, disconnectSessions, emitServerUpdated, emitMusicPlaylists, emitMusicSettings, watch, adminOps };
 }
 

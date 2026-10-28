@@ -696,6 +696,20 @@ setup_backup_timer() {
   ok "Резервные копии: sozvon-backup.timer (каждую ночь, хранятся 7 дней + 4 недели)"
 }
 
+# Кнопка «Обновить Astra» в админ-панели: path-юнит следит за $DATA_DIR/update-request (docs/ADMIN.md)
+setup_self_update() {
+  local u
+  [ -f "$APP_DIR/deploy/templates/sozvon-self-update.path" ] || return 0
+  install -d -o root -g root -m 0755 /var/lib/sozvon-state
+  for u in sozvon-self-update.service sozvon-self-update.path; do
+    render "$APP_DIR/deploy/templates/$u" "/etc/systemd/system/$u" 0644 root:root \
+      "APP_DIR=$APP_DIR" "DATA_DIR=$DATA_DIR" "STATE_DIR=/var/lib/sozvon-state"
+  done
+  systemctl daemon-reload
+  systemctl enable -q --now sozvon-self-update.path
+  ok "Обновление из админ-панели: sozvon-self-update.path (sudo bash $APP_DIR/deploy/admin.sh grant ИМЯ)"
+}
+
 # Ежедневное обновление yt-dlp (systemd timer)
 setup_ytdlp_timer() {
   local u
@@ -723,6 +737,7 @@ setup_services() {
     setup_ytdlp_timer
     setup_app_release_timer
     setup_backup_timer
+    setup_self_update
     systemctl daemon-reload
     systemctl enable -q coturn sozvon sozvon-bot
   else
@@ -840,6 +855,7 @@ banner() {
   printf 'Полезное:\n'
   printf '  обновить:     sudo bash %s/deploy/update.sh\n' "$APP_DIR"
   printf '  бэкап:        sudo bash %s/deploy/backup.sh now | list (каждую ночь — автоматически, docs/BACKUP.md)\n' "$APP_DIR"
+  printf '  админ-панель: sudo bash %s/deploy/admin.sh grant ВАШЕ_ИМЯ (docs/ADMIN.md)\n' "$APP_DIR"
   printf '  журнал:       journalctl -u sozvon -f\n'
   printf '  музыка:       sudo bash %s/deploy/music-check.sh  (доступны ли YouTube/SoundCloud/Spotify)\n' "$APP_DIR"
   printf '  настройки:    %s (после правки: systemctl restart sozvon)\n' "$ENV_FILE"

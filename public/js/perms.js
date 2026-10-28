@@ -99,10 +99,13 @@ export function isServerOwner(server, userId = state.user?.id) {
   return !!server && !!userId && server.ownerId === userId;
 }
 
+/** Администратор экземпляра (js/ui/admin.js): на сервере у него все права, как у владельца */
+const isInstanceAdmin = (userId) => !!state.instanceAdmin && !!userId && userId === state.user?.id;
+
 /** Права на сервере (без учёта каналов) */
 export function basePermissions(server, userId = state.user?.id) {
   if (!server || !userId) return 0;
-  if (isServerOwner(server, userId)) return ALL_PERMS;
+  if (isServerOwner(server, userId) || isInstanceAdmin(userId)) return ALL_PERMS;
   // старый сервер без ролей (до миграции) — права по умолчанию
   if (!Array.isArray(server.roles) || !server.roles.length) return DEFAULT_EVERYONE;
   let p = everyoneRole(server)?.permissions ?? DEFAULT_EVERYONE;
@@ -139,7 +142,7 @@ export function can(server, perm, channelId = null, userId = state.user?.id) {
 
 /** Позиция высшей роли (владелец — Infinity, @everyone — 0) */
 export function highestPosition(server, userId) {
-  if (isServerOwner(server, userId)) return Infinity;
+  if (isServerOwner(server, userId) || isInstanceAdmin(userId)) return Infinity;
   const roles = memberRoles(server, userId);
   return roles.length ? (roles[0].position ?? 0) : 0;
 }
@@ -148,14 +151,14 @@ export function highestPosition(server, userId) {
 export function outranks(server, targetId, actorId = state.user?.id) {
   if (!server || !actorId || !targetId || actorId === targetId) return false;
   if (isServerOwner(server, targetId)) return false;
-  if (isServerOwner(server, actorId)) return true;
+  if (isServerOwner(server, actorId) || isInstanceAdmin(actorId)) return true;
   return highestPosition(server, actorId) > highestPosition(server, targetId);
 }
 
 /** Может ли текущий пользователь редактировать/выдавать роль */
 export function canManageRole(server, role, actorId = state.user?.id) {
   if (!role || !can(server, 'MANAGE_ROLES', null, actorId)) return false;
-  if (isServerOwner(server, actorId)) return true;
+  if (isServerOwner(server, actorId) || isInstanceAdmin(actorId)) return true;
   return (role.position ?? 0) < highestPosition(server, actorId);
 }
 

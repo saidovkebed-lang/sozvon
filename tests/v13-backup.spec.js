@@ -142,6 +142,13 @@ test.describe('deploy/backup.sh', () => {
       expect(extractFile(full, 'env/sozvon.env')).toContain('TURN_SECRET=supersecret');
     }
     expect(fs.readFileSync(path.join(bed.backups, '.last-status'), 'utf8')).toContain('telegram=выключено');
+    // v19: итог для админ-панели — в каталоге состояния root рядом с DATA_DIR (не в самом DATA_DIR)
+    const stFile = path.join(path.dirname(bed.data), 'sozvon-state', 'backup-status.json');
+    const st = JSON.parse(fs.readFileSync(stFile, 'utf8'));
+    expect(st).toMatchObject({ result: 'ok', ok: true, file: files.at(-1), telegram: 'выключено', error: '' });
+    expect(Date.now() - Date.parse(st.time)).toBeLessThan(120_000);
+    expect(fs.statSync(stFile).mode & 0o777).toBe(0o644);
+    expect(fs.existsSync(path.join(bed.data, 'backup-status.json'))).toBe(false);
 
     // BACKUP_MUSIC=0 — без музыкальной библиотеки
     fs.rmSync(bed.backups, { recursive: true });

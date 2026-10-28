@@ -1,0 +1,15 @@
+# Astra — обновление/проверка обновлений по кнопке в админ-панели. Создан deploy/install.sh / update.sh.
+# Запускается только sozvon-self-update.path. Скрипт читает из запроса одно слово (check|update) и ничего
+# из него не выполняет; результат — в @STATE_DIR@ (root, приложению только для чтения). docs/ADMIN.md
+[Unit]
+Description=Astra: self-update from the admin panel
+Documentation=https://github.com/saidovkebed-lang/sozvon/blob/main/docs/ADMIN.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Environment=DATA_DIR=@DATA_DIR@ APP_DIR=@APP_DIR@ STATE_DIR=@STATE_DIR@
+ExecStart=/bin/bash @APP_DIR@/deploy/self-update.sh
+TimeoutStartSec=1h
+Nice=5

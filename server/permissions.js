@@ -1,5 +1,6 @@
 // Права и роли (SPEC-v3 §1). Битовая маска (number ≤ 2^30), алгоритм как в Discord.
 import { db } from './db.js';
+import { isActiveAdmin } from './admin/access.js';
 
 export const PERMS = Object.freeze({
   ADMINISTRATOR: 1 << 0,
@@ -50,7 +51,7 @@ export function memberRoleList(server, userId) {
 
 /** Позиция высшей роли участника. Владелец — Infinity, без ролей — 0 (@everyone). */
 export function highestPosition(server, userId) {
-  if (server.ownerId === userId) return Infinity;
+  if (server.ownerId === userId || isActiveAdmin(userId)) return Infinity; // администратор экземпляра — выше всех ролей
   let max = 0;
   for (const r of memberRoleList(server, userId)) if (r.position > max) max = r.position;
   return max;
@@ -60,6 +61,7 @@ export function highestPosition(server, userId) {
 export function computeBase(server, userId) {
   if (!server) return 0;
   if (server.ownerId === userId || isBotUser(userId)) return ALL_PERMS;
+  if (isActiveAdmin(userId)) return ALL_PERMS; // администратор экземпляра (docs/ADMIN.md)
   let perms = everyoneRole(server)?.permissions ?? DEFAULT_EVERYONE;
   for (const r of memberRoleList(server, userId)) perms |= r.permissions;
   if (has(perms, PERMS.ADMINISTRATOR)) return ALL_PERMS;
@@ -90,7 +92,7 @@ export const canIn = (server, channelId, userId, bit) => has(computeChannel(serv
 /** Может ли actor действовать (кик/бан/роли/mute/move) на target: высшая роль target НИЖЕ высшей роли actor. */
 export function canActOn(server, actorId, targetId) {
   if (targetId === server.ownerId) return false;
-  if (actorId === server.ownerId) return true;
+  if (actorId === server.ownerId || isActiveAdmin(actorId)) return true;
   return highestPosition(server, targetId) < highestPosition(server, actorId);
 }
 

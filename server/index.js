@@ -1,4 +1,5 @@
 // Точка входа сервера «Astra».
+import './admin/logbuf.js'; // первым: последние ошибки для админ-панели (console.error/warn)
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
@@ -20,6 +21,7 @@ import { getIceServers, turnConfigured, forceRelay } from './ice.js';
 import { startTunnel, getPublicUrl } from './tunnel.js';
 import { createSfu } from './sfu.js';
 import { initStats, flushStats, createRecapRouter } from './stats.js';
+import { initAdmin, mountAdmin } from './admin/index.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DATA_DIR = path.resolve(process.env.DATA_DIR || path.join(ROOT, 'data'));
@@ -32,6 +34,7 @@ const SHARE = process.argv.includes('--share') || ['1', 'true', 'yes', 'on'].inc
 
 // ---------- данные ----------
 initDb(DATA_DIR);
+initAdmin({ dataDir: DATA_DIR, rootDir: ROOT }); // админ-панель экземпляра (server/admin, docs/ADMIN.md)
 initStats(DATA_DIR); // «Astra Итоги»: DATA_DIR/stats.json (server/stats.js)
 // контакт для push-сервисов (VAPID): PUSH_SUBJECT или публичный https-адрес сервера (Apple требует настоящий)
 initPush(DATA_DIR, { subject: process.env.PUSH_SUBJECT || (/^https:\/\//.test(process.env.PUBLIC_URL || '') ? process.env.PUBLIC_URL : undefined) });
@@ -74,6 +77,7 @@ const sfu = createSfu({ share: SHARE });
 sfu.start().catch((err) => console.warn('[sfu] Ошибка запуска:', err.message));
 const realtime = attachRealtime(io, { uploadsDir, dataDir: DATA_DIR, sfu });
 
+app.use('/api', mountAdmin({ realtime, sfu })); // /api/admin/* + блокировки аккаунтов — до остальных /api
 app.use('/api', createRecapRouter()); // «Astra Итоги»: /api/servers/:sid/recap
 app.use('/api/watch', realtime.watch.router); // «Смотреть вместе»: загрузка видеофайла
 app.use('/api', createApiRouter({

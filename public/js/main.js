@@ -40,6 +40,7 @@ import { setDndCheck } from './ui/sounds.js';
 import { toggleMute, toggleDeafen } from './voice/voice.js';
 import { audioEngine } from './audio/engine.js';
 import * as perms from './perms.js';
+import { initAdmin, requirePasswordChange } from './ui/admin.js';
 
 // тема/масштаб уже выставлены /js/theme-boot.js до отрисовки; дальше — по подписке на prefs
 initAppearance();
@@ -64,6 +65,7 @@ function initUi() {
   initMusicPlayer(sock.on);
   initWatch(sock.on);
   initRecap(); // «Astra Итоги»
+  initAdmin(); // админ-панель экземпляра (только администраторам)
   initVoiceSocket(sock.on);
   initSounds();
   initNotifications(sock.on);
@@ -135,6 +137,11 @@ function initSocketEvents() {
     if (reason === 'io server disconnect') setTimeout(() => { if (!sock.connected) sock.connect(); }, 300);
   });
   sock.on('connect_error', (err) => {
+    if (err?.message === 'password_change_required') { // пароль сброшен администратором
+      sock.disconnect();
+      requirePasswordChange((token) => sock.connect(token));
+      return;
+    }
     if (err?.message === 'unauthorized') {
       sock.disconnect();
       setToken(null);
