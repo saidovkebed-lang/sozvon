@@ -83,8 +83,19 @@ export function requirePasswordChange(onDone) {
   const repI = h('input', { class: 'input', id: 'temp-confirm-password', type: 'password', autocomplete: 'new-password', required: true });
   // при включённой 2FA смена пароля требует код (server/totp.js: requireUserCode)
   const codeI = h('input', { class: 'input', id: 'temp-2fa-code', type: 'text', inputmode: 'numeric', autocomplete: 'one-time-code', maxlength: '20' });
-  const codeField = h('label', { class: 'field', hidden: true }, h('span', { class: 'field__label' }, 'Код двухфакторной защиты'), codeI);
-  adminFetch('GET', '/api/me').then((r) => { if (r?.user?.totpEnabled) codeField.hidden = false; }).catch(() => {});
+  // вход через Telegram: код для действия присылает бот
+  const tgBtn = h('button', { type: 'button', class: 'btn btn--ghost', id: 'temp-2fa-tg', hidden: true }, 'Прислать код в Telegram');
+  tgBtn.addEventListener('click', async () => {
+    tgBtn.disabled = true;
+    try { await adminFetch('POST', '/api/me/2fa/telegram/code'); err.textContent = 'Код отправлен в Telegram'; }
+    catch (ex) { err.textContent = ex.message; }
+    setTimeout(() => { tgBtn.disabled = false; }, 30_000);
+  });
+  const codeField = h('div', { class: 'field', hidden: true }, h('label', { class: 'field__label', for: 'temp-2fa-code' }, 'Код двухфакторной защиты'), codeI, tgBtn);
+  adminFetch('GET', '/api/me').then((r) => {
+    if (r?.user?.totpEnabled || r?.user?.tg2faEnabled) codeField.hidden = false;
+    if (r?.user?.tg2faEnabled) tgBtn.hidden = false;
+  }).catch(() => {});
   const submit = h('button', { type: 'submit', class: 'btn btn--primary' }, 'Сменить пароль');
   const form = h('form', { class: 'modal__body form', novalidate: true },
     h('p', { class: 'modal__text' }, 'Администратор сбросил ваш пароль. Введите временный пароль, который он вам передал, и придумайте новый.'),

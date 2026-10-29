@@ -36,6 +36,8 @@ export const api = {
   register: (username, password) => request('POST', '/api/register', { username, password }, { auth: false }),
   login: (username, password) => request('POST', '/api/login', { username, password }, { auth: false }),
   login2fa: (challenge, code) => request('POST', '/api/login/2fa', { challenge, code }, { auth: false }),
+  login2faStatus: (challenge) => request('POST', '/api/login/2fa/status', { challenge }, { auth: false }),
+  login2faResend: (challenge) => request('POST', '/api/login/2fa/resend', { challenge }, { auth: false }),
   me: () => request('GET', '/api/me'),
   config: () => request('GET', '/api/config', undefined, { auth: false }),
   uploadAttachment(file) {

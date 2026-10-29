@@ -4,8 +4,11 @@
 //   totpEnabled   — boolean, включена ли 2FA (единственное, что видно клиенту — и только самому владельцу);
 //   totpSecret    — секрет (base32, 160 бит), зашифрован AES-256-GCM ключом из DATA_DIR/totp-key;
 //   totpLastStep  — номер последнего принятого 30-секундного шага (защита от повтора кода);
-//   totpRecovery  — HMAC-SHA256 хэши неиспользованных кодов восстановления;
+//   totpRecovery  — HMAC-SHA256 хэши неиспользованных кодов восстановления — ОДИН набор на аккаунт,
+//                   общий для всех способов (приложение и/или Telegram, server/tg2fa.js);
 //   totpEnabledAt — когда включена.
+// Второй способ — коды через Telegram-бота владельца (server/tg2fa.js: user.tg2fa, user.tgChatId).
+// has2FA(user) — включён ли хотя бы один способ.
 //
 // API для других модулей (например, админ-панели):
 //   verifyUserTotp(user, code[, { allowRecovery }]) → boolean
@@ -210,16 +213,25 @@ function tooMany(sec, code = 'totp_locked') {
 }
 
 /* ---------------- проверка второго фактора ---------------- */
+/** Включён ли у пользователя хотя бы один способ 2FA (приложение или Telegram). */
+export const has2FA = (user) => !!user && !user.isBot && (user.totpEnabled === true || (user.tg2fa === true && !!user.tgChatId));
+
+// Проверка кодов из Telegram подключается модулем server/tg2fa.js (без циклического импорта):
+// fn(user, code, ctx) → true, если код верен для этого контекста, и «израсходован».
+// ctx: { kind: 'login', challenge } | { kind: 'admin', session } | { kind: 'action' }.
+let tgVerifier = null;
+export function setTelegramVerifier(fn) { tgVerifier = fn; }
+
 /**
  * Внутренняя проверка: 'totp' | 'recovery' | false. Учитывает блокировку аккаунта и повтор кода,
  * неудача увеличивает счётчик блокировки.
  */
-function verifySecondFactor(user, code, { allowRecovery = false, now = Date.now() } = {}) {
-  if (!user || user.isBot || !user.totpEnabled) return false;
+function verifySecondFactor(user, code, { allowRecovery = false, now = Date.now(), tg = null } = {}) {
+  if (!has2FA(user)) return false;
   if (totpLockedFor(user.id)) return false;
   const raw = String(code ?? '').replace(/\s/g, '');
   if (/^\d{6}$/.test(raw)) {
-    const secret = decryptSecret(user.totpSecret, user.id);
+    const secret = user.totpEnabled ? decryptSecret(user.totpSecret, user.id) : null;
     if (secret) {
       const step = matchStep(base32Decode(secret), raw, Number(user.totpLastStep) || -1, now);
       if (step >= 0) {
@@ -228,6 +240,10 @@ function verifySecondFactor(user, code, { allowRecovery = false, now = Date.now(
         save();
         return 'totp';
       }
+    }
+    if (tg && user.tg2fa && tgVerifier && tgVerifier(user, raw, tg)) {
+      accountFails.delete(user.id);
+      return 'telegram';
     }
   } else if (allowRecovery && consumeRecovery(user, raw)) {
     accountFails.delete(user.id);
@@ -242,8 +258,8 @@ function verifySecondFactor(user, code, { allowRecovery = false, now = Date.now(
  * true — код верен и «израсходован» (повтор того же кода будет отклонён). false — неверен, 2FA выключена,
  * пользователь — бот или аккаунт временно заблокирован после серии неверных кодов.
  */
-export function verifyUserTotp(user, code, { allowRecovery = false } = {}) {
-  return !!verifySecondFactor(user, code, { allowRecovery });
+export function verifyUserTotp(user, code, { allowRecovery = false, tg = null } = {}) {
+  return !!verifySecondFactor(user, code, { allowRecovery, tg });
 }
 
 /**
@@ -251,16 +267,17 @@ export function verifyUserTotp(user, code, { allowRecovery = false } = {}) {
  * действия администратора и т. п.). Бросает HttpError:
  *   403 { code: 'totp_required' } — код не передан; 403 { code: 'totp_invalid' } — неверный;
  *   429 { code: 'totp_locked' } — слишком много неверных кодов (аккаунт или адрес).
- * Возвращает null, если у пользователя 2FA выключена (ничего не требуется), иначе 'totp' | 'recovery'.
+ * Возвращает null, если у пользователя 2FA выключена (ничего не требуется), иначе 'totp' | 'telegram' | 'recovery'.
+ * tg — какие коды из Telegram принимаются (по умолчанию — код «для действия»; null — никакие).
  */
-export function requireRecent2FA(req, code, { allowRecovery = true, status = 403 } = {}) {
+export function requireRecent2FA(req, code, { allowRecovery = true, status = 403, tg = { kind: 'action' } } = {}) {
   const user = req?.user;
   if (!user || req.isBot || user.isBot) throw new HttpError(403, 'Недоступно для бота');
-  if (!user.totpEnabled) return null;
-  return checkCode(user, code, { ip: req.ip, allowRecovery, status });
+  if (!has2FA(user)) return null;
+  return checkCode(user, code, { ip: req.ip, allowRecovery, status, tg });
 }
 
-function checkCode(user, code, { ip, allowRecovery = true, status = 403 } = {}) {
+function checkCode(user, code, { ip, allowRecovery = true, status = 403, tg = { kind: 'action' } } = {}) {
   const limitIp = ip && !exempt(ip);
   if (limitIp) { const w = ipFails.blockedFor(ip); if (w) throw tooMany(w); }
   const locked = totpLockedFor(user.id);
@@ -268,7 +285,7 @@ function checkCode(user, code, { ip, allowRecovery = true, status = 403 } = {}) 
   if (code === undefined || code === null || String(code).trim() === '') {
     throw new HttpError(status, 'Введите код двухфакторной защиты', 'totp_required');
   }
-  const method = verifySecondFactor(user, code, { allowRecovery });
+  const method = verifySecondFactor(user, code, { allowRecovery, tg });
   if (method) return method;
   if (limitIp) ipFails.hit(ip);
   const nowLocked = totpLockedFor(user.id);
@@ -277,12 +294,43 @@ function checkCode(user, code, { ip, allowRecovery = true, status = 403 } = {}) 
 }
 
 /* ---------------- вход: второй шаг ---------------- */
-const challenges = new Map(); // token → { userId, pw, exp, tries }
+const challenges = new Map(); // token → { userId, pw, exp, tries, approved, ip, ua }
 
-export function createLoginChallenge(user) {
+export function createLoginChallenge(user, { ip = null, ua = '' } = {}) {
   const token = crypto.randomBytes(32).toString('base64url');
-  challenges.set(token, { userId: user.id, pw: user.passwordHash, exp: Date.now() + CHALLENGE_TTL_MS, tries: 0 });
+  challenges.set(token, { userId: user.id, pw: user.passwordHash, exp: Date.now() + CHALLENGE_TTL_MS, tries: 0, approved: false, ip, ua: String(ua || '').slice(0, 300) });
   return token;
+}
+
+/** Действующий (не истёкший) второй шаг входа или null. Для server/tg2fa.js («Это я» / «Это не я»). */
+export function getChallenge(token) {
+  const c = typeof token === 'string' ? challenges.get(token) : null;
+  if (!c) return null;
+  if (c.exp <= Date.now()) { challenges.delete(token); return null; }
+  return c;
+}
+export function dropChallenge(token) { challenges.delete(token); }
+
+/**
+ * Опрос второго шага: вход подтверждён кнопкой «Это я» в Telegram → done: { user, method: 'telegram' } (одноразово);
+ * ещё ждём → done: null. Недействительный токен — 401 challenge_invalid (или ошибка из whyInvalid) и учёт в лимите по адресу.
+ */
+export function pollLoginChallenge(token, ip, { whyInvalid } = {}) {
+  const limitIp = ip && !exempt(ip);
+  if (limitIp) { const w = ipFails.blockedFor(ip); if (w) throw tooMany(w); }
+  const c = getChallenge(token);
+  if (!c) {
+    if (limitIp) ipFails.hit(ip);
+    const e = whyInvalid?.(token);
+    if (e) throw e;
+    throw new HttpError(401, 'Время на ввод кода истекло. Войдите заново.', 'challenge_invalid');
+  }
+  if (!c.approved) return { challenge: c, done: null };
+  const user = db.data.users.find((u) => u.id === c.userId);
+  challenges.delete(token);
+  if (!user || !has2FA(user) || user.passwordHash !== c.pw) throw new HttpError(401, 'Время на ввод кода истекло. Войдите заново.', 'challenge_invalid');
+  accountFails.delete(user.id);
+  return { challenge: c, done: { user, method: 'telegram' } };
 }
 
 /** Второй шаг входа. Возвращает пользователя; одноразовый — после успеха токен удаляется. */
@@ -297,9 +345,9 @@ export function completeLoginChallenge(token, code, ip) {
     throw expired();
   }
   const user = db.data.users.find((u) => u.id === c.userId);
-  if (!user || user.isBot || !user.totpEnabled || user.passwordHash !== c.pw) { challenges.delete(token); throw expired(); }
+  if (!user || !has2FA(user) || user.passwordHash !== c.pw) { challenges.delete(token); throw expired(); }
   const method = (() => {
-    try { return checkCode(user, code, { ip, allowRecovery: true, status: 401 }); }
+    try { return checkCode(user, code, { ip, allowRecovery: true, status: 401, tg: { kind: 'login', challenge: token } }); }
     catch (e) {
       if (e.code === 'totp_invalid' && ++c.tries >= CHALLENGE_MAX_TRIES) challenges.delete(token);
       if (e.code === 'totp_locked') challenges.delete(token);
@@ -327,12 +375,33 @@ export async function checkPassword(user, password) {
 const pending = new Map(); // userId → { secret, exp }
 
 export function twoFactorStatus(user) {
+  const on = has2FA(user);
   return {
-    enabled: !!user.totpEnabled,
-    recoveryCodesLeft: user.totpEnabled && Array.isArray(user.totpRecovery) ? user.totpRecovery.length : 0,
+    enabled: on,                       // включён хотя бы один способ
+    totpEnabled: !!user.totpEnabled,   // приложение-аутентификатор
+    recoveryCodesLeft: on && Array.isArray(user.totpRecovery) ? user.totpRecovery.length : 0,
     enabledAt: user.totpEnabled ? user.totpEnabledAt ?? null : null,
   };
 }
+
+/**
+ * Коды восстановления при включении способа: один набор на аккаунт. Если набор уже есть (включён другой
+ * способ) — он сохраняется, возвращается null; иначе создаётся новый и возвращаются коды (показать один раз).
+ */
+export function issueRecoveryIfMissing(user) {
+  if (has2FA(user) && Array.isArray(user.totpRecovery)) return null;
+  const codes = generateRecoveryCodes();
+  user.totpRecovery = codes.map(hashRecovery);
+  return codes;
+}
+
+/** Последний способ выключен — коды восстановления больше не нужны. */
+export function dropRecoveryIfUnused(user) {
+  if (!has2FA(user)) delete user.totpRecovery;
+}
+
+/** Проверка кода для модулей без req (server/tg2fa.js): как requireRecent2FA. */
+export function checkUserCode(user, code, opts) { return checkCode(user, code, opts); }
 
 function notBot(user) {
   if (!user || user.isBot) throw new HttpError(403, 'Боту двухфакторная защита недоступна');
@@ -367,18 +436,17 @@ export function confirmEnrollment(user, code, ip) {
     if (nowLocked) throw tooMany(nowLocked);
     throw new HttpError(400, 'Неверный код. Проверьте время на телефоне и попробуйте ещё раз', 'totp_invalid');
   }
-  const codes = generateRecoveryCodes();
   pending.delete(user.id);
   accountFails.delete(user.id);
+  const codes = issueRecoveryIfMissing(user); // уже включён Telegram — набор кодов остаётся прежним
   Object.assign(user, {
     totpEnabled: true,
     totpSecret: encryptSecret(p.secret, user.id),
     totpLastStep: step,
-    totpRecovery: codes.map(hashRecovery),
     totpEnabledAt: Date.now(),
   });
   save();
-  return { recoveryCodes: codes };
+  return codes ? { recoveryCodes: codes } : { recoveryCodes: null, recoveryKept: true };
 }
 
 /** Отключение: пароль + код (или код восстановления). */
@@ -387,15 +455,16 @@ export async function disableTwoFactor(user, { password, code } = {}, ip) {
   if (!user.totpEnabled) throw new HttpError(400, 'Двухфакторная защита не включена');
   await checkPassword(user, password);
   checkCode(user, code, { ip, allowRecovery: true });
-  for (const k of ['totpSecret', 'totpLastStep', 'totpRecovery', 'totpEnabledAt']) delete user[k];
+  for (const k of ['totpSecret', 'totpLastStep', 'totpEnabledAt']) delete user[k];
   user.totpEnabled = false;
+  dropRecoveryIfUnused(user); // Telegram остаётся — коды восстановления тоже
   save();
 }
 
 /** Новые коды восстановления (старые перестают действовать): пароль + код. */
 export async function regenerateRecoveryCodes(user, { password, code } = {}, ip) {
   notBot(user);
-  if (!user.totpEnabled) throw new HttpError(400, 'Двухфакторная защита не включена');
+  if (!has2FA(user)) throw new HttpError(400, 'Двухфакторная защита не включена');
   await checkPassword(user, password);
   checkCode(user, code, { ip, allowRecovery: true });
   const codes = generateRecoveryCodes();
@@ -406,6 +475,6 @@ export async function regenerateRecoveryCodes(user, { password, code } = {}, ip)
 
 /** Код для чувствительного действия (для модулей без req): бросает HttpError как requireRecent2FA. */
 export function requireUserCode(user, code, ip) {
-  if (!user?.totpEnabled) return null;
+  if (!has2FA(user)) return null;
   return checkCode(user, code, { ip, allowRecovery: true });
 }

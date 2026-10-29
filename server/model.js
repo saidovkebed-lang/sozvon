@@ -120,7 +120,8 @@ export function publicUser(u, { self = false } = {}) {
     bannerPreset: cleanChoice(u.bannerPreset, BANNER_PRESETS) || null,
     badges: computeBadges(u),
     // 2FA: только флаг и только самому владельцу (секрет и коды восстановления никогда не уходят клиенту)
-    ...(self ? { totpEnabled: !!u.totpEnabled } : {}),
+    // Telegram (server/tg2fa.js): только флаг; chat id не отдаётся никому
+    ...(self ? { totpEnabled: !!u.totpEnabled, tg2faEnabled: u.tg2fa === true } : {}),
     // «Сейчас слушает» (музыка бота в голосовом канале): false — пользователь скрыл это в настройках
     showListening: u.showListening !== false,
   };

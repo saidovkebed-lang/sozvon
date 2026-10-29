@@ -7,7 +7,7 @@
 // клик по уведомлению открывает нужный чат в уже открытом окне или в новом.
 // При изменении списка/логики — поднять VERSION: старые кэши удалятся при activate.
 
-const VERSION = 'v4-astra-2.1.0';
+const VERSION = 'v4-astra-2.1.1'; // 2.1.1: вход через Telegram (auth.js, two-factor.js)
 const CACHE = `sozvon-shell-${VERSION}`;
 
 const SHELL = [

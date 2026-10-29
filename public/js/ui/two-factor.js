@@ -1,6 +1,8 @@
-// «Моя учётная запись → Двухфакторная защита» (TOTP, server/totp.js):
-// подключение (пароль → QR + секрет → код → коды восстановления), отключение, новые коды восстановления,
-// «Выйти на других устройствах». QR рисуется локально (public/js/qr.js) — секрет никуда не отправляется.
+// «Моя учётная запись → Двухфакторная защита»: два способа — приложение-аутентификатор (TOTP, server/totp.js)
+// и Telegram-бот сервера (server/tg2fa.js); можно оба, при входе подходит любой.
+// Приложение: пароль → QR + секрет → код → коды восстановления. QR рисуется локально (public/js/qr.js).
+// Telegram: пароль → одноразовая ссылка t.me/<бот>?start=… (+ QR) → «Start» в боте → страница обновляется сама.
+// Коды восстановления — один набор на аккаунт для любого способа. Также «Выйти на других устройствах».
 import { $, h, icon } from '../util.js';
 import { state, applyUserUpdate } from '../state.js';
 import { getToken } from '../api.js';
@@ -125,7 +127,8 @@ function showQr(setup) {
       const res = await req('POST', '/api/me/2fa/enable', { code });
       if (res.user) applyUserUpdate(res.user);
       toastOk('Двухфакторная защита включена');
-      root.replaceChildren(recoveryView(res.recoveryCodes || [], 'Защита включена. Коды восстановления'));
+      if (res.recoveryCodes?.length) root.replaceChildren(recoveryView(res.recoveryCodes, 'Защита включена. Коды восстановления'));
+      else refresh(); // уже был Telegram — коды восстановления прежние
     } catch (ex) {
       err.textContent = ex.message;
       setBusy(form, false);
@@ -138,20 +141,46 @@ function showQr(setup) {
 }
 
 /* ---------- действия при включённой 2FA ---------- */
-function actionForm({ title, submitText, danger = false, onSubmit }) {
+const hasTg = () => !!(status?.telegram?.enabled ?? state.user?.tg2faEnabled);
+
+/** Кнопка «Прислать код в Telegram» (код для действия в настройках). */
+function tgCodeButton(errEl, id = 'twofa-action-tg') {
+  const btn = h('button', { type: 'button', class: 'btn btn--ghost', id }, icon('i-send'), 'Прислать код в Telegram');
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    try {
+      await req('POST', '/api/me/2fa/telegram/code');
+      toastOk('Код отправлен в Telegram');
+      if (errEl) errEl.textContent = '';
+      setTimeout(() => { btn.disabled = false; }, 30_000);
+    } catch (ex) {
+      if (errEl) errEl.textContent = ex.message; else toastError(ex.message);
+      btn.disabled = false;
+    }
+  });
+  return btn;
+}
+export { tgCodeButton };
+
+function actionForm({ title, submitText, danger = false, onSubmit, note = null }) {
+  const err = errorEl();
+  const tg = hasTg();
+  const label = tg ? (status?.totpEnabled ? 'Код из Telegram или приложения, либо код восстановления' : 'Код из Telegram или код восстановления')
+    : 'Код из приложения или код восстановления';
   const form = h('form', { class: 'form twofa-step', id: 'twofa-action-form', novalidate: true },
     h('input', { type: 'text', name: 'username', autocomplete: 'username', hidden: true, value: state.user?.username || '' }),
     h('p', { class: 'setting__label' }, title),
+    note ? h('p', { class: 'settings-hint' }, note) : '',
     h('div', { class: 'form-grid' },
       field('twofa-action-password', 'Текущий пароль', { type: 'password', autocomplete: 'current-password', required: true }),
-      field('twofa-action-code', 'Код из приложения или код восстановления', { ...codeAttrs, inputmode: 'text', required: true })),
-    errorEl(),
+      field('twofa-action-code', label, { ...codeAttrs, inputmode: 'text', required: true })),
+    err,
     h('div', { class: 'twofa-actions' },
+      tg ? tgCodeButton(err) : '',
       h('button', { type: 'button', class: 'btn btn--ghost', onclick: () => refresh() }, 'Отмена'),
       h('button', { type: 'submit', class: `btn ${danger ? 'btn--danger' : 'btn--primary'}`, id: 'twofa-action-submit' }, submitText)));
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const err = $('#twofa-error', form);
     const password = $('#twofa-action-password', form).value;
     const code = $('#twofa-action-code', form).value.trim();
     if (!password) { err.textContent = 'Введите текущий пароль'; return; }
@@ -166,13 +195,13 @@ function actionForm({ title, submitText, danger = false, onSubmit }) {
 
 function disableFlow() {
   actionForm({
-    title: 'Отключить двухфакторную защиту',
+    title: hasTg() ? 'Отключить приложение-аутентификатор' : 'Отключить двухфакторную защиту',
     submitText: 'Отключить',
     danger: true,
     onSubmit: async (body) => {
       const res = await req('POST', '/api/me/2fa/disable', body);
       if (res.user) applyUserUpdate(res.user);
-      toastOk('Двухфакторная защита отключена');
+      toastOk(hasTg() ? 'Приложение-аутентификатор отключено' : 'Двухфакторная защита отключена');
       refresh();
     },
   });
@@ -189,35 +218,178 @@ function regenFlow() {
   });
 }
 
+/* ---------- Telegram ---------- */
+const cloudPasswordNote = () => h('p', { class: 'settings-hint twofa-note', id: 'twofa-tg-note' },
+  icon('i-shield'),
+  ' Совет: включите в Telegram «Облачный пароль» (Настройки → Конфиденциальность → Облачный пароль). '
+  + 'Без него тот, кто перевыпустит вашу SIM-карту, сможет войти в ваш Telegram и получить коды. Бот включить его за вас не может.');
+
+let linkPoll = null;
+function stopLinkPoll() { clearTimeout(linkPoll); linkPoll = null; }
+
+function startTgLink() {
+  const form = h('form', { class: 'form twofa-step', id: 'twofa-tg-form', novalidate: true },
+    h('input', { type: 'text', name: 'username', autocomplete: 'username', hidden: true, value: state.user?.username || '' }),
+    h('p', { class: 'settings-hint' }, 'Коды входа будут приходить от бота этого сервера Astra в Telegram, а вход можно будет подтвердить кнопкой «Это я». Подтвердите, что это вы: введите текущий пароль.'),
+    field('twofa-tg-password', 'Текущий пароль', { type: 'password', autocomplete: 'current-password', required: true }),
+    errorEl(),
+    h('div', { class: 'twofa-actions' },
+      h('button', { type: 'button', class: 'btn btn--ghost', onclick: () => refresh() }, 'Отмена'),
+      h('button', { type: 'submit', class: 'btn btn--primary', id: 'twofa-tg-submit' }, 'Продолжить')));
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const err = $('#twofa-error', form);
+    const password = $('#twofa-tg-password', form).value;
+    if (!password) { err.textContent = 'Введите текущий пароль'; return; }
+    setBusy(form, true);
+    try {
+      showTgLink(await req('POST', '/api/me/2fa/telegram/link', { password }));
+    } catch (ex) { err.textContent = ex.message; setBusy(form, false); }
+  });
+  root.replaceChildren(form);
+  $('#twofa-tg-password', form).focus();
+}
+
+function showTgLink(link) {
+  const left = h('span', { id: 'twofa-tg-left' });
+  const tick = () => {
+    const s = Math.max(0, Math.round((link.expiresAt - Date.now()) / 1000));
+    left.textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+    return s;
+  };
+  tick();
+  const cancel = async () => {
+    stopLinkPoll();
+    try { await req('DELETE', '/api/me/2fa/telegram/link'); } catch { /* ignore */ }
+    refresh();
+  };
+  const view = h('div', { class: 'twofa-step', id: 'twofa-tg-link' },
+    h('p', { class: 'settings-hint' }, '1. Откройте ссылку на телефоне или компьютере с Telegram (или отсканируйте QR-код камерой телефона).'),
+    h('a', { class: 'btn btn--primary twofa-tg-open', id: 'twofa-tg-open', href: link.link, target: '_blank', rel: 'noopener noreferrer' }, icon('i-send'), `Открыть @${link.bot}`),
+    h('div', { class: 'twofa-qr', id: 'twofa-tg-qr' }, qrSvg(link.link, { label: 'QR-код ссылки на бота Telegram' })),
+    h('p', { class: 'settings-hint' }, '2. В боте нажмите «Запустить» (Start). Эта страница обновится сама.'),
+    h('p', { class: 'settings-hint', role: 'status' }, 'Ожидаем привязку… Ссылка одноразовая и действует ещё ', left, '.'),
+    cloudPasswordNote(),
+    h('p', { class: 'form__error', id: 'twofa-error', role: 'alert' }),
+    h('div', { class: 'twofa-actions' },
+      h('button', { type: 'button', class: 'btn btn--ghost', id: 'twofa-tg-cancel', onclick: cancel }, 'Отмена')));
+  root.replaceChildren(view);
+  const poll = async () => {
+    linkPoll = null;
+    if (!view.isConnected) return; // настройки закрыты
+    if (tick() <= 0) { $('#twofa-error', view).textContent = 'Время ссылки истекло — начните заново.'; return; }
+    try {
+      const st = await req('GET', '/api/me/2fa/telegram/link');
+      if (st.linked) {
+        if (st.user) applyUserUpdate(st.user);
+        toastOk('Telegram привязан');
+        if (st.recoveryCodes?.length) root.replaceChildren(recoveryView(st.recoveryCodes, 'Telegram привязан. Коды восстановления'));
+        else {
+          root.replaceChildren(h('div', { class: 'twofa-step', id: 'twofa-tg-done' },
+            h('p', { class: 'setting__label' }, 'Telegram привязан'),
+            h('p', { class: 'settings-hint' }, 'Коды восстановления остались прежними — они подходят для любого способа.'),
+            h('div', { class: 'twofa-actions' }, h('button', { type: 'button', class: 'btn btn--primary', id: 'twofa-done', onclick: () => refresh() }, 'Готово'))));
+        }
+        return;
+      }
+      if (!st.pending) { $('#twofa-error', view).textContent = 'Ссылка больше не действует — начните заново.'; return; }
+    } catch { /* сеть — повторим */ }
+    linkPoll = setTimeout(poll, 2000);
+  };
+  stopLinkPoll();
+  linkPoll = setTimeout(poll, 1500);
+}
+
+function unlinkTgFlow() {
+  actionForm({
+    title: 'Отвязать Telegram',
+    note: 'Нажмите «Прислать код в Telegram» и введите код из бота (или код из приложения / код восстановления).',
+    submitText: 'Отвязать',
+    danger: true,
+    onSubmit: async (body) => {
+      const res = await req('POST', '/api/me/2fa/telegram/unlink', body);
+      if (res.user) applyUserUpdate(res.user);
+      toastOk('Telegram отвязан');
+      refresh();
+    },
+  });
+}
+
 /* ---------- состояние ---------- */
+const fmtDate = (t) => (t ? new Date(t).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' }) : '');
+
+function methodRow({ id, title, desc, on, actions }) {
+  return h('div', { class: 'setting twofa-method', id, dataset: { enabled: String(!!on) } },
+    h('div', { class: 'setting__text' },
+      h('span', { class: 'setting__label' }, title, on ? h('span', { class: 'twofa-badge' }, 'включено') : ''),
+      h('p', { class: 'setting__desc' }, desc)),
+    h('div', { class: 'twofa-actions' }, ...actions));
+}
+
 function renderStatus() {
+  stopLinkPoll();
   const on = !!status?.enabled;
+  const totpOn = !!status?.totpEnabled;
+  const tg = status?.telegram || { available: false, enabled: !!state.user?.tg2faEnabled };
   const left = status?.recoveryCodesLeft ?? 0;
+  const ways = [totpOn && 'код из приложения', tg.enabled && 'код или кнопка «Это я» в Telegram'].filter(Boolean).join(' или ');
   const desc = on
-    ? `Включена. При входе нужен код из приложения. Кодов восстановления осталось: ${left}.`
-    : 'При входе, кроме пароля, потребуется 6-значный код из приложения-аутентификатора на телефоне. Работает без интернета и сторонних сервисов.';
+    ? `Включена. При входе нужен ${ways}. Кодов восстановления осталось: ${left}.`
+    : 'При входе, кроме пароля, потребуется второй шаг: 6-значный код из приложения-аутентификатора на телефоне или подтверждение в Telegram. Выберите способ.';
   const row = h('div', { class: 'setting', id: 'twofa-status', dataset: { enabled: String(on) } },
     h('div', { class: 'setting__text' },
       h('span', { class: 'setting__label' }, on ? 'Двухфакторная защита включена' : 'Двухфакторная защита выключена'),
       h('p', { class: 'setting__desc' }, desc)),
-    on
-      ? h('div', { class: 'twofa-actions' },
-        h('button', { type: 'button', class: 'btn btn--ghost', id: 'twofa-regen', onclick: regenFlow }, 'Новые коды'),
-        h('button', { type: 'button', class: 'btn btn--danger-soft', id: 'twofa-disable', onclick: disableFlow }, 'Отключить'))
-      : h('button', { type: 'button', class: 'btn btn--primary', id: 'twofa-enable', onclick: startEnroll }, 'Включить'));
+    on ? h('div', { class: 'twofa-actions' },
+      h('button', { type: 'button', class: 'btn btn--ghost', id: 'twofa-regen', onclick: regenFlow }, 'Новые коды')) : '');
+
+  const totpRow = methodRow({
+    id: 'twofa-method-totp',
+    title: 'Приложение-аутентификатор',
+    on: totpOn,
+    desc: totpOn ? 'Google Authenticator, Яндекс Ключ, Aegis, 2FAS и т. п. Работает без интернета.'
+      : 'Google Authenticator, Яндекс Ключ, Aegis, 2FAS и т. п. Работает без интернета и сторонних сервисов.',
+    actions: [totpOn
+      ? h('button', { type: 'button', class: 'btn btn--danger-soft', id: 'twofa-disable', onclick: disableFlow }, 'Отключить')
+      : h('button', { type: 'button', class: on ? 'btn btn--ghost' : 'btn btn--primary', id: 'twofa-enable', onclick: startEnroll }, on ? 'Подключить' : 'Включить')],
+  });
+  let tgRow = null;
+  if (tg.enabled || tg.available) {
+    const tgDesc = tg.enabled
+      ? `Привязан${tg.account ? `: ${tg.account}` : ''}${tg.linkedAt ? `, ${fmtDate(tg.linkedAt)}` : ''}. Коды входа приходят от бота сервера, вход можно подтвердить кнопкой «Это я».`
+        + (tg.lockedFor ? ' Сейчас вход по коду из Telegram приостановлен (нажата «Это не я»).' : '')
+      : 'Без установки приложений: код входа и кнопка «Это я» приходят от бота этого сервера в Telegram.';
+    tgRow = methodRow({
+      id: 'twofa-method-tg',
+      title: 'Telegram',
+      on: tg.enabled,
+      desc: tgDesc,
+      actions: [tg.enabled
+        ? h('button', { type: 'button', class: 'btn btn--danger-soft', id: 'twofa-tg-unlink', onclick: unlinkTgFlow }, 'Отвязать')
+        : h('button', { type: 'button', class: on ? 'btn btn--ghost' : 'btn btn--primary', id: 'twofa-tg-enable', onclick: startTgLink }, on ? 'Подключить' : 'Включить')],
+    });
+  }
+  const methods = h('div', { class: 'twofa-methods', id: 'twofa-methods' },
+    h('p', { class: 'settings-hint' }, on ? 'Способы (при входе подходит любой включённый):' : 'Способ второго шага:'),
+    totpRow, tgRow || '');
   const low = on && left <= 3
     ? h('p', { class: 'settings-hint twofa-warn' }, left === 0 ? 'Коды восстановления закончились — создайте новые.' : 'Кодов восстановления мало — создайте новые.')
     : null;
-  root.replaceChildren(row, low || '');
+  root.replaceChildren(row, methods, tg.enabled ? cloudPasswordNote() : '', low || '');
 }
 
 export async function refresh() {
   if (!root) return;
-  status = { enabled: !!state.user?.totpEnabled, recoveryCodesLeft: 0 };
+  status = {
+    enabled: !!(state.user?.totpEnabled || state.user?.tg2faEnabled), totpEnabled: !!state.user?.totpEnabled, recoveryCodesLeft: 0,
+    telegram: { available: false, enabled: !!state.user?.tg2faEnabled },
+  };
   renderStatus();
   if (state.user?.isBot) return;
   try {
     status = await req('GET', '/api/me/2fa');
+    if (!status.telegram) status.telegram = { available: false, enabled: false }; // старый сервер
+    if (!('totpEnabled' in status)) status.totpEnabled = status.enabled;
     renderStatus();
   } catch { /* старый сервер — показываем по флагу */ }
 }

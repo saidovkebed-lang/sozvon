@@ -49,6 +49,10 @@
       </form>
       <!-- 2FA: второй шаг входа (public/js/ui/auth.js) -->
       <form id="auth-2fa-form" class="form" novalidate hidden>
+        <div class="auth-tg" id="auth-2fa-tg" hidden>
+          <p class="auth-tg__text" id="auth-2fa-tg-text" role="status" aria-live="polite"></p>
+          <button class="btn btn--ghost auth-tg__resend" id="auth-2fa-resend" type="button">Отправить код ещё раз</button>
+        </div>
         <div class="field">
           <label class="field__label" for="auth-2fa-code" id="auth-2fa-label">Код из приложения-аутентификатора</label>
           <input class="input" id="auth-2fa-code" name="one-time-code" type="text" inputmode="numeric" autocomplete="one-time-code"

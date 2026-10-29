@@ -6,7 +6,9 @@
 //     либо в самой админ-панели другим администратором).
 //
 // Двухфакторная защита (2FA): админ-панель и права администратора на всех серверах действуют, только если
-// у администратора включена 2FA — поле user.totpEnabled === true (его ставит модуль 2FA, server/auth.js).
+// у администратора включена 2FA — приложение-аутентификатор (user.totpEnabled === true, server/totp.js) или,
+// если разрешено ADMIN_ALLOW_TG_2FA (по умолчанию 1 — так попросил владелец), вход через Telegram-бота
+// (user.tg2fa === true, server/tg2fa.js). ADMIN_ALLOW_TG_2FA=0 — только приложение-аутентификатор.
 // Требование настраивается: ADMIN_REQUIRE_2FA=0 в /etc/sozvon.env, либо (только root) admin.sh require-2fa off|on|default
 // — значение хранится в DATA_DIR/admin-settings.json и важнее переменной окружения.
 import fs from 'node:fs';
@@ -78,14 +80,19 @@ export function admin2faRequired() {
   return !OFF.includes(String(process.env.ADMIN_REQUIRE_2FA ?? '1').trim().toLowerCase());
 }
 
+/** Засчитывается ли Telegram как 2FA для админ-панели (ADMIN_ALLOW_TG_2FA, по умолчанию да). */
+export function adminAllowTg2fa() {
+  return !OFF.includes(String(process.env.ADMIN_ALLOW_TG_2FA ?? '1').trim().toLowerCase());
+}
+
 /**
- * Хук 2FA для админских действий. Поле от модуля 2FA: user.totpEnabled === true
- * (сам секрет — user.totp; здесь он не читается). true — можно.
+ * Хук 2FA для админских действий. Поля от модулей 2FA: user.totpEnabled === true или (если разрешено)
+ * user.tg2fa === true (секреты здесь не читаются). true — можно.
  */
 export function requireAdmin2FA(reqOrUser) {
   const user = reqOrUser?.user && !reqOrUser.username ? reqOrUser.user : reqOrUser;
   if (!admin2faRequired()) return true;
-  return user?.totpEnabled === true;
+  return user?.totpEnabled === true || (adminAllowTg2fa() && user?.tg2fa === true && !!user?.tgChatId);
 }
 
 /** Администратор с выполненным требованием 2FA: только у него действуют права на всех серверах. */

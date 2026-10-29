@@ -32,7 +32,8 @@ export function checkBotToken(token) {
 
 export { HttpError } from './http-error.js';
 import { HttpError } from './http-error.js';
-import { createLoginChallenge, requireUserCode } from './totp.js';
+import { createLoginChallenge, requireUserCode, has2FA } from './totp.js';
+import { startLoginTelegram } from './tg2fa.js';
 // Двухфакторная защита (server/totp.js): помощники для других модулей (админ-панель и т. п.)
 export { verifyUserTotp, requireRecent2FA } from './totp.js';
 
@@ -77,7 +78,7 @@ export async function register(body) {
   return { token: createSession(user.id), user: publicUser(user, { self: true }) };
 }
 
-export async function login(body) {
+export async function login(body, { ip = null, ua = '' } = {}) {
   const username = typeof body?.username === 'string' ? body.username.trim().replace(/\s+/g, ' ') : '';
   const password = typeof body?.password === 'string' ? body.password : '';
   if (!username || !password) throw new HttpError(401, 'Введите имя пользователя и пароль');
@@ -86,7 +87,14 @@ export async function login(body) {
     throw new HttpError(401, 'Неверное имя пользователя или пароль');
   }
   // 2FA: пароль верен, но сессию выдаём только после второго шага (POST /api/login/2fa)
-  if (user.totpEnabled) return { twoFactor: true, challenge: createLoginChallenge(user), methods: ['totp', 'recovery'] };
+  // Способы: приложение (totp), Telegram (код и кнопка «Это я» в боте), код восстановления.
+  if (has2FA(user)) {
+    const challenge = createLoginChallenge(user, { ip, ua });
+    const methods = [...(user.totpEnabled ? ['totp'] : []), ...(user.tg2fa ? ['telegram'] : []), 'recovery'];
+    const out = { twoFactor: true, challenge, methods };
+    if (user.tg2fa) out.telegram = startLoginTelegram(user, challenge, { ip, ua }); // код уходит в Telegram сразу
+    return out;
+  }
   return { token: createSession(user.id), user: publicUser(user, { self: true }) };
 }
 
