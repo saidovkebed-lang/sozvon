@@ -115,7 +115,7 @@ export function createAdminRouter({ realtime }) {
   });
 
   // ---------- заблокированные токены и обязательная смена временного пароля ----------
-  const ALLOWED_WITH_TEMP = new Set(['GET /me', 'POST /me/password', 'GET /config', 'GET /admin/me', 'GET /app/latest', 'GET /push/key', 'POST /push/unsubscribe']);
+  const ALLOWED_WITH_TEMP = new Set(['GET /me', 'POST /me/password', 'GET /config', 'GET /admin/me', 'GET /me/flags', 'GET /app/latest', 'GET /push/key', 'POST /push/unsubscribe']);
   router.use((req, res, next) => {
     const [scheme, value] = String(req.get('authorization') || '').split(' ');
     if (!/^bearer$/i.test(scheme || '')) return next();
@@ -133,8 +133,8 @@ export function createAdminRouter({ realtime }) {
     next();
   });
 
-  // ---------- статус для клиента (любой вошедший) ----------
-  router.get('/admin/me', requireAuth, (req, res) => {
+  // ---------- статус для клиента (любой вошедший; для посторонних панели «нет» — /admin/* отвечает 404) ----------
+  const meFlags = (req, res) => {
     const admin = !req.isBot && isInstanceAdmin(req.user);
     res.json({
       admin,
@@ -145,12 +145,14 @@ export function createAdminRouter({ realtime }) {
       unlockMinutes: admin ? unlockMinutes() : undefined,
       mustChangePassword: mustChangePassword(req.user),
     });
-  });
+  };
+  router.get('/me/flags', requireAuth, meFlags);
+  router.get('/admin/me', requireAuth, (req, res, next) => (!req.isBot && isInstanceAdmin(req.user) ? meFlags(req, res) : next()));
 
   // ---------- разблокировать админ-сессию свежим кодом 2FA (на ADMIN_UNLOCK_MIN минут) ----------
   router.post('/admin/unlock', requireAuth, (req, res, next) => {
     try {
-      if (req.isBot || !isInstanceAdmin(req.user)) return res.status(403).json({ error: 'Нет доступа', code: 'not_admin' });
+      if (req.isBot || !isInstanceAdmin(req.user)) return res.status(404).json({ error: 'Не найдено' });
       if (!requireAdmin2FA(req.user)) return res.status(403).json({ error: MSG_2FA, code: 'admin_2fa_required' });
       if (admin2faRequired()) {
         const method = requireRecent2FA(req, req.body?.code); // 403 totp_required / totp_invalid, 429 totp_locked
@@ -173,7 +175,7 @@ export function createAdminRouter({ realtime }) {
       const k = `x:${req.user?.id}`;
       if (probeLimit.blockedFor(k)) return res.status(429).json({ error: 'Слишком много запросов' });
       probeLimit.hit(k);
-      return res.status(403).json({ error: 'Нет доступа', code: 'not_admin' });
+      return res.status(404).json({ error: 'Не найдено' }); // для не-админов панели не существует
     }
     if (!requireAdmin2FA(req.user)) return res.status(403).json({ error: MSG_2FA, code: 'admin_2fa_required' });
     if (sessionUnlockedUntil(req.token) <= Date.now()) return res.status(403).json({ error: MSG_UNLOCK, code: 'admin_unlock_required' });

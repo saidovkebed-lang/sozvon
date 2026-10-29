@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Astra — обновление по кнопке «Обновить Astra» в админ-панели (docs/ADMIN.md).
+# Astra — обновление по кнопке «Обновить Astra» в админ-панели.
 # Запускает systemd от root: sozvon-self-update.path следит за файлом $DATA_DIR/update-request, который
 # создаёт приложение (пользователь sozvon), и стартует sozvon-self-update.service → этот скрипт.
 #   sudo bash /opt/sozvon/deploy/self-update.sh check     вручную: проверить, есть ли новая версия

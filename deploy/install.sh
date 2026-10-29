@@ -696,7 +696,7 @@ setup_backup_timer() {
   ok "Резервные копии: sozvon-backup.timer (каждую ночь, хранятся 7 дней + 4 недели)"
 }
 
-# Кнопка «Обновить Astra» в админ-панели: path-юнит следит за $DATA_DIR/update-request (docs/ADMIN.md)
+# Кнопка «Обновить Astra» в админ-панели: path-юнит следит за $DATA_DIR/update-request
 setup_self_update() {
   local u
   [ -f "$APP_DIR/deploy/templates/sozvon-self-update.path" ] || return 0
@@ -855,7 +855,6 @@ banner() {
   printf 'Полезное:\n'
   printf '  обновить:     sudo bash %s/deploy/update.sh\n' "$APP_DIR"
   printf '  бэкап:        sudo bash %s/deploy/backup.sh now | list (каждую ночь — автоматически, docs/BACKUP.md)\n' "$APP_DIR"
-  printf '  админ-панель: sudo bash %s/deploy/admin.sh grant ВАШЕ_ИМЯ (docs/ADMIN.md)\n' "$APP_DIR"
   printf '  журнал:       journalctl -u sozvon -f\n'
   printf '  музыка:       sudo bash %s/deploy/music-check.sh  (доступны ли YouTube/SoundCloud/Spotify)\n' "$APP_DIR"
   printf '  настройки:    %s (после правки: systemctl restart sozvon)\n' "$ENV_FILE"

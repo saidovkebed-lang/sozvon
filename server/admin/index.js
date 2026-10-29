@@ -1,4 +1,4 @@
-// Админ-панель экземпляра (docs/ADMIN.md): инициализация и подключение к серверу.
+// Админ-панель экземпляра: инициализация и подключение к серверу.
 import { initAdminAccess } from './access.js';
 import { initAudit } from './audit.js';
 import { initUpdate } from './update.js';

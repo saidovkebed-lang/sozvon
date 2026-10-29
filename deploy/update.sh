@@ -178,7 +178,7 @@ if have_systemd; then
     systemctl enable -q --now sozvon-backup.timer
     ok "Резервные копии: таймер sozvon-backup.timer активен (sudo bash $APP_DIR/deploy/backup.sh list)"
   fi
-  # Кнопка «Обновить Astra» в админ-панели (docs/ADMIN.md): path-юнит + root-помощник
+  # Кнопка «Обновить Astra» в админ-панели: path-юнит + root-помощник
   if [ -f "$APP_DIR/deploy/templates/sozvon-self-update.path" ]; then
     install -d -o root -g root -m 0755 /var/lib/sozvon-state
     for u in sozvon-self-update.service sozvon-self-update.path; do

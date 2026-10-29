@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Astra — администраторы экземпляра (админ-панель, docs/ADMIN.md).
+# Astra — администраторы экземпляра (админ-панель).
 #
 #   sudo bash /opt/sozvon/deploy/admin.sh grant ИМЯ           сделать пользователя администратором
 #   sudo bash /opt/sozvon/deploy/admin.sh revoke ИМЯ          снять права администратора

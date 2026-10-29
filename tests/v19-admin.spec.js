@@ -1,4 +1,4 @@
-// v19: админ-панель экземпляра (server/admin/*, docs/ADMIN.md).
+// v19: админ-панель экземпляра (server/admin/*).
 // Отдельный сервер на свой порт и свой DATA_DIR (HTTP, без SFU): ADMIN_USERS, фейковый Telegram Bot API,
 // фейковый HTTP-прокси (VPN), подмена проверок (ALERT_PROBE_OVERRIDES) и помощник обновления — настоящий
 // deploy/self-update.sh над временным git-репозиторием (вместо systemd path-юнита — тестовый крючок).
@@ -153,19 +153,21 @@ test.afterAll(async () => {
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
-test('не-админ: 403 на /api/admin/*, без сессии — 401; /api/admin/me — admin:false', async () => {
+test('не-админ: для него панели «нет» — 404 на /api/admin/*, без сессии — 401; /api/me/flags — admin:false', async () => {
   const alice = await register('alice');
   expect((await api('GET', '/api/admin/servers')).status).toBe(401);
   const r = await api('GET', '/api/admin/servers', { token: alice.token });
-  expect(r.status).toBe(403);
-  expect(r.json.code).toBe('not_admin');
+  expect(r.status).toBe(404);
+  expect(r.json.code).toBeUndefined();
   for (const [m, u] of [['GET', '/api/admin/users'], ['GET', '/api/admin/health'], ['POST', '/api/admin/update/run'], ['POST', `/api/admin/users/${alice.id}/admin`]]) {
-    expect((await api(m, u, { token: alice.token, body: m === 'POST' ? { grant: true, confirm: true } : undefined })).status, `${m} ${u}`).toBe(403);
+    expect((await api(m, u, { token: alice.token, body: m === 'POST' ? { grant: true, confirm: true } : undefined })).status, `${m} ${u}`).toBe(404);
   }
-  expect((await api('GET', '/api/admin/me', { token: alice.token })).json).toMatchObject({ admin: false, active: false });
+  expect((await api('GET', '/api/admin/me', { token: alice.token })).status).toBe(404);
+  expect((await api('POST', '/api/admin/unlock', { token: alice.token, body: { code: '000000' } })).status).toBe(404);
+  expect((await api('GET', '/api/me/flags', { token: alice.token })).json).toMatchObject({ admin: false, active: false });
   // бот не бывает администратором
   const botToken = fs.readFileSync(path.join(dataDir, 'bot-token.txt'), 'utf8').trim();
-  expect((await api('GET', '/api/admin/servers', { token: `Bot ${botToken}` })).status).toBe(403);
+  expect((await api('GET', '/api/admin/servers', { token: `Bot ${botToken}` })).status).toBe(404);
 });
 
 test('admin.sock (как admin.sh): grant; 2FA обязательна по умолчанию, require-2fa off открывает панель', async ({ page }) => {
@@ -211,7 +213,7 @@ test('deploy/admin.sh grant/list/revoke против временного DATA_D
   expect(r.stdout).toContain(admin.username);
   r = spawnSync('bash', [script, 'revoke', carol.username], { env, encoding: 'utf8' });
   expect(r.status, r.stdout + r.stderr).toBe(0);
-  expect((await api('GET', '/api/admin/me', { token: carol.token })).json.admin).toBe(false);
+  expect((await api('GET', '/api/me/flags', { token: carol.token })).json.admin).toBe(false);
   r = spawnSync('bash', [script, 'grant', 'DJ Бот'], { env, encoding: 'utf8' });
   expect(r.status).not.toBe(0);
   expect(r.stderr).toContain('Бот не может быть администратором');
@@ -383,7 +385,7 @@ test('права администратора: выдать/снять; посл
   expect((await api('POST', `/api/admin/users/${hank.id}/admin`, { token: admin.token, body: { grant: true } })).json.user.flags.admin).toBe(true);
   expect((await api('GET', '/api/admin/me', { token: hank.token })).json.admin).toBe(true);
   expect((await api('POST', `/api/admin/users/${hank.id}/admin`, { token: admin.token, body: { grant: false } })).json.user.flags.admin).toBe(false);
-  expect((await api('GET', '/api/admin/servers', { token: hank.token })).status).toBe(403);
+  expect((await api('GET', '/api/admin/servers', { token: hank.token })).status).toBe(404);
   // ADMIN_USERS: envboss — администратор без флага, снять из панели нельзя
   const reg = await api('POST', '/api/register', { body: { username: 'envboss', password: 'secret123' } });
   expect(reg.status).toBe(200);
@@ -667,7 +669,7 @@ test('UI: админ-панель — пункт меню только у адм
   await page.locator('#admin-servers-search').fill('Ольгин');
   await page.locator(`#admin-servers-list [data-server-id="${srv.id}"]`).click();
   await expect(page.locator('#admin-server-detail')).toContainText('Ольгин сервер');
-  await page.screenshot({ path: 'tests/screens-qa/v19-admin-server.png' });
+  await page.screenshot({ path: 'tests/.results/v19-admin-server.png' });
   await page.locator('#admin-server-channels [data-action="messages"]').first().click();
   await expect(page.locator('#admin-messages')).toContainText('привет из UI');
   await page.locator('#admin-messages [data-action="delete-message"]').first().click();
@@ -681,9 +683,9 @@ test('UI: админ-панель — пункт меню только у адм
   await page.locator('#admin-tab-health').click();
   await expect(page.locator('#admin-health')).toContainText('Память');
   await expect(page.locator('#admin-health')).toContainText('VPN-прокси');
-  await page.screenshot({ path: 'tests/screens-qa/v19-admin-health.png', fullPage: true });
+  await page.screenshot({ path: 'tests/.results/v19-admin-health.png', fullPage: true });
   await page.setViewportSize({ width: 390, height: 800 });
-  await page.screenshot({ path: 'tests/screens-qa/v19-admin-health-mobile.png' });
+  await page.screenshot({ path: 'tests/.results/v19-admin-health-mobile.png' });
   await page.setViewportSize({ width: 1280, height: 720 });
 
   await page.locator('#admin-tab-alerts').click();
@@ -691,7 +693,7 @@ test('UI: админ-панель — пункт меню только у адм
 
   await page.locator('#admin-tab-audit').click();
   await expect(page.locator('#admin-audit')).toContainText('удалил сообщение');
-  await page.screenshot({ path: 'tests/screens-qa/v19-admin-audit.png' });
+  await page.screenshot({ path: 'tests/.results/v19-admin-audit.png' });
   await page.keyboard.press('Escape');
   await expect(panel).toBeHidden();
 });

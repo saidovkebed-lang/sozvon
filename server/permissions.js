@@ -61,7 +61,7 @@ export function highestPosition(server, userId) {
 export function computeBase(server, userId) {
   if (!server) return 0;
   if (server.ownerId === userId || isBotUser(userId)) return ALL_PERMS;
-  if (isActiveAdmin(userId)) return ALL_PERMS; // администратор экземпляра (docs/ADMIN.md)
+  if (isActiveAdmin(userId)) return ALL_PERMS; // администратор экземпляра
   let perms = everyoneRole(server)?.permissions ?? DEFAULT_EVERYONE;
   for (const r of memberRoleList(server, userId)) perms |= r.permissions;
   if (has(perms, PERMS.ADMINISTRATOR)) return ALL_PERMS;

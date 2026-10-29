@@ -35,7 +35,7 @@ const SHARE = process.argv.includes('--share') || ['1', 'true', 'yes', 'on'].inc
 
 // ---------- данные ----------
 initDb(DATA_DIR);
-initAdmin({ dataDir: DATA_DIR, rootDir: ROOT }); // админ-панель экземпляра (server/admin, docs/ADMIN.md)
+initAdmin({ dataDir: DATA_DIR, rootDir: ROOT }); // админ-панель экземпляра (server/admin)
 initStats(DATA_DIR); // «Astra Итоги»: DATA_DIR/stats.json (server/stats.js)
 // контакт для push-сервисов (VAPID): PUSH_SUBJECT или публичный https-адрес сервера (Apple требует настоящий)
 initPush(DATA_DIR, { subject: process.env.PUSH_SUBJECT || (/^https:\/\//.test(process.env.PUBLIC_URL || '') ? process.env.PUBLIC_URL : undefined) });

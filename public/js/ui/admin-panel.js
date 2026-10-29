@@ -1,5 +1,5 @@
 // «Админ-панель» экземпляра (полноэкранная). Разделы: серверы, пользователи, состояние сервера,
-// оповещения, обновление, журнал. Все данные — /api/admin/* (server/admin/routes.js). docs/ADMIN.md
+// оповещения, обновление, журнал. Все данные — /api/admin/* (server/admin/routes.js).
 import { h, icon, $, $$, avatar, fmtDate, fmtSize, safeMediaUrl, firstLetter } from '../util.js';
 import { state } from '../state.js';
 import { adminFetch, adminState } from './admin.js';
@@ -140,7 +140,7 @@ export async function openAdminPanel(section) {
     if (t) dlg.append(t); // тосты — поверх панели
   }
   // доступ и 2FA проверяет сервер; здесь — понятный экран вместо ошибок
-  try { adminState.info = await adminFetch('GET', '/api/admin/me'); } catch { /* покажет раздел */ }
+  try { adminState.info = await adminFetch('GET', '/api/me/flags'); } catch { /* покажет раздел */ }
   if (adminState.info && !adminState.info.admin) { dlg.close(); toast('Нет доступа к админ-панели', 'error'); return; }
   if (adminState.info && !adminState.info.active) { show2faGate(); return; }
   if (adminState.info && adminState.info.unlocked === false) { showUnlockGate(section); return; }

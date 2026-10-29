@@ -1,5 +1,5 @@
 // Админ-панель экземпляра: пункт «Админ-панель» в меню пользователя (только администраторам),
-// обязательная смена временного пароля. Сама панель — лениво, js/ui/admin-panel.js. docs/ADMIN.md
+// обязательная смена временного пароля. Сама панель — лениво, js/ui/admin-panel.js.
 import { h, icon, $ } from '../util.js';
 import { state, subscribe, notify } from '../state.js';
 import { getToken, setToken } from '../api.js';
@@ -31,7 +31,7 @@ export async function adminFetch(method, url, body) {
 async function refreshAdminInfo() {
   if (!state.user) return;
   try {
-    adminState.info = await adminFetch('GET', '/api/admin/me');
+    adminState.info = await adminFetch('GET', '/api/me/flags');
   } catch { adminState.info = null; }
   adminState.loadedFor = state.user.id;
   const active = !!adminState.info?.active;
