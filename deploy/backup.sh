@@ -361,7 +361,7 @@ setup() {
 EOF
   local token chat pp pp2 cur resp
   cur=$(env_get BACKUP_TELEGRAM_TOKEN)
-  read -rp "Токен бота${cur:+ (Enter — оставить прежний)}: " token
+  read -rsp "Токен бота (ввод скрыт)${cur:+; Enter — оставить прежний}: " token; echo
   token=${token:-$cur}
   [[ "$token" =~ ^[0-9]+:[A-Za-z0-9_-]+$ ]] || die "Токен не похож на токен бота (123456:ABC…)"
   export BACKUP_TELEGRAM_TOKEN=$token
