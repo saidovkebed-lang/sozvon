@@ -494,6 +494,8 @@ function renderProfilePreview() {
 
 function fillProfileForm() {
   draft = profileDraftFromUser();
+  const showL = $('#profile-show-listening');
+  if (showL) showL.checked = state.user?.showListening !== false;
   const set = (id, v) => { const el = $(id); if (el) el.value = v; };
   set('#profile-display-name', draft.displayName);
   set('#profile-pronouns', draft.pronouns);
@@ -553,6 +555,27 @@ async function saveProfile() {
     fillProfileForm();
     toastOk('Профиль сохранён');
   } catch (e) { err.textContent = e.message; } finally { btn.disabled = false; }
+}
+
+/** «Показывать, что я слушаю» (user.showListening на сервере): сохраняется сразу, без «Сохранить» */
+function listeningPrivacyRow() {
+  const id = 'profile-show-listening';
+  const sw = h('input', { type: 'checkbox', class: 'switch', id, role: 'switch', 'aria-describedby': `${id}-d` });
+  sw.checked = state.user?.showListening !== false;
+  sw.addEventListener('change', async () => {
+    const v = sw.checked;
+    sw.disabled = true;
+    try {
+      const r = await api.patchMe({ showListening: v });
+      applyUserUpdate(r?.user || { id: state.user.id, showListening: v });
+      toastOk(v ? 'Друзья увидят, что вы слушаете' : 'Скрыто: «Сейчас слушает» не показывается');
+    } catch (e) { sw.checked = !v; toastError(e); } finally { sw.disabled = false; }
+  });
+  return h('div', { class: 'setting' },
+    h('div', { class: 'setting__text' },
+      h('label', { class: 'setting__label', for: id }, 'Показывать, что я слушаю'),
+      h('p', { class: 'setting__desc', id: `${id}-d` }, 'Когда в вашем голосовом канале играет DJ Бот, те, кто видит этот канал, увидят «🎵 Слушает: …» в профиле и списке участников и смогут нажать «Слушать вместе».')),
+    sw);
 }
 
 function buildProfile() {
@@ -624,6 +647,7 @@ function buildProfile() {
         h('div', { class: 'setting__text' }, h('label', { class: 'setting__label', for: 'profile-theme-on' }, 'Цветная тема карточки'), h('p', { class: 'setting__desc' }, 'Градиент из двух цветов на фоне вашего профиля.')),
         themeSw),
       h('div', { class: 'profile-theme__colors' }, themeColor('profile-theme-primary', 'Основной'), themeColor('profile-theme-accent', 'Акцент'))),
+    section('Конфиденциальность', listeningPrivacyRow()),
     h('p', { class: 'form__error', id: 'profile-error', role: 'alert' }));
   const bar = h('div', { class: 'save-bar save-bar--sticky', id: 'profile-save-bar', hidden: true },
     h('span', { class: 'save-bar__text' }, 'Есть несохранённые изменения'),

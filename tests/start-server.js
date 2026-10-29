@@ -10,4 +10,6 @@ fs.mkdirSync(path.join(DATA_DIR, 'music'), { recursive: true });
 const files = ensureMedia();
 for (const f of files.library) fs.copyFileSync(f, path.join(DATA_DIR, 'music', path.basename(f)));
 process.env.DATA_DIR = DATA_DIR;
+// обложки треков: без выхода в интернет (Deezer/iTunes — недостижимый адрес, картинки — только с 127.0.0.1)
+Object.assign(process.env, { COVERS_DEEZER_BASE: 'http://127.0.0.1:9', COVERS_ITUNES_BASE: 'http://127.0.0.1:9', COVERS_IMAGE_HOSTS: '127.0.0.1' });
 await import(path.join(ROOT, 'server', 'index.js'));

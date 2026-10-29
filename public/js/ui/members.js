@@ -2,6 +2,7 @@
 import { $, h, icon, avatar, displayName } from '../util.js';
 import { subscribe, getServer, presenceOf, activeCustomStatus, STATUS_LABELS } from '../state.js';
 import { roleColor, hoistRole, sortedRoles } from '../perms.js';
+import { listeningOf, listeningLine } from './listening.js';
 
 export function statusDot(status) {
   return h('span', { class: 'avatar__status', dataset: { status }, 'aria-hidden': 'true' });
@@ -13,6 +14,7 @@ function memberEl(u, server) {
   av.append(statusDot(status));
   const color = roleColor(server, u.id);
   const cs = activeCustomStatus(u);
+  const listening = listeningOf(u); // «Слушает: …» вместо пользовательского статуса
   const name = displayName(u);
   const el = h('div', {
     class: 'member' + (status === 'offline' ? ' is-offline' : '') + (u.isBot ? ' member--bot' : ''),
@@ -24,7 +26,8 @@ function memberEl(u, server) {
   }, av,
   h('div', { class: 'member__text' },
     h('span', { class: 'member__name', style: color ? { color } : null }, name),
-    cs ? h('span', { class: 'member__status' }, cs.emoji ? h('span', { class: 'member__emoji' }, cs.emoji) : null, cs.text || '') : null));
+    listening ? listeningLine(listening)
+      : cs ? h('span', { class: 'member__status' }, cs.emoji ? h('span', { class: 'member__emoji' }, cs.emoji) : null, cs.text || '') : null));
   if (u.id === server.ownerId) el.append(icon('i-crown', 'icon--sm member__crown'));
   else if (u.isBot) el.append(icon('i-bot', 'icon--sm member__bot'));
   return el;
@@ -60,7 +63,7 @@ function render() {
 }
 
 export function initMembers() {
-  subscribe(['servers', 'nav', 'presence', 'profile'], render);
+  subscribe(['servers', 'nav', 'presence', 'profile', 'voice', 'music'], render);
   // кастомные статусы истекают сами
   setInterval(() => { if (getServer()) render(); }, 60_000);
 }

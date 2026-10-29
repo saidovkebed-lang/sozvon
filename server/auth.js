@@ -195,6 +195,10 @@ export function updateProfile(user, body) {
     patch.bannerPreset = v;
   }
   if ('badges' in body) throw new HttpError(400, 'Значки выдаются автоматически');
+  if ('showListening' in body) {
+    if (typeof body.showListening !== 'boolean') throw new HttpError(400, '«Показывать, что я слушаю»: true или false');
+    patch.showListening = body.showListening;
+  }
   if (Object.keys(patch).length === 0) throw new HttpError(400, 'Нет полей для изменения');
   const prevStatus = user.status;
   Object.assign(user, patch);

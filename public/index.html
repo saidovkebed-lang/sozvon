@@ -23,6 +23,7 @@
   <link rel="stylesheet" href="/css/app.css">
   <link rel="stylesheet" href="/css/watch.css">
   <link rel="stylesheet" href="/css/astra2.css">
+  <link rel="stylesheet" href="/css/music-extras.css">
 </head>
 <body>
   <!-- ===== Экран входа ===== -->
@@ -255,6 +256,9 @@
         </button>
         <button class="icon-btn" type="button" id="btn-music-to-playlist" aria-label="Добавить трек в плейлист" title="В плейлист">
           <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-plus"/></svg>
+        </button>
+        <button class="icon-btn music-player__eq" type="button" id="btn-music-eq" aria-haspopup="dialog" aria-expanded="false" aria-pressed="false" aria-label="Эквалайзер" title="Эквалайзер">
+          <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-sliders"/></svg>
         </button>
         <input type="range" class="slider" id="music-volume" min="0" max="100" value="50" aria-label="Громкость музыки">
       </div>

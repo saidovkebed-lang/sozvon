@@ -16,7 +16,7 @@ import { db, save, newId } from './db.js';
 import { HttpError, requireAuth } from './auth.js';
 import { findServer, findUser, isMember } from './model.js';
 import { PERMS, can } from './permissions.js';
-import { findTrackRec, findBySource, publicTrack } from './music-library.js';
+import { findTrackRec, findBySource, publicTrack, itemCover } from './music-library.js';
 import { parseMusicLink, urlKey, resolveInput } from './music-sources.js';
 
 export const PLAYLIST_LIMITS = Object.freeze({ perServer: 200, items: 500, name: 60 });
@@ -132,6 +132,7 @@ function publicPlaylist(pl, server, userId, { withItems = false } = {}) {
       ready: !!(it.trackId && findTrackRec(it.trackId)),
       source: it.source || (it.trackId ? 'library' : 'search'),
       ...(it.ref?.url ? { url: it.ref.url } : {}),
+      ...((c) => (c ? { cover: c } : {}))(itemCover({ trackId: it.trackId, title: it.title, artist: it.artist, ref: it.ref, pending: !it.trackId })),
     }));
   }
   return out;
@@ -157,6 +158,8 @@ export function playItems(pl) {
       pending: true, id: 'p-' + crypto.randomBytes(5).toString('hex'), title: it.title, artist: it.artist || '',
       duration: it.duration || 0, source: it.source && it.source !== 'library' ? it.source : 'search', ref: { ...it.ref },
     });
+    const cover = itemCover(items[items.length - 1]);
+    if (cover) items[items.length - 1].cover = cover;
   }
   return { items, missing };
 }

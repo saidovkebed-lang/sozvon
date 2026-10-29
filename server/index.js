@@ -16,6 +16,7 @@ import { ensureCerts, localIPv4 } from './certs.js';
 import { createApiRouter } from './routes.js';
 import { attachRealtime } from './realtime.js';
 import { initMusicLibrary, syncLibrary, hasYtDlp } from './music-library.js';
+import { initCovers, serveCover } from './covers.js';
 import { getIceServers, turnConfigured, forceRelay } from './ice.js';
 import { startTunnel, getPublicUrl } from './tunnel.js';
 import { createSfu } from './sfu.js';
@@ -42,6 +43,7 @@ fs.mkdirSync(downloadsDir, { recursive: true });
 const uploadsDir = path.join(DATA_DIR, 'uploads');
 fs.mkdirSync(uploadsDir, { recursive: true });
 initMusicLibrary(DATA_DIR);
+initCovers(DATA_DIR);
 ensureBotUser();
 initBotToken(DATA_DIR);
 
@@ -132,6 +134,8 @@ app.use('/media/music', express.static(path.join(DATA_DIR, 'music'), {
   dotfiles: 'deny', index: false, fallthrough: false, maxAge: '1h',
   setHeaders(res) { res.setHeader('X-Content-Type-Options', 'nosniff'); },
 }));
+// Обложки треков (server/covers.js): доступ как у /media/music, картинка ищется при первом запросе
+app.get('/media/covers/:file', serveCover);
 // «Смотреть вместе»: видео с Range, по подписанной ссылке (?t=) и только тем, кто видит канал
 app.get('/media/watch/:file', realtime.watch.media);
 app.use(express.static(PUBLIC_DIR, { index: 'index.html' }));

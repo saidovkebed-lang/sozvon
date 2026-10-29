@@ -9,6 +9,8 @@ import { prefs } from '../prefs.js';
 import { openModal, confirmDialog } from './modals.js';
 import { toastError, toastOk } from './toasts.js';
 import { initPlaylists, openPlaylistPicker, itemFromState } from './music-playlists.js';
+import { coverArt, setCover, updateMediaSession } from './covers.js';
+import { initEqPanel, closeEqPanel } from './music-eq-panel.js';
 
 async function command(cmd, args = '') {
   try {
@@ -36,9 +38,11 @@ function renderPlayer() {
   const show = !!(state.myVoice && ms && (ready || loadingItem));
   player.hidden = !show;
   renderQueue();
-  if (!show) return;
+  if (!show) { updateMediaSession(null); closeEqPanel(); return; }
   player.classList.toggle('is-loading', !ready);
+  setCover($('.music-player__art', player), ready ? ms.track.cover : loadingItem.cover);
   if (!ready) {
+    updateMediaSession(null);
     $('#music-title').textContent = `Загрузка: ${loadingItem.title || 'трек'}`;
     $('#music-title').title = loadingItem.title || '';
     $('#music-artist').textContent = loadingItem.artist ? `${loadingItem.artist} · загружается…` : 'загружается…';
@@ -81,6 +85,13 @@ function renderPlayer() {
   prog.tabIndex = canSeek ? 0 : -1;
   prog.title = !allowed ? 'Нет права управлять музыкой' : (t.duration ? 'Перемотать' : 'Длительность неизвестна — перемотка недоступна');
   tickProgress();
+  // системный оверлей медиа (Media Session API): название, исполнитель, обложка, кнопки
+  updateMediaSession(t, {
+    paused: !!ms.paused,
+    actions: allowed ? {
+      play: () => command('resume'), pause: () => command('pause'), nexttrack: () => command('skip'),
+    } : { play: null, pause: null, nexttrack: null },
+  });
 }
 
 /** Очередь в модалке библиотеки: готовые и «ожидающие» (pending, без url) элементы.
@@ -115,6 +126,7 @@ function renderQueue() {
     },
     h('span', { class: 'queue-item__grip', 'aria-hidden': 'true', title: canMove ? 'Перетащите, чтобы изменить порядок' : '' }, icon('i-grip')),
     h('span', { class: 'queue-item__n' }, String(i + 1)),
+    coverArt(t.cover, { size: 'sm', cls: 'queue-item__cover' }),
     h('div', { class: 'queue-item__info' },
       h('div', { class: 'queue-item__title' }, t.autoplay ? h('span', { class: 'queue-item__auto', title: 'Добавлено автоплеем' }, 'авто') : null, t.title || 'Без названия'),
       h('div', { class: 'queue-item__meta' }, [
@@ -324,6 +336,7 @@ function renderLibrary(tracks) {
   }
   const playing = music.currentState()?.track?.id;
   list.replaceChildren(...tracks.map((t) => h('div', { class: 'track' + (t.id === playing ? ' is-playing' : ''), dataset: { trackId: t.id } },
+    coverArt(t.cover, { size: 'sm', cls: 'track__cover' }),
     h('div', { class: 'track__info' },
       h('div', { class: 'track__title' }, t.title || 'Без названия'),
       h('div', { class: 'track__artist' }, [t.artist || 'Неизвестный исполнитель', t.addedBy ? ` · добавил ${t.addedBy}` : ''].join(''))),
@@ -401,6 +414,9 @@ export function initMusicPlayer(on) {
   });
   initSeek();
   initQueueEditing();
+  initEqPanel();
+  // обложка загрузилась — обновить Media Session (там только загрузившиеся обложки)
+  $('#music-player .music-player__art').addEventListener('cover-load', renderPlayer);
   initPlaylists({ command, on });
   $('#btn-music-autoplay').addEventListener('click', (e) => {
     const on = e.currentTarget.getAttribute('aria-pressed') === 'true';

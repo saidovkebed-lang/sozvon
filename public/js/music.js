@@ -2,6 +2,7 @@
 import { state, notify, musicElapsed } from './state.js';
 import { lsSet } from './util.js';
 import { prefs } from './prefs.js';
+import { musicEq } from './audio/music-eq.js';
 
 const DRIFT_MAX = 1.5;
 const PREF_KEY = 'audio.musicVolume';     // 0..100 — единственный источник истины
@@ -19,6 +20,9 @@ class MusicSync {
 
   init() {
     this.audio = document.getElementById('music-audio');
+    // эквалайзер: граф WebAudio строится только когда он включён и не «Ровно» (audio/music-eq.js)
+    musicEq.onBlocked = () => { if (!this.blocked) { this.blocked = true; notify('music'); } };
+    musicEq.init(this.audio);
     this.applyVolume(prefs.get(PREF_KEY));
     prefs.subscribe(PREF_KEY, (_k, v) => { this.applyVolume(v); notify('music'); });
     this.audio.addEventListener('error', () => {
@@ -31,7 +35,9 @@ class MusicSync {
   applyVolume(v) {
     const n = Number(v);
     this.volume = Number.isFinite(n) ? Math.min(100, Math.max(0, Math.round(n))) : 70;
-    if (this.audio) this.audio.volume = this.volume / 100;
+    // при активном эквалайзере громкость — узел графа, а элемент всегда на 100 %
+    if (this.audio) this.audio.volume = musicEq.active ? 1 : this.volume / 100;
+    musicEq.setVolume(this.volume / 100);
   }
 
   /** Слайдер #music-volume / контекстное меню бота → prefs */
@@ -44,6 +50,7 @@ class MusicSync {
   /** Вызвать в обработчике пользовательского жеста */
   unlock() {
     if (!this.audio) return;
+    musicEq.kick();
     if (this.blocked) {
       this.blocked = false;
       notify('music');
@@ -87,6 +94,7 @@ class MusicSync {
       return;
     }
     a.muted = !!state.deafened;
+    musicEq.setMuted(!!state.deafened);
     const elapsed = musicElapsed(ms);
     if (this.currentUrl !== ms.track.url) {
       this.currentUrl = ms.track.url;
@@ -124,6 +132,7 @@ class MusicSync {
   /** Кнопка «▶ Включить звук» */
   async forcePlay() {
     this.blocked = false;
+    musicEq.kick();
     const a = this.audio;
     const ms = this.currentState();
     if (!a || !ms?.track?.url) return;

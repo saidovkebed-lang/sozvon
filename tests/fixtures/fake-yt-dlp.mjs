@@ -23,6 +23,9 @@
 //    qaWatchLong (4 ч — больше WATCH_MAX_DURATION_MIN), qaWatchBIG1 (больше --max-filesize), qaWatchFAIL.
 //    Скачивание с -f …height… / --merge-output-format → ffmpeg testsrc+синус в mp4 (VP9+Opus: Chromium из Playwright
 //    не умеет H.264/AAC), прогресс по --progress-template.
+//  - v21 обложки (tests/v21-music-extras): видео qaCov0000NN, плейлист PLqaCov. Миниатюра (thumbnail/thumbnails) —
+//    только у видео с полем thumb: $QA_COVERS_BASE/img/<thumb> (фейковый сервер обложек); у остальных видео
+//    миниатюр нет (никаких адресов i.ytimg.com — тесты не ходят в интернет).
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -100,6 +103,14 @@ const VIDEOS = {
   qaWatchLong: { title: 'QA Watch Four Hours', uploader: 'QA Cinema', duration: 4 * 3600 },
   qaWatchBIG1: { title: 'QA Watch Huge', uploader: 'QA Cinema', duration: 30 },
   qaWatchFAIL: { title: 'QA Watch Broken', uploader: 'QA Cinema', duration: 20 },
+  // v21 обложки: метки qadeezerhit/qaituneshit/… понимает tests/fixtures/fake-covers.js
+  qaCov000001: { title: 'QA Cov Thumb', uploader: 'QA Cov', duration: 30, thumb: 'thumb-qaCov000001.jpg' },
+  qaCov000002: { title: 'QA Cov qadeezerhit Song', uploader: 'QA Cov', duration: 30 },
+  qaCov000003: { title: 'QA Cov qaituneshit Song', uploader: 'QA Cov', duration: 30 },
+  qaCov000004: { title: 'QA Cov qanohit Song', uploader: 'QA Cov', duration: 30 },
+  qaCov000005: { title: 'QA Cov qadeezerhit BrokenThumb', uploader: 'QA Cov', duration: 30, thumb: 'missing-qaCov000005.jpg' },
+  qaCov000006: { title: 'QA Cov Listen Together', uploader: 'QA Cov', duration: 90, thumb: 'thumb-qaCov000006.jpg' },
+  qaCov000007: { title: 'QA Cov EQ Track', uploader: 'QA Cov', duration: 90, thumb: 'thumb-qaCov000007.jpg' },
 };
 // радио-миксы YouTube (list=RD<id>): детерминированные «похожие» для автоплея
 const MIXES = {
@@ -112,6 +123,7 @@ const PLAYLISTS = {
   PLqaWithFail: { title: 'QA YouTube Playlist With Fail', ids: ['qaVid000001', 'qaVidFAIL01', 'qaVid000003'] },
   PLqaCtl: { title: 'QA Ctl Playlist', ids: ['qaCtl000001', 'qaCtl000002', 'qaCtl000003'] },
   PLqaPls: { title: 'QA Pls Playlist', ids: ['qaPls000001', 'qaPls000002', 'qaPls000003'] },
+  PLqaCov: { title: 'QA Cov Playlist', ids: ['qaCov000001', 'qaCov000002', 'qaCov000003', 'qaCov000004'] },
 };
 function spotifyTracks() {
   const out = [];
@@ -132,8 +144,11 @@ const hashId = (s) => 'qs' + crypto.createHash('sha1').update(s).digest('base64u
 function videoInfo(id) {
   const v = VIDEOS[id] || (id.startsWith('qs') ? searchCache()[id] : null);
   if (!v) return null;
+  const thumb = v.thumb && process.env.QA_COVERS_BASE ? `${process.env.QA_COVERS_BASE}/img/${v.thumb}` : null;
   return {
     ...tplEntry, _type: 'url', ie_key: 'Youtube', id, title: v.title, duration: v.duration,
+    thumbnails: thumb ? [{ url: thumb.replace(/\.jpg$/, '-small.jpg'), width: 168, height: 94 }, { url: thumb, width: 480, height: 360 }] : [],
+    thumbnail: thumb,
     channel: v.uploader, uploader: v.uploader, url: `https://www.youtube.com/watch?v=${id}`,
     webpage_url: `https://www.youtube.com/watch?v=${id}`, extractor_key: 'Youtube', extractor: 'youtube',
   };

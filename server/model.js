@@ -119,6 +119,8 @@ export function publicUser(u, { self = false } = {}) {
     avatarFrame: cleanChoice(u.avatarFrame, AVATAR_FRAMES) || null,
     bannerPreset: cleanChoice(u.bannerPreset, BANNER_PRESETS) || null,
     badges: computeBadges(u),
+    // «Сейчас слушает» (музыка бота в голосовом канале): false — пользователь скрыл это в настройках
+    showListening: u.showListening !== false,
   };
 }
 

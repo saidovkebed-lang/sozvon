@@ -23,6 +23,7 @@ import {
 import { sendPush, pushPublicKey } from './push.js';
 import { observeStats, noteMemberJoined, startStats } from './stats.js';
 import { cleanServerTheme, markStreamed } from './cosmetics.js';
+import { itemCover } from './music-library.js';
 
 const serverRoom = (id) => `server:${id}`;
 const userRoom = (id) => `user:${id}`;
@@ -1015,6 +1016,8 @@ export function attachRealtime(io, { uploadsDir, dataDir = path.dirname(uploadsD
           out.url = str(t.url).slice(0, 500);
         }
         if (t.autoplay === true) out.autoplay = true; // добавлен автоплеем
+        const cover = itemCover(out); // обложка: только наш адрес /media/covers/… (server/covers.js)
+        if (cover) out.cover = cover;
         return out;
       };
       const state = {
