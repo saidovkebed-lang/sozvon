@@ -1,5 +1,5 @@
 # Astra — обновление/проверка обновлений по кнопке в админ-панели. Создан deploy/install.sh / update.sh.
-# Запускается только sozvon-self-update.path. Скрипт читает из запроса одно слово (check|update) и ничего
+# Запускается только sozvon-self-update.path. Скрипт читает из запроса одно слово (check|update|backup) и ничего
 # из него не выполняет; результат — в @STATE_DIR@ (root, приложению только для чтения). docs/ADMIN.md
 [Unit]
 Description=Astra: self-update from the admin panel

@@ -26,6 +26,7 @@ import { cleanServerTheme, markStreamed } from './cosmetics.js';
 import { createAdminOps } from './admin/ops.js';
 import { itemCover } from './music-library.js';
 import { cleanListening, createListeningStore, ListeningError } from './pc-listening.js';
+import { emit as emitEvent } from './events.js';
 
 const serverRoom = (id) => `server:${id}`;
 const userRoom = (id) => `user:${id}`;
@@ -212,6 +213,8 @@ export function attachRealtime(io, { uploadsDir, dataDir = path.dirname(uploadsD
     if (!target || target.isBot) return;
     const n = addNotification(userId, { type, channelId, serverId, message });
     io.to(userRoom(userId)).emit('notification:new', { notification: n });
+    // Telegram-бот (server/tgbot.js) сам проверит настройки пользователя, DND и «только когда меня нет в Astra»
+    emitEvent('notify', userId, n, message, { active: hasVisibleClient(userId) });
     if (target.status === 'dnd' || hasVisibleClient(userId)) return;
     const subs = livePushSubs(userId);
     if (!subs.length) return;
@@ -292,6 +295,92 @@ export function attachRealtime(io, { uploadsDir, dataDir = path.dirname(uploadsD
     botSocket.emit('bot:command', {
       command, args, userId: user.id, username: user.username, serverId, textChannelId, voiceChannelId,
     });
+  }
+
+  // ---------- отправка сообщений (Socket.IO и ответы из Telegram, server/tgbot.js) ----------
+  const cleanText = (content) => {
+    if (content !== undefined && content !== null && typeof content !== 'string') fail('Некорректный текст сообщения');
+    const text = str(content).replace(/\r\n/g, '\n').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '').trim();
+    if (text.length > 2000) fail('Сообщение слишком длинное (максимум 2000 символов)');
+    return text;
+  };
+  const rateLimit = (limiter) => {
+    const now = Date.now();
+    if (now > limiter.reset) { limiter.count = 0; limiter.reset = now + 10_000; }
+    if (++limiter.count > 25) fail('Слишком много сообщений подряд — подождите пару секунд');
+  };
+
+  /** Сообщение в ЛС: только текст и вложения; писать можно, пока есть общий сервер */
+  function sendDm(user, dm, content, attachments, limiter) {
+    const other = findUser(dmOther(dm, user.id));
+    if (!other || other.isBot) fail('Собеседник недоступен');
+    if (!sharesServer(user.id, other.id)) fail('Писать можно только тем, с кем у вас есть общий сервер');
+    const text = cleanText(content);
+    const atts = validateAttachments(attachments);
+    if (!text && atts.length === 0) fail('Нельзя отправить пустое сообщение');
+    rateLimit(limiter);
+    const msg = addMessage({ channelId: dm.id, authorId: user.id, content: text, attachments: atts });
+    dm.lastAt = msg.createdAt;
+    if (dm.hidden) dm.hidden = {}; // новое сообщение возвращает чат в список у обоих
+    setRead(user.id, dm.id, msg.createdAt);
+    save();
+    const message = publicMessage(msg);
+    for (const uid of dm.userIds) {
+      io.to(userRoom(uid)).emit('dm:updated', { dm: publicDm(dm, uid) });
+      io.to(userRoom(uid)).emit('message:new', { message });
+    }
+    if (isViewing(other.id, dm.id)) setRead(other.id, dm.id, msg.createdAt);
+    else notifyUser(other.id, { type: 'dm', channelId: dm.id, message: msg });
+    return { message };
+  }
+
+  /** Отправить сообщение от имени пользователя со всеми проверками прав и лимитом (limiter — {count, reset}). */
+  function postMessage(user, { channelId, content, attachments }, limiter) {
+    const dm = findDm(channelId);
+    if (dm) return sendDm(user, requireDm(channelId, user), content, attachments, limiter);
+    const { channel, server, perms } = requireChannel(channelId, user, 'text');
+    if (!has(perms, PERMS.SEND_MESSAGES)) fail('Нет права писать в этот канал');
+    const text = cleanText(content);
+    const atts = validateAttachments(attachments);
+    if (atts.length && !has(perms, PERMS.ATTACH_FILES)) fail('Нет права прикреплять файлы в этом канале');
+    if (!text && atts.length === 0) fail('Нельзя отправить пустое сообщение');
+    rateLimit(limiter);
+
+    const mentionEveryone = /(^|[^\p{L}\p{N}_@])@(everyone|here)(?![\p{L}\p{N}_])/u.test(text) && has(perms, PERMS.MENTION_EVERYONE);
+    const msg = addMessage({ channelId: channel.id, authorId: user.id, content: text, attachments: atts, mentionEveryone });
+    const message = publicMessage(msg);
+    emitToViewers(channel.id, 'message:new', { message });
+    setRead(user.id, channel.id, msg.createdAt);
+    notifyMentions(server, channel, msg);
+
+    const cmd = text.match(/^!([\p{L}\d]+)(?:\s+([\s\S]*))?$/u);
+    if (cmd) {
+      const command = cmd[1].toLowerCase();
+      const args = (cmd[2] || '').trim();
+      if (!has(perms, PERMS.USE_MUSIC_BOT)) setTimeout(() => sendSystem(channel, NO_MUSIC_PERM), 50);
+      else if (isBotOnline()) forwardCommand({ command, args, user, serverId: server.id, textChannelId: channel.id });
+      else setTimeout(() => sendSystem(channel, BOT_OFFLINE_TEXT), 50);
+    }
+    return { message };
+  }
+
+  // Ответ из Telegram: свой лимит на пользователя (как у одной вкладки); ошибки — WsError с понятным текстом
+  const tgLimiters = new Map();
+  function postAsUser(userId, channelId, content) {
+    const user = findUser(userId);
+    if (!user || user.isBot) fail('Аккаунт не найден');
+    let limiter = tgLimiters.get(userId);
+    if (!limiter) { limiter = { count: 0, reset: Date.now() + 10_000 }; tgLimiters.set(userId, limiter); }
+    return postMessage(user, { channelId, content }, limiter);
+  }
+  /** Где сообщение: { kind: 'dm', other } | { kind: 'channel', server, channel } — для подписи в Telegram. */
+  function describeTarget(userId, channelId) {
+    const dm = findDm(channelId);
+    if (dm) return isDmMember(dm, userId) ? { kind: 'dm', other: findUser(dmOther(dm, userId)) } : null;
+    const channel = findChannel(channelId);
+    const server = channel && findServer(channel.serverId);
+    if (!server || !isMember(server, userId) || !canViewChannel(server, channel.id, userId)) return null;
+    return { kind: 'channel', server, channel };
   }
 
   // ---------- голос и права ----------
@@ -434,6 +523,7 @@ export function attachRealtime(io, { uploadsDir, dataDir = path.dirname(uploadsD
         server.memberIds.push(user.id);
         save();
         noteMemberJoined(server.id);
+        emitEvent('joined', server, user, { via: 'invite' });
       }
       io.in(userRoom(user.id)).socketsJoin(serverRoom(server.id));
       emitServerUpdated(server);
@@ -768,70 +858,7 @@ export function attachRealtime(io, { uploadsDir, dataDir = path.dirname(uploadsD
       return { messages: list.slice(-50).map(publicMessage) };
     });
 
-    const cleanText = (content) => {
-      if (content !== undefined && content !== null && typeof content !== 'string') fail('Некорректный текст сообщения');
-      const text = str(content).replace(/\r\n/g, '\n').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '').trim();
-      if (text.length > 2000) fail('Сообщение слишком длинное (максимум 2000 символов)');
-      return text;
-    };
-    const rateLimit = () => {
-      const now = Date.now();
-      if (now > limiter.reset) { limiter.count = 0; limiter.reset = now + 10_000; }
-      if (++limiter.count > 25) fail('Слишком много сообщений подряд — подождите пару секунд');
-    };
-
-    /** Сообщение в ЛС: только текст и вложения; писать можно, пока есть общий сервер */
-    function sendDm(dm, content, attachments) {
-      const other = findUser(dmOther(dm, user.id));
-      if (!other || other.isBot) fail('Собеседник недоступен');
-      if (!sharesServer(user.id, other.id)) fail('Писать можно только тем, с кем у вас есть общий сервер');
-      const text = cleanText(content);
-      const atts = validateAttachments(attachments);
-      if (!text && atts.length === 0) fail('Нельзя отправить пустое сообщение');
-      rateLimit();
-      const msg = addMessage({ channelId: dm.id, authorId: user.id, content: text, attachments: atts });
-      dm.lastAt = msg.createdAt;
-      if (dm.hidden) dm.hidden = {}; // новое сообщение возвращает чат в список у обоих
-      setRead(user.id, dm.id, msg.createdAt);
-      save();
-      const message = publicMessage(msg);
-      for (const uid of dm.userIds) {
-        io.to(userRoom(uid)).emit('dm:updated', { dm: publicDm(dm, uid) });
-        io.to(userRoom(uid)).emit('message:new', { message });
-      }
-      if (isViewing(other.id, dm.id)) setRead(other.id, dm.id, msg.createdAt);
-      else notifyUser(other.id, { type: 'dm', channelId: dm.id, message: msg });
-      return { message };
-    }
-
-    on('message:send', ({ channelId, content, attachments }) => {
-      const dm = findDm(channelId);
-      if (dm) return sendDm(requireDm(channelId, user), content, attachments);
-      const { channel, server, perms } = requireChannel(channelId, user, 'text');
-      if (!has(perms, PERMS.SEND_MESSAGES)) fail('Нет права писать в этот канал');
-      const text = cleanText(content);
-      const atts = validateAttachments(attachments);
-      if (atts.length && !has(perms, PERMS.ATTACH_FILES)) fail('Нет права прикреплять файлы в этом канале');
-      if (!text && atts.length === 0) fail('Нельзя отправить пустое сообщение');
-      rateLimit();
-
-      const mentionEveryone = /(^|[^\p{L}\p{N}_@])@(everyone|here)(?![\p{L}\p{N}_])/u.test(text) && has(perms, PERMS.MENTION_EVERYONE);
-      const msg = addMessage({ channelId: channel.id, authorId: user.id, content: text, attachments: atts, mentionEveryone });
-      const message = publicMessage(msg);
-      emitToViewers(channel.id, 'message:new', { message });
-      setRead(user.id, channel.id, msg.createdAt);
-      notifyMentions(server, channel, msg);
-
-      const cmd = text.match(/^!([\p{L}\d]+)(?:\s+([\s\S]*))?$/u);
-      if (cmd) {
-        const command = cmd[1].toLowerCase();
-        const args = (cmd[2] || '').trim();
-        if (!has(perms, PERMS.USE_MUSIC_BOT)) setTimeout(() => sendSystem(channel, NO_MUSIC_PERM), 50);
-        else if (isBotOnline()) forwardCommand({ command, args, user, serverId: server.id, textChannelId: channel.id });
-        else setTimeout(() => sendSystem(channel, BOT_OFFLINE_TEXT), 50);
-      }
-      return { message };
-    });
+    on('message:send', ({ channelId, content, attachments }) => postMessage(user, { channelId, content, attachments }, limiter));
 
     on('message:delete', ({ messageId }) => {
       if (typeof messageId !== 'string') fail('Сообщение не найдено');
@@ -1146,6 +1173,9 @@ export function attachRealtime(io, { uploadsDir, dataDir = path.dirname(uploadsD
   // Админ-панель экземпляра (server/admin/): действия над любым сервером/пользователем с рассылками
   const adminOps = createAdminOps({ io, voice, removeMember, permsChanged, emitServerUpdated, emitToViewers, forgetNotifications, mediaInUse });
 
-  return { isBotOnline, emitUserUpdated, disconnectSessions, emitServerUpdated, emitMusicPlaylists, emitMusicSettings, watch, adminOps };
+  return {
+    isBotOnline, emitUserUpdated, disconnectSessions, emitServerUpdated, emitMusicPlaylists, emitMusicSettings, watch, adminOps,
+    postAsUser, describeTarget, hasVisibleClient, WsError,
+  };
 }
 

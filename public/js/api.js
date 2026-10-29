@@ -38,6 +38,14 @@ export const api = {
   login2fa: (challenge, code) => request('POST', '/api/login/2fa', { challenge, code }, { auth: false }),
   login2faStatus: (challenge) => request('POST', '/api/login/2fa/status', { challenge }, { auth: false }),
   login2faResend: (challenge) => request('POST', '/api/login/2fa/resend', { challenge }, { auth: false }),
+  // Telegram-бот: вход без пароля, сброс пароля, настройки уведомлений в Telegram
+  loginTelegram: (username) => request('POST', '/api/login/telegram', { username }, { auth: false }),
+  loginTelegramStatus: (challenge) => request('POST', '/api/login/telegram/status', { challenge }, { auth: false }),
+  passwordResetRequest: (username) => request('POST', '/api/password-reset/request', { username }, { auth: false }),
+  passwordResetCheck: (token) => request('POST', '/api/password-reset/check', { token }, { auth: false }),
+  passwordResetComplete: (body) => request('POST', '/api/password-reset/complete', body, { auth: false }),
+  telegramSettings: () => request('GET', '/api/me/telegram'),
+  patchTelegramSettings: (body) => request('PATCH', '/api/me/telegram', body),
   me: () => request('GET', '/api/me'),
   config: () => request('GET', '/api/config', undefined, { auth: false }),
   uploadAttachment(file) {

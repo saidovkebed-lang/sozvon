@@ -232,6 +232,9 @@ function startTgLink() {
     h('input', { type: 'text', name: 'username', autocomplete: 'username', hidden: true, value: state.user?.username || '' }),
     h('p', { class: 'settings-hint' }, 'Коды входа будут приходить от бота этого сервера Astra в Telegram, а вход можно будет подтвердить кнопкой «Это я». Подтвердите, что это вы: введите текущий пароль.'),
     field('twofa-tg-password', 'Текущий пароль', { type: 'password', autocomplete: 'current-password', required: true }),
+    h('label', { class: 'twofa-check' },
+      h('input', { type: 'checkbox', id: 'twofa-tg-passwordless', checked: true }),
+      h('span', {}, 'Вход без пароля через Telegram — кнопкой «✅ Войти» в боте (можно выключить в настройках и в боте)')),
     errorEl(),
     h('div', { class: 'twofa-actions' },
       h('button', { type: 'button', class: 'btn btn--ghost', onclick: () => refresh() }, 'Отмена'),
@@ -243,7 +246,7 @@ function startTgLink() {
     if (!password) { err.textContent = 'Введите текущий пароль'; return; }
     setBusy(form, true);
     try {
-      showTgLink(await req('POST', '/api/me/2fa/telegram/link', { password }));
+      showTgLink(await req('POST', '/api/me/2fa/telegram/link', { password, passwordless: $('#twofa-tg-passwordless', form).checked }));
     } catch (ex) { err.textContent = ex.message; setBusy(form, false); }
   });
   root.replaceChildren(form);

@@ -3,7 +3,7 @@ import { $, initAvatarHover } from './util.js';
 import { state, notify, upsertServer, setUserOnline, getServer, applyNetConfig, applyUserUpdate } from './state.js';
 import { api, getToken, setToken } from './api.js';
 import * as sock from './socket.js';
-import { initAuth, showAuth, hideAuth } from './ui/auth.js';
+import { initAuth, showAuth, hideAuth, setAuthTelegram } from './ui/auth.js';
 import { initModals, initConfirm } from './ui/modals.js';
 import { initServers } from './ui/servers.js';
 import { initSidebar } from './ui/sidebar.js';
@@ -271,6 +271,7 @@ export function applyConfig(cfg) {
   if (!cfg) return;
   applyNetConfig(cfg);
   state.botOnline = !!cfg.botOnline;
+  setAuthTelegram(!!cfg.telegram);
 }
 
 async function boot() {

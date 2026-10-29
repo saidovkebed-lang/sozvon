@@ -10,6 +10,7 @@ import { save } from '../db.js';
 import { findUserByName, findUser } from '../model.js';
 import { isEnvAdmin, isInstanceAdmin, listAdmins, updateSettings, admin2faRequired } from './access.js';
 import { audit } from './audit.js';
+import { startChatsFor } from '../tgbot.js';
 
 const ROOT_ACTOR = { id: null, username: 'root (admin.sh)' };
 
@@ -52,7 +53,14 @@ export function controlCommand(body) {
     audit(ROOT_ACTOR, 'admin.revoke', { type: 'user', id: u.id, name: u.username });
     return { status: 200, body: { ok: true, user: u.username, admins: adminList(), stillAdmin: isInstanceAdmin(u) } };
   }
-  return { status: 400, body: { ok: false, error: 'Команды: list | grant ИМЯ | revoke ИМЯ | require-2fa on|off|default' } };
+  // deploy/backup.sh setup: сервер сам постоянно читает обновления бота, поэтому backup.sh не вызывает getUpdates,
+  // а спрашивает здесь, кто недавно нажал /start (только если настраивается тот же бот: сравнение по sha256 токена)
+  if (cmd === 'tg-chats') {
+    const botHash = String(body.botHash || '');
+    if (!/^[0-9a-f]{16}$/.test(botHash)) return { status: 400, body: { ok: false, error: 'tg-chats: нужен botHash' } };
+    return { status: 200, body: { ok: true, ...startChatsFor(botHash) } };
+  }
+  return { status: 400, body: { ok: false, error: 'Команды: list | grant ИМЯ | revoke ИМЯ | require-2fa on|off|default | tg-chats' } };
 }
 
 export function startControl(dataDir) {

@@ -4,18 +4,22 @@
 # создаёт приложение (пользователь sozvon), и стартует sozvon-self-update.service → этот скрипт.
 #   sudo bash /opt/sozvon/deploy/self-update.sh check     вручную: проверить, есть ли новая версия
 #   sudo bash /opt/sozvon/deploy/self-update.sh update    вручную: то же, что кнопка (обычно — просто update.sh)
+#   sudo bash /opt/sozvon/deploy/self-update.sh backup    вручную: то же, что «💾 Бэкап сейчас» в Telegram-боте
 #
 # Безопасность (граница root ↔ sozvon):
 #  • единственный вход — файл-запрос. Из него читаются максимум 32 байта (с тайм-аутом, ссылки и не-файлы
-#    игнорируются), оставляются только буквы a-z и сравниваются с двумя словами: check | update. Содержимое
+#    игнорируются), оставляются только буквы a-z и сравниваются с тремя словами: check | update | backup. Содержимое
 #    никогда не выполняется и не подставляется в команды; сам файл удаляется (rm не идёт по ссылкам).
 #  • результат пишется НЕ в каталог данных (его владелец — sozvon, там возможны подменённые ссылки), а в
 #    $STATE_DIR=/var/lib/sozvon-state (root:root 755, файлы 644): приложение может только читать.
 #  • выполняется только код из $APP_DIR (root:root) — тот же deploy/update.sh, что и при ручном обновлении.
 #  • одновременные запуски исключены flock (/run/sozvon-self-update.lock), update.sh держит свой замок.
 #
+#  • backup запускает только $APP_DIR/deploy/backup.sh now (тот же, что ночной таймер): итог пишет сам backup.sh
+#    в $STATE_DIR/backup-status.json, а здесь — $STATE_DIR/backup-run.json (состояние и код выхода) и backup-run.log.
+#
 # Переопределения (тесты): DATA_DIR, APP_DIR, STATE_DIR, SOZVON_BRANCH, SELF_UPDATE_LOCK, SELF_UPDATE_CMD,
-# SELF_UPDATE_ALLOW_NONROOT=1.
+# SELF_UPDATE_BACKUP_CMD, SELF_UPDATE_ALLOW_NONROOT=1.
 set -Eeuo pipefail
 umask 022
 
@@ -25,6 +29,7 @@ STATE_DIR=${STATE_DIR:-/var/lib/sozvon-state}
 BRANCH=${SOZVON_BRANCH:-main}
 LOCK=${SELF_UPDATE_LOCK:-/run/sozvon-self-update.lock}
 UPDATE_CMD=${SELF_UPDATE_CMD:-$APP_DIR/deploy/update.sh}
+BACKUP_CMD=${SELF_UPDATE_BACKUP_CMD:-$APP_DIR/deploy/backup.sh}
 REQ=$DATA_DIR/update-request
 export PATH="/opt/node/bin:/usr/local/bin:$PATH"
 
@@ -115,9 +120,29 @@ do_update() {
   say "Обновление завершено: код $rc (${from:-?} → ${to:-?})"
 }
 
+do_backup() {
+  local started rc tmp result
+  started=$(now_ms)
+  tmp=$(mktemp "$STATE_DIR/.log.XXXXXX")
+  chmod 0644 "$tmp"
+  mv -f "$tmp" "$STATE_DIR/backup-run.log"
+  json "state=running" "startedAt:n=$started" | write_state backup-run.json
+  set +e
+  # backup.sh сам пишет $STATE_DIR/backup-status.json (файл, размер, Telegram, ошибка)
+  SOZVON_STATE_DIR=$STATE_DIR bash "$BACKUP_CMD" now >>"$STATE_DIR/backup-run.log" 2>&1 </dev/null
+  rc=$?
+  set -e
+  result=failed
+  # 2 — локальная копия готова, но в Telegram отправить не удалось
+  { [ "$rc" -eq 0 ] || [ "$rc" -eq 2 ]; } && result="done"
+  json "state=$result" "startedAt:n=$started" "finishedAt:n=$(now_ms)" "exitCode:n=$rc" | write_state backup-run.json
+  say "Бэкап по запросу завершён: код $rc"
+}
+
 case "$kind" in
   check) do_check ;;
   update) do_update ;;
+  backup) do_backup ;;
   "") say "Запроса нет — нечего делать" ;;
   *) say "Неизвестный запрос «$kind» — пропущено" ;;
 esac
