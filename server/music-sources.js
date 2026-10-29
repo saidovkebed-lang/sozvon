@@ -21,6 +21,7 @@ import {
   getMusicDir, registerFile, findBySource, findTrackRec, sanitizeFileName, uniqueName, hasYtDlp, hasFfmpeg, ytdlpPath,
   AUDIO_EXT, MUSIC_MAX_BYTES, YTDLP_HOSTS, parseUrl, downloadDirect,
 } from './music-library.js';
+import { coverUrl, titleCoverKey } from './covers.js';
 import { parseSpotify, isSpotifyShortLink, expandShortLink, fetchSpotify, spotifyApiConfigured, TYPE_RU } from './spotify.js';
 
 // ---------- настройки (env читается при каждом обращении — удобно для тестов) ----------
@@ -305,7 +306,7 @@ export function downloadUrl(url, { addedBy = null, aliases = [], meta = null, sr
     if (hasFfmpeg()) args.push('-x', '--audio-format', 'm4a>m4a/mp3>mp3/mp3', '--audio-quality', '5');
     args.push('--max-filesize', `${Math.floor(MUSIC_MAX_BYTES / 1024 / 1024)}M`,
       '-o', path.join(tmpDir, '%(id)s.%(ext)s'),
-      '--print', 'after_move:%(.{id,title,track,artist,uploader,channel,duration,extractor_key,webpage_url,filepath})j',
+      '--print', 'after_move:%(.{id,title,track,artist,uploader,channel,duration,extractor_key,webpage_url,thumbnail,filepath})j',
       '--', url);
     try {
       const timeoutMs = downloadTimeoutMs();
@@ -334,6 +335,7 @@ export function downloadUrl(url, { addedBy = null, aliases = [], meta = null, sr
       degradedUntil.delete(source);
       return await registerFile(finalName, addedBy, {
         title, artist, duration: Number(info.duration) || meta?.duration || 0,
+        thumb: typeof info.thumbnail === 'string' ? info.thumbnail : null,
         sources: [...aliases, uKey, keyOf(info.extractor_key, info.id), info.webpage_url && urlKey(info.webpage_url)],
       });
     } finally {
@@ -343,6 +345,17 @@ export function downloadUrl(url, { addedBy = null, aliases = [], meta = null, sr
 }
 
 // ---------- поиск ----------
+/** Лучшая миниатюра записи yt-dlp (не шире 1280 px): только для поиска обложки на сервере */
+function bestThumb(e) {
+  const list = Array.isArray(e.thumbnails) ? e.thumbnails.filter((t) => t && typeof t.url === 'string' && /^https?:\/\//.test(t.url)) : [];
+  if (list.length) {
+    const ok = list.filter((t) => !t.width || t.width <= 1280);
+    const pick = (ok.length ? ok : list).reduce((a, b) => ((b.width || 0) > (a.width || 0) ? b : a));
+    return pick.url;
+  }
+  return typeof e.thumbnail === 'string' && /^https?:\/\//.test(e.thumbnail) ? e.thumbnail : null;
+}
+
 function normEntry(e, fallback = {}) {
   if (!e || typeof e !== 'object') return null;
   const url = e.webpage_url || e.url || null;
@@ -356,6 +369,7 @@ function normEntry(e, fallback = {}) {
     duration: Number(e.duration) > 0 ? Math.round(Number(e.duration)) : 0,
     key: keyOf(extractor, e.id),
     src: srcOfExtractor(extractor),
+    thumb: bestThumb(e),
   };
 }
 
@@ -454,18 +468,25 @@ async function flatPlaylist(url, src) {
   return value;
 }
 
+/** Обложка «ожидающего» элемента: запоминаем миниатюру источника (сервер скачает её сам), клиенту — наш адрес */
+function withCover(item, thumb) {
+  const cover = coverUrl(item.ref?.key || titleCoverKey(item.artist, item.title), { artist: item.artist, title: item.title, thumbs: thumb ? [thumb] : [] });
+  if (cover) item.cover = cover;
+  return item;
+}
+
 function pendingFromEntry(e, src) {
-  return {
+  return withCover({
     pending: true, id: pendingId(), title: e.title || 'Без названия', artist: e.artist || '', duration: e.duration || 0,
     source: src, ref: { url: e.url, key: e.key || urlKey(e.url) },
-  };
+  }, e.thumb);
 }
 
 function pendingFromSpotify(t) {
-  return {
+  return withCover({
     pending: true, id: pendingId(), title: t.title, artist: t.artist, duration: t.duration || 0, source: 'spotify',
     ref: { key: t.spotifyId ? `spotify:${t.spotifyId}` : null, query: [t.mainArtist, t.title].filter(Boolean).join(' - ') },
-  };
+  }, t.image);
 }
 
 /**

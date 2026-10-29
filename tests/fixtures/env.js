@@ -15,6 +15,10 @@ export const MUSIC_PORT = Number(process.env.QA_MUSIC_PORT || PORT + 10);
 export const MUSIC_BASE_URL = `https://localhost:${MUSIC_PORT}`;
 export const MUSIC_DATA_DIR = process.env.QA_MUSIC_DATA_DIR || path.join(os.tmpdir(), `sozvon-qa-music-data${SUFFIX}`);
 export const SPOTIFY_FAKE_PORT = Number(process.env.QA_SPOTIFY_PORT || PORT + 91);
+// Обложки (tests/v21-music-extras): фейковые Deezer/iTunes и картинки миниатюр
+export const COVERS_FAKE_PORT = Number(process.env.QA_COVERS_PORT || PORT + 92);
+export const COVERS_FAKE_BASE = `http://127.0.0.1:${COVERS_FAKE_PORT}`;
+export const COVERS_LOG = path.join(MUSIC_DATA_DIR + '-covers.log');
 export const FAKE_YTDLP = path.join(ROOT, 'tests', 'fixtures', 'fake-yt-dlp.mjs');
 export const YTDLP_LOG = path.join(MUSIC_DATA_DIR + '-ytdlp-calls.log');
 

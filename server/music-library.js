@@ -10,6 +10,7 @@ import { pipeline } from 'node:stream/promises';
 import { parseFile } from 'music-metadata';
 import { db, save } from './db.js';
 import { HttpError } from './auth.js';
+import { coverUrl, titleCoverKey, coverIdOf, setCoverResolver } from './covers.js';
 
 export const MUSIC_MAX_BYTES = 50 * 1024 * 1024;
 export const AUDIO_EXT = new Set(['.mp3', '.m4a', '.aac', '.ogg', '.oga', '.opus', '.wav', '.flac', '.webm', '.weba', '.mp4']);
@@ -82,11 +83,38 @@ export function fixMulterName(name) {
 const trackId = (file) => crypto.createHash('sha1').update(file).digest('hex').slice(0, 12);
 
 export function publicTrack(t) {
-  return {
+  const out = {
     id: t.id, title: t.title, artist: t.artist, duration: t.duration,
     url: '/media/music/' + encodeURIComponent(t.file), addedBy: t.addedBy,
   };
+  const cover = trackCover(t);
+  if (cover) out.cover = cover;
+  return out;
 }
+
+// ---------- обложки (server/covers.js) ----------
+/** Ключ обложки трека библиотеки: ключ источника (как у «ожидающего» элемента, из которого он скачан) или название */
+const trackCoverKey = (t) => t.sources?.[0] || titleCoverKey(t.artist, t.title) || `lib:${t.id}`;
+/** Наш адрес обложки трека библиотеки (null — обложки выключены) */
+export function trackCover(t) {
+  if (!t) return null;
+  return coverUrl(trackCoverKey(t), { artist: t.artist, title: t.title, thumbs: t.thumb ? [t.thumb] : [] });
+}
+/**
+ * Адрес обложки элемента очереди/плейлиста: готовый трек — по записи библиотеки,
+ * «ожидающий» — по ключу источника (ref.key) или по названию.
+ */
+export function itemCover(it) {
+  if (!it || typeof it !== 'object') return null;
+  const rec = !it.pending && typeof (it.trackId || it.id) === 'string' ? findTrackRec(it.trackId || it.id) : null;
+  if (rec) return trackCover(rec);
+  const key = typeof it.ref?.key === 'string' && /^[a-z]+:[^\s]{1,200}$/.test(it.ref.key) ? it.ref.key : titleCoverKey(it.artist, it.title);
+  return coverUrl(key, { artist: it.artist, title: it.title });
+}
+// после перезапуска реестр обложек пуст: найти трек библиотеки по id обложки
+setCoverResolver((id) => {
+  for (const t of db.data?.tracks || []) if (coverIdOf(trackCoverKey(t)) === id) { trackCover(t); return; }
+});
 
 async function readMeta(file) {
   const full = path.join(musicDir, file);
@@ -175,6 +203,8 @@ export async function registerFile(file, addedBy, extra = {}) {
   const track = { id: trackId(file), file, ...meta, addedBy, size: st.size, mtimeMs: st.mtimeMs, createdAt: Date.now() };
   const sources = [...new Set((extra.sources || []).filter(Boolean))];
   if (sources.length) track.sources = sources;
+  // миниатюра источника (yt-dlp) — только для поиска обложки на сервере, клиенту не отдаётся
+  if (typeof extra.thumb === 'string' && /^https?:\/\//.test(extra.thumb)) track.thumb = extra.thumb.slice(0, 1000);
   db.data.tracks.push(track);
   save();
   return publicTrack(track);

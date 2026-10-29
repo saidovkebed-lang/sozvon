@@ -121,6 +121,8 @@ export function publicUser(u, { self = false } = {}) {
     badges: computeBadges(u),
     // 2FA: только флаг и только самому владельцу (секрет и коды восстановления никогда не уходят клиенту)
     ...(self ? { totpEnabled: !!u.totpEnabled } : {}),
+    // «Сейчас слушает» (музыка бота в голосовом канале): false — пользователь скрыл это в настройках
+    showListening: u.showListening !== false,
   };
 }
 

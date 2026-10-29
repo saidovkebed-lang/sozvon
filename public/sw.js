@@ -7,7 +7,7 @@
 // клик по уведомлению открывает нужный чат в уже открытом окне или в новом.
 // При изменении списка/логики — поднять VERSION: старые кэши удалятся при activate.
 
-const VERSION = 'v4-astra-2.0.2';
+const VERSION = 'v4-astra-2.1.0';
 const CACHE = `sozvon-shell-${VERSION}`;
 
 const SHELL = [
@@ -17,6 +17,7 @@ const SHELL = [
   '/css/watch.css',
   '/css/recap.css', '/js/ui/recap.js', // «Astra Итоги»
   '/css/astra2.css',
+  '/css/music-extras.css', '/js/ui/covers.js', '/js/ui/listening.js', '/js/ui/music-eq-panel.js', '/js/audio/music-eq.js', // обложки, эквалайзер, «Сейчас слушает»
   '/js/main.js',
   '/js/api.js',
   '/js/music.js',

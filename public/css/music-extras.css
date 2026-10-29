@@ -1,0 +1,120 @@
+/* Музыка: обложки треков, эквалайзер, «Сейчас слушает» (ui/covers.js, ui/music-eq-panel.js, ui/listening.js) */
+
+/* ---------- обложки ---------- */
+.cover {
+  position: relative;
+  flex: none;
+  display: inline-grid; place-items: center;
+  width: 32px; height: 32px;
+  overflow: hidden;
+  border-radius: var(--r-sm, 6px);
+  background: var(--accent-gradient);
+  color: #fff;
+}
+.cover .icon { width: 55%; height: 55%; }
+.cover--xs { width: 16px; height: 16px; border-radius: 3px; }
+.cover--sm { width: 32px; height: 32px; }
+.cover--md { width: 52px; height: 52px; border-radius: var(--r-md); }
+.cover__img {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity var(--dur, 0.2s) ease;
+}
+.has-img > .cover__img { opacity: 1; }
+.cover.has-img > .icon { visibility: hidden; }
+
+/* плавающий плеер: обложка вместо значка ноты */
+.music-player__art { position: relative; overflow: hidden; }
+.music-player__art.has-img { background: var(--bg-5); }
+.music-player__art.has-img > .icon { visibility: hidden; animation: none; }
+.music-player.is-loading .music-player__art.has-img > .cover__img { opacity: 0.55; }
+
+.queue-item__cover { margin-left: -4px; }
+.track > .track__cover { margin-right: var(--sp-2); }
+
+/* ---------- эквалайзер ---------- */
+.music-player__eq.is-on { color: var(--accent-text); }
+.music-player__eq.is-on::after {
+  content: ''; position: absolute; top: 6px; right: 6px;
+  width: 6px; height: 6px; border-radius: 50%; background: var(--accent);
+}
+.music-player__eq { position: relative; }
+/* кнопка эквалайзера — седьмая в ряду: в полной карточке (320px) ползунку громкости хватает и 40px */
+.music-player__controls .slider { min-width: 40px; }
+
+.eq-panel {
+  position: fixed;
+  z-index: calc(var(--z-player, 50) + 5);
+  width: min(380px, calc(100vw - 24px));
+  padding: var(--sp-3);
+  display: flex; flex-direction: column; gap: var(--sp-3);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-xl);
+  box-shadow: var(--shadow-lg);
+  color: var(--text);
+  animation: player-in var(--dur-slow, 0.25s) var(--ease-out, ease-out) both;
+}
+.eq-panel:focus { outline: none; }
+.eq-panel__head { display: flex; align-items: center; gap: var(--sp-2); }
+.eq-panel__title { flex: 1; display: flex; align-items: center; gap: 6px; margin: 0; font-size: var(--fs-md); font-weight: var(--fw-semibold); }
+.eq-panel__switch { font-size: var(--fs-sm); color: var(--text-muted); cursor: pointer; }
+.eq-panel__presets { display: flex; flex-wrap: wrap; gap: 6px; }
+.eq-preset {
+  height: 28px; padding: 0 10px;
+  border-radius: var(--r-pill);
+  background: var(--bg-5);
+  color: var(--text);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+  display: inline-flex; align-items: center;
+}
+button.eq-preset:hover { background: var(--bg-4, var(--bg-5)); filter: brightness(1.15); }
+.eq-preset.is-active, button.eq-preset.is-active:hover { background: var(--accent); color: #fff; filter: none; }
+.eq-panel__preamp { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: var(--sp-2); }
+.eq-panel__preamp .field__label { margin: 0; }
+.eq-panel__preamp output { min-width: 56px; text-align: right; font-size: var(--fs-xs); color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.eq-panel__bands {
+  display: grid; grid-template-columns: repeat(10, minmax(0, 1fr));
+  gap: 2px;
+  padding: var(--sp-2) 0;
+  border-radius: var(--r-md);
+  background: var(--bg-3, rgba(255, 255, 255, 0.03));
+}
+.eq-panel.is-off .eq-panel__bands, .eq-panel.is-off .eq-panel__preamp { opacity: 0.55; }
+.eq-band { display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 0; }
+.eq-band__val, .eq-band__label { font-size: 10px; color: var(--text-faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.eq-band__label { color: var(--text-muted); }
+.eq-slider {
+  writing-mode: vertical-lr;
+  direction: rtl;
+  width: 22px; height: 120px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.eq-panel__foot { display: flex; align-items: center; gap: var(--sp-2); }
+.eq-panel__note { flex: 1; margin: 0; font-size: var(--fs-xs); color: var(--text-faint); line-height: 1.35; }
+
+@media (max-width: 639.98px) {
+  .eq-panel {
+    left: 8px !important; right: 8px; bottom: 8px; top: auto !important;
+    width: auto;
+    max-height: calc(100dvh - 16px);
+    overflow-y: auto;
+  }
+  .eq-slider { height: 140px; width: 26px; }
+}
+
+/* ---------- «Сейчас слушает» ---------- */
+.member__listening { display: flex; align-items: center; gap: 4px; color: var(--text-muted); }
+.member__listening-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.profile-listening__row { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; }
+.profile-listening__text { min-width: 0; line-height: 1.3; }
+.profile-listening__title { font-weight: var(--fw-semibold); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.profile-listening__artist { font-size: var(--fs-sm); color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.profile-listening__where { display: flex; align-items: center; gap: 4px; font-size: var(--fs-xs); color: var(--text-faint); }
+.profile-listening__join { margin-top: var(--sp-2); width: 100%; justify-content: center; }
+.profile-listening__reason { margin: 4px 0 0; font-size: var(--fs-xs); color: var(--text-faint); }

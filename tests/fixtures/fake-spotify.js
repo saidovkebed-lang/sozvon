@@ -33,6 +33,14 @@ export const SPOTIFY_PAGES = {
     t[1] = { ...t[1], title: 'QA FAIL Song Nobody Has', subtitle: 'QA Nobody', uri: 'spotify:track:0000000000000000000qaF', uid: 'qafail' };
     e.trackList = t;
   }),
+  // v21 обложки: альбом из 2 треков (свои id — кэш обложек не пересекается с другими тестами),
+  // обложка альбома — картинка фейкового сервера обложек (QA_COVERS_BASE)
+  'album/qaCoverAlbum0000000000': () => derive('spotify-embed-album.html', (e) => {
+    e.name = 'QA Cover Album'; e.title = e.name;
+    e.trackList = e.trackList.slice(0, 2).map((t, i) => ({ ...t, uri: `spotify:track:qaCovTrk0000000000000${i + 1}`, uid: `qacov${i}` }));
+    const img = `${process.env.QA_COVERS_BASE}/img/spotify-album-qacover.jpg`;
+    e.visualIdentity = { ...e.visualIdentity, image: [{ url: img, maxHeight: 300, maxWidth: 300 }, { url: img.replace('.jpg', '-64.jpg'), maxHeight: 64, maxWidth: 64 }] };
+  }),
 };
 
 export function startFakeSpotify(port, logFile) {

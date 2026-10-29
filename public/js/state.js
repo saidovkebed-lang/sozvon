@@ -130,7 +130,7 @@ export function musicElapsed(ms) {
 
 export const PROFILE_FIELDS = ['username', 'color', 'displayName', 'avatar', 'avatarAnimated', 'banner', 'bannerAnimated',
   'bannerColor', 'about', 'pronouns', 'status', 'customStatus', 'profileTheme', 'createdAt',
-  'avatarFrame', 'bannerPreset', 'badges'];
+  'avatarFrame', 'bannerPreset', 'badges', 'showListening'];
 
 function mergeProfile(target, user) {
   for (const k of PROFILE_FIELDS) if (k in user) target[k] = user[k];

@@ -8,6 +8,7 @@ import { api } from '../api.js';
 import { music } from '../music.js';
 import { openModal, closeModal, confirmDialog } from './modals.js';
 import { toastError, toastOk } from './toasts.js';
+import { coverArt } from './covers.js';
 
 let command = async () => false; // music-player.js передаёт свою функцию команд бота
 let lists = [];          // плейлисты текущего сервера (без треков)
@@ -151,6 +152,7 @@ function renderDetail() {
     class: 'queue-item' + (it.ready ? '' : ' is-pending'), dataset: { iid: it.iid, pos: String(i + 1) },
   },
   h('span', { class: 'queue-item__n' }, String(i + 1)),
+  coverArt(it.cover, { size: 'sm', cls: 'queue-item__cover' }),
   h('div', { class: 'queue-item__info' },
     h('div', { class: 'queue-item__title' }, it.title || 'Без названия'),
     h('div', { class: 'queue-item__meta' }, [it.artist || null, it.ready ? null : 'скачается перед воспроизведением'].filter(Boolean).join(' · '))),

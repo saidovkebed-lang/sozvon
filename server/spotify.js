@@ -117,7 +117,15 @@ export async function expandShortLink(raw) {
 
 // ---------- нормализация ----------
 const clean = (s) => String(s ?? '').replace(/\s+/g, ' ').trim();
-function mkTrack({ id, title, artists, durationMs }) {
+/** Из списка картинок Spotify ([{url,width|maxWidth}]) — ближайшая к 300 px (для обложки трека, только на сервере) */
+export function pickImage(list) {
+  const imgs = (Array.isArray(list) ? list : []).filter((i) => i && typeof i.url === 'string' && /^https?:\/\//.test(i.url));
+  if (!imgs.length) return null;
+  const w = (i) => Number(i.width || i.maxWidth || i.height || i.maxHeight) || 300;
+  return imgs.reduce((a, b) => (Math.abs(w(b) - 300) < Math.abs(w(a) - 300) ? b : a)).url;
+}
+
+function mkTrack({ id, title, artists, durationMs, image = null }) {
   const list = (Array.isArray(artists) ? artists : String(artists || '').split(/\s*,\s*/)).map(clean).filter(Boolean);
   const t = clean(title);
   if (!t) return null;
@@ -127,6 +135,7 @@ function mkTrack({ id, title, artists, durationMs }) {
     artist: list.join(', ').slice(0, 200),
     mainArtist: list[0] || '',
     duration: Number.isFinite(durationMs) && durationMs > 0 ? Math.round(durationMs / 100) / 10 : 0,
+    image: typeof image === 'string' ? image : null,
   };
 }
 const idFromUri = (uri) => (String(uri || '').match(/^spotify:track:([A-Za-z0-9]{22})$/) || [])[1] || null;
@@ -173,7 +182,7 @@ function apiReason(r) {
 async function viaApi(type, id, limit) {
   if (type === 'track') {
     const t = await apiGet(`/v1/tracks/${id}`);
-    const tr = mkTrack({ id: t.id, title: t.name, artists: (t.artists || []).map((a) => a.name), durationMs: t.duration_ms });
+    const tr = mkTrack({ id: t.id, title: t.name, artists: (t.artists || []).map((a) => a.name), durationMs: t.duration_ms, image: pickImage(t.album?.images) });
     return { title: tr?.title || 'Трек', tracks: tr ? [tr] : [], total: 1 };
   }
   const obj = await apiGet(type === 'album' ? `/v1/albums/${id}` : `/v1/playlists/${id}`);
@@ -185,7 +194,7 @@ async function viaApi(type, id, limit) {
     for (const it of page.items || []) {
       const t = type === 'album' ? it : (it?.track || it?.item);
       if (!t || t.is_local || (t.type && t.type !== 'track')) continue;
-      const tr = mkTrack({ id: t.id, title: t.name, artists: (t.artists || []).map((a) => a.name), durationMs: t.duration_ms });
+      const tr = mkTrack({ id: t.id, title: t.name, artists: (t.artists || []).map((a) => a.name), durationMs: t.duration_ms, image: pickImage((t.album || obj).images) });
       if (tr) tracks.push(tr);
       if (tracks.length >= limit) break;
     }
@@ -215,19 +224,25 @@ function entityFrom(json, type) {
   return null;
 }
 
+/** Обложка альбома/трека embed-страницы (у плейлиста — обложка плейлиста, трекам она не подходит) */
+const entityImage = (entity) => pickImage(entity?.visualIdentity?.image || entity?.coverArt?.sources);
+
 function tracksFromEntity(entity, type) {
   if (type === 'track' && !Array.isArray(entity.trackList)) {
     const tr = mkTrack({
       id: entity.id || idFromUri(entity.uri), title: entity.name || entity.title,
       artists: Array.isArray(entity.artists) ? entity.artists.map((a) => a?.name || a?.profile?.name) : entity.subtitle,
       durationMs: Number(entity.duration?.totalMilliseconds ?? entity.duration),
+      image: entityImage(entity),
     });
     return tr ? [tr] : [];
   }
+  const albumImage = type === 'album' ? entityImage(entity) : null;
   return (entity.trackList || []).map((t) => mkTrack({
     id: idFromUri(t.uri), title: t.title || t.name,
     artists: t.subtitle ?? (t.artists || []).map((a) => a?.name),
     durationMs: Number(t.duration?.totalMilliseconds ?? t.duration),
+    image: pickImage(t.coverArt?.sources || t.images) || albumImage,
   })).filter(Boolean);
 }
 

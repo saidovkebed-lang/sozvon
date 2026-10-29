@@ -25,6 +25,7 @@ export const DEFAULTS = Object.freeze({
   'audio.userMuted': {},             // { [userId]: true } — локально заглушён
   'audio.streamVolumes': {},         // { [userId]: 0..200 } — громкость звука трансляции этого стримера (отдельно от голоса)
   'audio.musicVolume': 70,           // 0..100 — громкость бота
+  'music.eq': { on: false, preset: 'flat', gains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], preamp: 0 }, // эквалайзер музыки бота (audio/music-eq.js)
   'watch.volume': 80,                // 0..100 — громкость «Смотреть вместе» (только у себя)
 
   // --- Внешний вид ---
