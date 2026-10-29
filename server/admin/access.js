@@ -100,3 +100,27 @@ export function mustChangePassword(u) {
   const m = user?.mustChangePassword;
   return !!m && typeof m === 'object' && !!m.hash && m.hash === user.passwordHash;
 }
+
+// ---------- разблокировка админ-сессии свежим кодом 2FA ----------
+// Включённой 2FA мало: чтобы открыть админ-панель, администратор вводит текущий код (POST /api/admin/unlock),
+// и этот сеанс (токен) разблокирован на ADMIN_UNLOCK_MIN минут (по умолчанию 30). Хранится в памяти:
+// перезапуск сервера, выход или отзыв сеанса — и код нужно ввести снова.
+const unlocks = new Map(); // token → until
+export const unlockMinutes = () => {
+  const n = Number(process.env.ADMIN_UNLOCK_MIN);
+  return Number.isFinite(n) && n > 0 ? n : 30;
+};
+export function unlockSession(token) {
+  const until = Date.now() + unlockMinutes() * 60_000;
+  unlocks.set(token, until);
+  for (const [t, u] of unlocks) if (u <= Date.now() || !db.data.sessions[t]) unlocks.delete(t);
+  return until;
+}
+/** Разблокирован ли сеанс (без требования 2FA — всегда да). */
+export function sessionUnlockedUntil(token) {
+  if (!admin2faRequired()) return Infinity;
+  const u = unlocks.get(token);
+  if (!u || u <= Date.now() || !db.data.sessions[token]) { unlocks.delete(token); return 0; }
+  return u;
+}
+export function lockSession(token) { unlocks.delete(token); }

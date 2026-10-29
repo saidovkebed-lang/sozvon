@@ -196,3 +196,4 @@ button.admin-row:hover { background: var(--bg-4); }
   .admin-row__stats .admin-row__time { display: none; }
   .admin-row--static { flex-wrap: wrap; }
 }
+.admin-gate__code { max-width: 240px; text-align: center; font-size: var(--fs-lg); letter-spacing: 0.12em; }

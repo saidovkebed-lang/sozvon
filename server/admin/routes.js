@@ -8,11 +8,12 @@ import crypto from 'node:crypto';
 import express from 'express';
 import bcrypt from 'bcryptjs';
 import { db, save } from '../db.js';
-import { HttpError, requireAuth } from '../auth.js';
+import { HttpError, requireAuth, requireRecent2FA } from '../auth.js';
 import { findUser, findServer, findChannel, serverChannels, publicServer, publicMessage, isOnline, userServers } from '../model.js';
 import { Limiter } from '../rate-limit.js';
 import {
   isInstanceAdmin, isEnvAdmin, requireAdmin2FA, admin2faRequired, listAdmins, mustChangePassword,
+  unlockSession, sessionUnlockedUntil, lockSession, unlockMinutes,
 } from './access.js';
 import { audit, readAudit } from './audit.js';
 import { collectHealth } from './health.js';
@@ -22,6 +23,7 @@ import { OpError } from './ops.js';
 
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 const MSG_2FA = 'Включите двухфакторную защиту, чтобы открыть админ-панель';
+const MSG_UNLOCK = 'Введите код двухфакторной защиты, чтобы открыть админ-панель';
 
 function cleanName(raw, max = 50) {
   if (typeof raw !== 'string') throw new HttpError(400, 'Название: введите текст');
@@ -139,9 +141,28 @@ export function createAdminRouter({ realtime }) {
       active: admin && requireAdmin2FA(req.user),
       require2fa: admin ? admin2faRequired() : undefined,
       totpEnabled: admin ? req.user.totpEnabled === true : undefined,
+      unlocked: admin ? sessionUnlockedUntil(req.token) > Date.now() : undefined,
+      unlockMinutes: admin ? unlockMinutes() : undefined,
       mustChangePassword: mustChangePassword(req.user),
     });
   });
+
+  // ---------- разблокировать админ-сессию свежим кодом 2FA (на ADMIN_UNLOCK_MIN минут) ----------
+  router.post('/admin/unlock', requireAuth, (req, res, next) => {
+    try {
+      if (req.isBot || !isInstanceAdmin(req.user)) return res.status(403).json({ error: 'Нет доступа', code: 'not_admin' });
+      if (!requireAdmin2FA(req.user)) return res.status(403).json({ error: MSG_2FA, code: 'admin_2fa_required' });
+      if (admin2faRequired()) {
+        const method = requireRecent2FA(req, req.body?.code); // 403 totp_required / totp_invalid, 429 totp_locked
+        const until = unlockSession(req.token);
+        audit(req.user, 'admin.unlock', null, { method, minutes: unlockMinutes() }, req.ip);
+        return res.json({ ok: true, until });
+      }
+      res.json({ ok: true, until: null });
+    } catch (e) { next(e); }
+  });
+
+  router.post('/admin/lock', requireAuth, (req, res) => { lockSession(req.token); res.json({ ok: true }); });
 
   // ---------- защита /admin/* ----------
   const readLimit = new Limiter({ limit: 600, windowMs: 5 * 60_000 });
@@ -155,6 +176,7 @@ export function createAdminRouter({ realtime }) {
       return res.status(403).json({ error: 'Нет доступа', code: 'not_admin' });
     }
     if (!requireAdmin2FA(req.user)) return res.status(403).json({ error: MSG_2FA, code: 'admin_2fa_required' });
+    if (sessionUnlockedUntil(req.token) <= Date.now()) return res.status(403).json({ error: MSG_UNLOCK, code: 'admin_unlock_required' });
     const lim = req.method === 'GET' ? readLimit : writeLimit;
     const key = req.user.id;
     const wait = lim.blockedFor(key);
@@ -461,7 +483,10 @@ export function createAdminRouter({ realtime }) {
   router.use((err, req, res, _next) => {
     if (err?.type === 'entity.parse.failed') return res.status(400).json({ error: 'Некорректный JSON в запросе' });
     if (err?.type === 'entity.too.large') return res.status(413).json({ error: 'Слишком большой запрос' });
-    if (err instanceof HttpError) return res.status(err.status).json({ error: err.message });
+    if (err instanceof HttpError) {
+      if (err.retryAfter) res.set('Retry-After', String(err.retryAfter));
+      return res.status(err.status).json(err.code ? { error: err.message, code: err.code } : { error: err.message });
+    }
     console.error('[admin]', err);
     res.status(500).json({ error: 'Внутренняя ошибка сервера' });
   });

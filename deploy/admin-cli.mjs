@@ -23,7 +23,7 @@ function print(r) {
     if (!('stillAdmin' in r)) console.log(`✓ ${r.user}: теперь администратор`);
     else console.log(r.stillAdmin ? `! ${r.user}: флаг снят, но он всё ещё администратор (указан в ADMIN_USERS)` : `✓ ${r.user}: больше не администратор`);
     if (r.require2fa && r.totpEnabled === false) {
-      console.log('  Админ-панель откроется после включения двухфакторной защиты: «Настройки» → «Безопасность».');
+      console.log('  Админ-панель откроется после включения двухфакторной защиты: «Настройки» → «Моя учётная запись» → «Двухфакторная защита».');
       console.log('  (Выключить требование: sudo bash /opt/sozvon/deploy/admin.sh require-2fa off — не рекомендуется.)');
     }
   }

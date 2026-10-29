@@ -22,7 +22,7 @@ const ACTIONS = {
   'message.delete': 'удалил сообщение', 'user.ban': 'заблокировал аккаунт', 'user.unban': 'разблокировал аккаунт',
   'user.logout': 'завершил все сеансы', 'user.reset_password': 'сбросил пароль', 'admin.grant': 'выдал права администратора',
   'admin.revoke': 'снял права администратора', 'alerts.toggles': 'изменил оповещения', 'alerts.test': 'отправил тестовое уведомление',
-  'update.check': 'проверил обновления', 'update.run': 'запустил обновление', 'settings.require2fa': 'изменил требование 2FA',
+  'admin.unlock': 'открыл админ-панель (код 2FA)', 'update.check': 'проверил обновления', 'update.run': 'запустил обновление', 'settings.require2fa': 'изменил требование 2FA',
 };
 
 let dlg = null;
@@ -143,7 +143,40 @@ export async function openAdminPanel(section) {
   try { adminState.info = await adminFetch('GET', '/api/admin/me'); } catch { /* покажет раздел */ }
   if (adminState.info && !adminState.info.admin) { dlg.close(); toast('Нет доступа к админ-панели', 'error'); return; }
   if (adminState.info && !adminState.info.active) { show2faGate(); return; }
+  if (adminState.info && adminState.info.unlocked === false) { showUnlockGate(section); return; }
   show(section || current);
+}
+
+/** 2FA включена: для этого сеанса нужен свежий код (разблокировка на unlockMinutes минут). */
+function showUnlockGate(section) {
+  $$('.admin__tab', dlg).forEach((t) => { t.disabled = true; t.classList.remove('is-active'); });
+  ui.title.textContent = 'Подтвердите вход';
+  const err = h('p', { class: 'form__error', role: 'alert' });
+  const code = h('input', {
+    class: 'input admin-gate__code', id: 'admin-unlock-code', type: 'text', inputmode: 'numeric', autocomplete: 'one-time-code',
+    maxlength: '20', placeholder: '123 456', 'aria-label': 'Код двухфакторной защиты',
+  });
+  const btn = h('button', { type: 'submit', class: 'btn btn--primary', id: 'admin-unlock-submit' }, 'Открыть админ-панель');
+  const form = h('form', { class: 'admin-gate', id: 'admin-unlock-gate', novalidate: true },
+    icon('i-lock', 'admin-gate__icon'),
+    h('h3', null, 'Введите код двухфакторной защиты, чтобы открыть админ-панель'),
+    h('p', null, `Код из приложения-аутентификатора (или код восстановления). Админ-панель будет открыта на этом устройстве ${adminState.info?.unlockMinutes || 30} минут.`),
+    code, err, btn);
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    err.textContent = '';
+    btn.disabled = true;
+    try {
+      await adminFetch('POST', '/api/admin/unlock', { code: code.value.replace(/\s+/g, '') });
+      adminState.info = { ...adminState.info, unlocked: true };
+      show(section || current);
+    } catch (ex) {
+      err.textContent = ex.message;
+      code.select();
+    } finally { btn.disabled = false; }
+  });
+  ui.content.replaceChildren(form);
+  code.focus();
 }
 
 function show2faGate() {
@@ -152,10 +185,10 @@ function show2faGate() {
   ui.content.replaceChildren(h('div', { class: 'admin-gate', id: 'admin-2fa-gate' },
     icon('i-lock', 'admin-gate__icon'),
     h('h3', null, 'Включите двухфакторную защиту, чтобы открыть админ-панель'),
-    h('p', null, 'Админ-панель даёт полный доступ ко всем серверам и аккаунтам. Поэтому она открывается только при включённой 2FA (код из приложения-аутентификатора при входе).'),
+    h('p', null, 'Админ-панель даёт полный доступ ко всем серверам и аккаунтам. Поэтому она открывается только при включённой 2FA: «Настройки» → «Моя учётная запись» → «Двухфакторная защита».'),
     h('button', {
       type: 'button', class: 'btn btn--primary', id: 'admin-open-security',
-      onclick: async () => { dlg.close(); const m = await import('./user-settings.js'); m.openUserSettings('security'); },
+      onclick: async () => { dlg.close(); const m = await import('./user-settings.js'); m.openUserSettings('account'); }, // 2FA — в «Моя учётная запись» (js/ui/two-factor.js)
     }, icon('i-shield'), 'Открыть настройки безопасности')));
 }
 
@@ -175,6 +208,7 @@ function show(id) {
 
 function failBox(e) {
   if (e.code === 'admin_2fa_required') { show2faGate(); return null; }
+  if (e.code === 'admin_unlock_required') { showUnlockGate(current); return null; } // разблокировка истекла
   return h('p', { class: 'form__error' }, e.message);
 }
 

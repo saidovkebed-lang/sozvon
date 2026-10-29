@@ -398,6 +398,75 @@ test('права администратора: выдать/снять; посл
   expect(rev.json.error).toContain('ADMIN_USERS');
 });
 
+test('настоящая 2FA (server/totp.js): включённая 2FA + свежий код разблокируют сеанс; сброс 2FA при сбросе пароля', async ({ page }) => {
+  const { totp, base32Decode } = await import(path.join(ROOT, 'server', 'totp.js'));
+  const jack = await register('jack');
+  expect((await control({ cmd: 'grant', username: jack.username })).status).toBe(200);
+  expect((await control({ cmd: 'require-2fa', value: 'on' })).json.require2fa).toBe(true);
+  try {
+    expect((await api('GET', '/api/admin/me', { token: jack.token })).json).toMatchObject({ admin: true, active: false });
+    // включить 2FA (как в «Моя учётная запись»)
+    const setup = await api('POST', '/api/me/2fa/setup', { token: jack.token, body: { password: jack.password } });
+    expect(setup.status, JSON.stringify(setup.json)).toBe(200);
+    const key = base32Decode(setup.json.secret);
+    const en = await api('POST', '/api/me/2fa/enable', { token: jack.token, body: { code: totp(key) } });
+    expect(en.status, JSON.stringify(en.json)).toBe(200);
+    const recovery = en.json.recoveryCodes;
+
+    expect((await api('GET', '/api/admin/me', { token: jack.token })).json).toMatchObject({ admin: true, active: true, unlocked: false });
+    const locked = await api('GET', '/api/admin/servers', { token: jack.token });
+    expect(locked.status).toBe(403);
+    expect(locked.json.code).toBe('admin_unlock_required');
+    expect((await api('POST', '/api/admin/unlock', { token: jack.token, body: {} })).json.code).toBe('totp_required');
+    const good = totp(key, Date.now() + 30_000);
+    const bad = String((Number(good) + 1) % 1e6).padStart(6, '0');
+    expect((await api('POST', '/api/admin/unlock', { token: jack.token, body: { code: bad } })).json.code).toBe('totp_invalid');
+    const ok = await api('POST', '/api/admin/unlock', { token: jack.token, body: { code: good } });
+    expect(ok.status, JSON.stringify(ok.json)).toBe(200);
+    expect(ok.json.until).toBeGreaterThan(Date.now() + 25 * 60_000);
+    expect((await api('GET', '/api/admin/servers', { token: jack.token })).status).toBe(200);
+    // администратор без 2FA при включённом требовании — снова закрыт
+    expect((await api('GET', '/api/admin/servers', { token: admin.token })).json.code).toBe('admin_2fa_required');
+
+    // новый вход (пароль + код восстановления) — новый сеанс тоже надо разблокировать; UI-экран ввода кода
+    const step1 = await api('POST', '/api/login', { body: { username: jack.username, password: jack.password } });
+    expect(step1.json.twoFactor).toBe(true);
+    const step2 = await api('POST', '/api/login/2fa', { body: { challenge: step1.json.challenge, code: recovery[0] } });
+    expect(step2.status, JSON.stringify(step2.json)).toBe(200);
+    const tok2 = step2.json.token;
+    expect((await api('GET', '/api/admin/servers', { token: tok2 })).json.code).toBe('admin_unlock_required');
+    await page.goto(BASE);
+    await page.evaluate((t) => localStorage.setItem('sozvon.token', t), tok2);
+    await page.goto(BASE);
+    await page.locator('#me-avatar').click();
+    await page.locator('[data-action="admin-panel"]').click();
+    await expect(page.locator('#admin-unlock-gate')).toContainText('Введите код двухфакторной защиты');
+    await page.locator('#admin-unlock-code').fill('000');
+    await page.locator('#admin-unlock-submit').click();
+    await expect(page.locator('#admin-unlock-gate .form__error')).not.toBeEmpty();
+    await page.locator('#admin-unlock-code').fill(recovery[1]);
+    await page.locator('#admin-unlock-submit').click();
+    await expect(page.locator('#admin-servers-list')).toBeVisible();
+    expect((await api('GET', '/api/admin/servers', { token: tok2 })).status).toBe(200);
+  } finally {
+    expect((await control({ cmd: 'require-2fa', value: 'off' })).json.require2fa).toBe(false);
+  }
+  // потерян телефон: сброс пароля с выключением 2FA
+  const reset = await api('POST', `/api/admin/users/${jack.id}/reset-password`, { token: admin.token, body: { resetTotp: true } });
+  expect(reset.status).toBe(200);
+  expect(reset.json.user.flags.totpEnabled).toBe(false);
+  await waitFor(async () => {
+    const u = JSON.parse(fs.readFileSync(path.join(dataDir, 'db.json'), 'utf8')).users.find((x) => x.id === jack.id);
+    return u && !Object.keys(u).some((k) => /^totp/.test(k));
+  }, { message: 'totp* fields removed' });
+  const relog = await api('POST', '/api/login', { body: { username: jack.username, password: reset.json.tempPassword } });
+  expect(relog.json).toMatchObject({ mustChangePassword: true });
+  expect(relog.json.twoFactor).toBeUndefined();
+  const audit = await api('GET', '/api/admin/audit', { token: admin.token });
+  expect(audit.json.entries.find((e) => e.action === 'admin.unlock' && e.actor.username === jack.username)).toBeTruthy();
+  await control({ cmd: 'revoke', username: jack.username });
+});
+
 test('журнал аудита: кто, что, над кем, когда', async () => {
   const r = await api('GET', '/api/admin/audit?limit=500', { token: admin.token });
   expect(r.status).toBe(200);

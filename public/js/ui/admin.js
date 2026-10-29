@@ -81,12 +81,17 @@ export function requirePasswordChange(onDone) {
   const oldI = h('input', { class: 'input', id: 'temp-old-password', type: 'password', autocomplete: 'current-password', required: true });
   const newI = h('input', { class: 'input', id: 'temp-new-password', type: 'password', autocomplete: 'new-password', minlength: '4', maxlength: '128', required: true });
   const repI = h('input', { class: 'input', id: 'temp-confirm-password', type: 'password', autocomplete: 'new-password', required: true });
+  // при включённой 2FA смена пароля требует код (server/totp.js: requireUserCode)
+  const codeI = h('input', { class: 'input', id: 'temp-2fa-code', type: 'text', inputmode: 'numeric', autocomplete: 'one-time-code', maxlength: '20' });
+  const codeField = h('label', { class: 'field', hidden: true }, h('span', { class: 'field__label' }, 'Код двухфакторной защиты'), codeI);
+  adminFetch('GET', '/api/me').then((r) => { if (r?.user?.totpEnabled) codeField.hidden = false; }).catch(() => {});
   const submit = h('button', { type: 'submit', class: 'btn btn--primary' }, 'Сменить пароль');
   const form = h('form', { class: 'modal__body form', novalidate: true },
     h('p', { class: 'modal__text' }, 'Администратор сбросил ваш пароль. Введите временный пароль, который он вам передал, и придумайте новый.'),
     h('label', { class: 'field' }, h('span', { class: 'field__label' }, 'Временный пароль'), oldI),
     h('label', { class: 'field' }, h('span', { class: 'field__label' }, 'Новый пароль'), newI),
     h('label', { class: 'field' }, h('span', { class: 'field__label' }, 'Повторите новый пароль'), repI),
+    codeField,
     err,
     h('div', { class: 'modal__footer admin-ask__footer' },
       h('button', { type: 'button', class: 'btn btn--ghost', onclick: () => { setToken(null); location.reload(); } }, 'Выйти'),
@@ -103,12 +108,15 @@ export function requirePasswordChange(onDone) {
     if (newI.value !== repI.value) { err.textContent = 'Пароли не совпадают'; return; }
     submit.disabled = true;
     try {
-      await adminFetch('POST', '/api/me/password', { oldPassword: oldI.value, newPassword: newI.value });
+      const body = { oldPassword: oldI.value, newPassword: newI.value };
+      if (codeI.value.trim()) body.code = codeI.value.replace(/\s+/g, '');
+      await adminFetch('POST', '/api/me/password', body);
       pwDialog.close();
       pwDialog.remove();
       pwDialog = null;
       onDone?.(getToken());
     } catch (ex) {
+      if (ex.code === 'totp_required' || ex.code === 'totp_invalid') codeField.hidden = false;
       err.textContent = ex.message;
     } finally { submit.disabled = false; }
   });
