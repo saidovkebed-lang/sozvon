@@ -193,6 +193,21 @@ c=$(curl -sSL -o /dev/null -w '%{http_code}' --connect-timeout 10 --max-time 30 
 if [ "$c" = 200 ]; then pass "GitHub доступен — yt-dlp будет обновляться"; else note "GitHub недоступен (HTTP $c) — автообновление yt-dlp пойдёт через pip" ; fi
 
 # -------------------------------------------------------------------- итог --
+# Итог для админ-панели («Состояние сервера» → «Музыка»): $STATE_DIR/music-check.json (каталог root, 644)
+STATE_DIR=${SOZVON_STATE_DIR:-/var/lib/sozvon-state}
+jesc() { printf '%s' "$1" | tr -d '\000-\037' | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+if install -d -m 0755 "$STATE_DIR" 2>/dev/null && [ "$(stat -c %u "$STATE_DIR" 2>/dev/null)" = 0 ] \
+    && mc_tmp=$(mktemp "$STATE_DIR/.music-check.XXXXXX" 2>/dev/null); then
+  {
+    printf '{"time":"%s","ok":%d,"failed":%d,"failures":[' "$(date -Is)" "${#PASS[@]}" "${#FAIL[@]}"
+    sep=""
+    for f in "${FAIL[@]}"; do printf '%s"%s"' "$sep" "$(jesc "$f")"; sep=","; done
+    printf ']}\n'
+  } >"$mc_tmp"
+  chmod 644 "$mc_tmp"
+  mv -f "$mc_tmp" "$STATE_DIR/music-check.json"
+fi
+
 printf '\n%sИтог:%s ✓ %d   ✗ %d\n' "$B" "$Z" "${#PASS[@]}" "${#FAIL[@]}"
 if [ "${#FAIL[@]}" -eq 0 ]; then
   printf '%sВсё в порядке: !play со ссылками YouTube, Spotify и SoundCloud должен работать.%s\n' "$G" "$Z"

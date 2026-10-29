@@ -45,6 +45,9 @@ export PATH="/opt/node/bin:/usr/local/bin:$PATH"
 # ------------------------------------------------------------ этап 1: код --
 if [ -z "$MODE" ]; then
   [ -d "$APP_DIR/.git" ] || die "$APP_DIR не git-репозиторий. Запустите deploy/install.sh"
+  # одно обновление за раз (вручную и кнопкой из админ-панели); замок наследует этап 2 (exec)
+  exec 8>/run/sozvon-update.lock
+  flock -n 8 || die "Обновление уже выполняется (другое окно или кнопка в админ-панели)"
   old=$(git -C "$APP_DIR" rev-parse --short HEAD)
   git -C "$APP_DIR" fetch --depth 1 origin "$BRANCH" || die "git fetch не удался (доступ к github.com?)"
   git -C "$APP_DIR" reset --hard -q FETCH_HEAD
@@ -174,6 +177,17 @@ if have_systemd; then
     systemctl daemon-reload
     systemctl enable -q --now sozvon-backup.timer
     ok "Резервные копии: таймер sozvon-backup.timer активен (sudo bash $APP_DIR/deploy/backup.sh list)"
+  fi
+  # Кнопка «Обновить Astra» в админ-панели (docs/ADMIN.md): path-юнит + root-помощник
+  if [ -f "$APP_DIR/deploy/templates/sozvon-self-update.path" ]; then
+    install -d -o root -g root -m 0755 /var/lib/sozvon-state
+    for u in sozvon-self-update.service sozvon-self-update.path; do
+      render_unit "$APP_DIR/deploy/templates/$u" "/etc/systemd/system/$u" \
+        "APP_DIR=$APP_DIR" "DATA_DIR=$DATA_DIR" "STATE_DIR=/var/lib/sozvon-state" || true
+    done
+    systemctl daemon-reload
+    systemctl enable -q --now sozvon-self-update.path
+    ok "Обновление из админ-панели: sozvon-self-update.path активен"
   fi
 fi
 

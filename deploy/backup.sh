@@ -25,8 +25,12 @@ APP_USER=${APP_USER:-sozvon}
 SERVICES=${BACKUP_SERVICES:-sozvon-bot sozvon}
 TIMER=sozvon-backup.timer
 SELF=$(readlink -f "$0" 2>/dev/null || printf '%s' "$0")
+# Итог последнего бэкапа для админ-панели (backup-status.json): каталог root, приложению только для чтения
+STATE_DIR=${SOZVON_STATE_DIR:-$(dirname "$DATA_DIR")/sozvon-state}
+LAST_ERROR=""
+STATUS_DONE=0
 
-die() { printf '\n✗ ОШИБКА: %s\n' "$*" >&2; exit 1; }
+die() { LAST_ERROR=$*; printf '\n✗ ОШИБКА: %s\n' "$*" >&2; exit 1; }
 ok() { printf '  ✓ %s\n' "$*"; }
 info() { printf '  · %s\n' "$*"; }
 warn() { printf '  ! %s\n' "$*" >&2; }
@@ -88,6 +92,28 @@ decompress_to_tar() {
   esac
 }
 
+# ---------------------------------------------------------------- статус для админ-панели
+jesc() { printf '%s' "$1" | tr -d '\000-\037' | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+# write_backup_status ok|failed ФАЙЛ РАЗМЕР TELEGRAM ОШИБКА → $STATE_DIR/backup-status.json (mktemp + mv)
+write_backup_status() {
+  local tmp okv=true
+  [ "$1" = ok ] || okv=false
+  install -d -m 0755 "$STATE_DIR" 2>/dev/null || return 0
+  # пишем только в каталог root (не в каталог данных sozvon — там возможна подмена ссылками)
+  [ "$(stat -c %u "$STATE_DIR" 2>/dev/null)" = "$(id -u)" ] || { warn "$STATE_DIR не принадлежит root — статус не записан"; return 0; }
+  tmp=$(mktemp "$STATE_DIR/.backup-status.XXXXXX") || return 0
+  printf '{"time":"%s","result":"%s","ok":%s,"file":"%s","size":%s,"telegram":"%s","error":"%s"}\n' \
+    "$(date -Is)" "$1" "$okv" "$(jesc "$2")" "${3:-null}" "$(jesc "$4")" "$(jesc "$5")" >"$tmp"
+  chmod 644 "$tmp"
+  mv -f "$tmp" "$STATE_DIR/backup-status.json"
+  STATUS_DONE=1
+}
+backup_exit_status() {
+  local rc=$?
+  [ "$STATUS_DONE" = 1 ] && return 0
+  write_backup_status failed "" "" "" "${LAST_ERROR:-код $rc}" || true
+}
+
 do_backup() {
   [ -d "$DATA_DIR" ] || die "Нет каталога данных $DATA_DIR"
   install -d -m 0700 "$BACKUP_DIR"
@@ -108,7 +134,7 @@ do_backup() {
   part="$BACKUP_DIR/.$name.partial"
   tmp=$(mktemp -d)
   # shellcheck disable=SC2064
-  trap "rm -rf '$tmp' '$part'" EXIT
+  trap "backup_exit_status; rm -rf '$tmp' '$part'" EXIT
   stage="$tmp/stage"
   mkdir -p "$stage/data" "$stage/env"
 
@@ -145,7 +171,7 @@ do_backup() {
     [ -e "$e" ] || [ -L "$e" ] || continue
     base=${e##*/}
     case "$base" in
-      db.json|.cache|.npm|node_modules|downloads|bin|*.tmp|.lock) continue ;;
+      db.json|.cache|.npm|node_modules|downloads|bin|*.tmp|.lock|admin.sock|admin-control.token|update-request) continue ;;
       music) [ "$music" = 0 ] && continue ;;
     esac
     entries+=("./$base")
@@ -193,6 +219,7 @@ do_backup() {
     echo "size=$(fsize "$file")"
     echo "telegram=$tg"
   } >"$BACKUP_DIR/.last-status"
+  write_backup_status ok "$name" "$(fsize "$file")" "$tg" ""
 
   local total
   total=$(du -cb "$BACKUP_DIR"/astra-*.tar.* 2>/dev/null | tail -n 1 | cut -f1)
