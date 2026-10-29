@@ -1,8 +1,8 @@
 # Astra — запрос обновления из админ-панели. Создан deploy/install.sh / update.sh.
-# Приложение (пользователь sozvon) создаёт @DATA_DIR@/update-request со словом check или update —
+# Приложение (пользователь sozvon) создаёт @DATA_DIR@/update-request со словом check, update или backup —
 # systemd запускает sozvon-self-update.service (root). Подробно: docs/ADMIN.md
 [Unit]
-Description=Astra: request from the admin panel (update/check)
+Description=Astra: request from the admin panel (update/check/backup)
 Documentation=https://github.com/saidovkebed-lang/sozvon/blob/main/docs/ADMIN.md
 
 [Path]

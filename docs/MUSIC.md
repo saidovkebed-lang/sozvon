@@ -191,10 +191,10 @@ sudo bash /opt/sozvon/deploy/music-check.sh
 4. На сервере:
    ```bash
    sudo chown sozvon: /var/lib/sozvon/cookies.txt && sudo chmod 600 /var/lib/sozvon/cookies.txt
-   echo 'YTDLP_COOKIES=/var/lib/sozvon/cookies.txt' | sudo tee -a /etc/sozvon.env
-   sudo systemctl restart sozvon
    sudo bash /opt/sozvon/deploy/music-check.sh
    ```
+   Файл `/var/lib/sozvon/cookies.txt` (каталог данных) подхватывается сам, без перезапуска и без правки
+   `/etc/sozvon.env`. `YTDLP_COOKIES=/путь/к/файлу` в `/etc/sozvon.env` нужен, только если файл лежит в другом месте.
 
 Cookies со временем «протухают» (недели–месяцы) — тогда повторите.
 
@@ -264,7 +264,7 @@ Spotify разбирается 1–3 секунды. Максимум на од�
 | Переменная | По умолчанию | Что делает |
 |---|---|---|
 | `YTDLP_PATH` | `yt-dlp` | путь к yt-dlp (установщик пишет `/usr/local/bin/yt-dlp`) |
-| `YTDLP_COOKIES` | — | файл cookies.txt для YouTube |
+| `YTDLP_COOKIES` | `/var/lib/sozvon/cookies.txt` (`DATA_DIR/cookies.txt`), если он есть | файл cookies.txt для YouTube |
 | `YTDLP_PROXY` | — | прокси только для yt-dlp (`http://`, `socks5://…`) |
 | `YTDLP_TIMEOUT_SEC` | `300` | максимум на скачивание одного трека |
 | `YTDLP_META_TIMEOUT_SEC` | `90` | максимум на поиск и чтение плейлиста |

@@ -4,10 +4,12 @@
 // интерфейс к привилегированной стороне — файл-запрос DATA_DIR/update-request с одним словом:
 //   check  — root-помощник делает git fetch и пишет update-check.json {current, latest, behind, notes}
 //   update — root-помощник запускает deploy/update.sh, вывод — в update.log, итог — update-status.json
+//   backup — root-помощник запускает deploy/backup.sh now (бот: «💾 Бэкап сейчас»), итог — backup-status.json
+//            (пишет сам backup.sh) и backup-run.json {state, startedAt, finishedAt, exitCode}
 // Результаты лежат в STATE_DIR (/var/lib/sozvon-state, root:root 755): приложение их только читает, а root
 // не пишет в каталог, принадлежащий sozvon (защита от подмены файлов символическими ссылками).
 // Файл отслеживает systemd: sozvon-self-update.path → sozvon-self-update.service (deploy/self-update.sh, root).
-// Помощник не выполняет содержимое запроса: сравнивает его с двумя фиксированными словами, остальное игнорирует.
+// Помощник не выполняет содержимое запроса: сравнивает его с тремя фиксированными словами, остальное игнорирует.
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
@@ -137,9 +139,22 @@ export function readUpdateLog(offset = 0) {
 
 export class UpdateError extends Error {}
 
-/** Записать запрос (check | update). Конкурентные запуски: пока есть запрос или идёт обновление — отказ. */
+/** Итог последнего «бэкапа по кнопке» (root-помощник): { state, startedAt, finishedAt, exitCode } | null. */
+export function backupRunState() {
+  const st = readJson(f('backup-run.json'));
+  return st && typeof st === 'object' ? {
+    state: String(st.state || ''), startedAt: st.startedAt || null, finishedAt: st.finishedAt || null, exitCode: st.exitCode ?? null,
+  } : null;
+}
+/** Итог последнего бэкапа (пишет deploy/backup.sh): как в «Состоянии сервера». */
+export function backupStatusFile() {
+  const st = readJson(f('backup-status.json'));
+  return st && typeof st === 'object' ? st : null;
+}
+
+/** Записать запрос (check | update | backup). Конкурентные запуски: пока есть запрос или идёт обновление — отказ. */
 export function requestUpdate(kind) {
-  if (kind !== 'check' && kind !== 'update') throw new UpdateError('Неизвестный запрос');
+  if (!['check', 'update', 'backup'].includes(kind)) throw new UpdateError('Неизвестный запрос');
   if (!helperInstalled()) throw new UpdateError('Помощник обновления не установлен. Один раз выполните на сервере: sudo bash /opt/sozvon/deploy/update.sh');
   const st = updateState();
   if (st.running) throw new UpdateError('Обновление уже идёт');

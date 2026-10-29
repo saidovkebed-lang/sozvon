@@ -6,6 +6,7 @@
 #   sudo bash /opt/sozvon/deploy/backup.sh restore ФАЙЛ     восстановить из копии (.tar.zst / .tar.gz / .enc / .enc.part00)
 #   sudo bash /opt/sozvon/deploy/backup.sh setup            включить отправку копий в свой Telegram-бот (зашифрованно)
 #   sudo bash /opt/sozvon/deploy/backup.sh telegram-test    проверить связь с ботом (тестовое сообщение)
+#   sudo bash /opt/sozvon/deploy/backup.sh telegram-chat-id узнать chat id (кто последним отправил боту /start)
 #
 # Копии: /var/backups/sozvon/astra-ГГГГММДД-ЧЧММ.tar.zst (или .tar.gz без zstd), права 600, владелец root.
 # Ротация: 7 последних дней + 4 недели (по одной копии в неделю). Подробно: docs/BACKUP.md
@@ -13,7 +14,8 @@
 # Переопределения (для тестов и нестандартных установок):
 #   DATA_DIR, SOZVON_ENV_FILE, BACKUP_DIR, APP_USER, BACKUP_KEEP_DAILY, BACKUP_KEEP_WEEKLY,
 #   BACKUP_COMPRESS=zstd|gzip, BACKUP_MUSIC=0 (без музыки), BACKUP_TELEGRAM_API, BACKUP_TELEGRAM_PART_SIZE,
-#   BACKUP_SERVICES («sozvon-bot sozvon»), BACKUP_ASSUME_YES=1 / BACKUP_RESTORE_ENV=y|n (restore без вопросов).
+#   BACKUP_SERVICES («sozvon-bot sozvon»), BACKUP_ASSUME_YES=1 / BACKUP_RESTORE_ENV=y|n (restore без вопросов),
+#   ADMIN_CONTROL_SOCKET (admin.sock сервера), BACKUP_CHAT_WAIT (сколько секунд ждать /start, по умолчанию 60).
 #   systemctl ищется в PATH (в тестах — подменный).
 set -Eeuo pipefail
 umask 077
@@ -372,12 +374,62 @@ telegram_test() {
   [ -n "$(conf BACKUP_PASSPHRASE)" ] || warn "Нет BACKUP_PASSPHRASE — без пароля копии в Telegram не отправляются"
 }
 
+# ---------------------------------------------------------------- chat id для setup
+# Работающий сервер Astra сам постоянно читает обновления бота (меню, ответы на уведомления). Второй читатель
+# getUpdates ему мешает (409 Conflict) и «съедает» его сообщения, поэтому при запущенном сервере chat id
+# спрашиваем у него через локальный канал admin.sock (как deploy/admin.sh; токен канала читает только root):
+# команда tg-chats отдаёт чаты, недавно отправившие /start, — если настраивается тот же бот (сравнение по sha256
+# токена, сам токен не передаётся). getUpdates вызываем, только когда служба остановлена или бот другой.
+ADMIN_SOCK=${ADMIN_CONTROL_SOCKET:-$DATA_DIR/admin.sock}
+ADMIN_TOKEN_FILE=$DATA_DIR/admin-control.token
+DETECTED_CHAT=""
+DETECTED_NAME=""
+server_query() {   # server_query JSON → ответ сервера; код 1 — сервер не отвечает
+  local tok
+  [ -S "$ADMIN_SOCK" ] && [ -r "$ADMIN_TOKEN_FILE" ] && have curl || return 1
+  tok=$(tr -d '\r\n' <"$ADMIN_TOKEN_FILE")
+  printf 'header = "x-admin-token: %s"\n' "$tok" \
+    | curl -sS --max-time 10 --unix-socket "$ADMIN_SOCK" -K - -H 'content-type: application/json' --data-binary "$1" http://localhost/admin 2>/dev/null
+}
+service_running() { have systemctl && systemctl is-active --quiet sozvon 2>/dev/null; }
+detect_chat_id() {
+  local token hash resp i wait_s req
+  token=$(conf BACKUP_TELEGRAM_TOKEN)
+  [ -n "$token" ] || die "Нет токена бота (BACKUP_TELEGRAM_TOKEN)"
+  hash=$(printf '%s' "$token" | sha256sum | cut -c1-16)
+  req="{\"cmd\":\"tg-chats\",\"botHash\":\"$hash\"}"
+  wait_s=${BACKUP_CHAT_WAIT:-60}
+  [[ "$wait_s" =~ ^[0-9]+$ ]] || wait_s=60
+  if resp=$(server_query "$req") && printf '%s' "$resp" | grep -q '"ok":true'; then
+    if printf '%s' "$resp" | grep -q '"sameBot":true'; then
+      info "Сервер Astra работает и сам читает сообщения этого бота — chat id узнаю у него (без getUpdates)" >&2
+      i=0
+      while :; do
+        DETECTED_CHAT=$(printf '%s' "$resp" | grep -o '"chatId":"-\{0,1\}[0-9]*"' | head -n 1 | grep -o -- '-\{0,1\}[0-9][0-9]*' || true)
+        DETECTED_NAME=$(printf '%s' "$resp" | grep -o '"name":"[^"]*"' | head -n 1 | sed 's/^"name":"//; s/"$//' || true)
+        [ -n "$DETECTED_CHAT" ] && return 0
+        [ "$i" -ge "$wait_s" ] && die "Никто не отправил боту /start за $wait_s с. Откройте бота в Telegram, отправьте /start и запустите команду снова"
+        [ "$i" -eq 0 ] && info "Откройте бота в Telegram и отправьте ему /start — жду до $wait_s с…" >&2
+        sleep 1
+        i=$((i + 1))
+        resp=$(server_query "$req") || die "Сервер перестал отвечать на $ADMIN_SOCK"
+      done
+    fi
+    info "Этот бот сервер Astra не опрашивает — читаю getUpdates" >&2
+  elif service_running; then
+    die "Служба sozvon работает, но не отвечает на $ADMIN_SOCK (старая версия?). Обновите Astra (sudo bash /opt/sozvon/deploy/update.sh) или введите chat id вручную"
+  fi
+  resp=$(tg_call getUpdates) || die "Не удалось связаться с Telegram"
+  DETECTED_CHAT=$(printf '%s' "$resp" | grep -o '"chat":{"id":-\{0,1\}[0-9]*' | tail -n 1 | grep -o -- '-\{0,1\}[0-9]*$' || true)
+  [ -n "$DETECTED_CHAT" ] || die "Бот ещё не получал сообщений. Напишите ему /start и запустите команду снова"
+}
+
 setup() {
   [ -t 0 ] || die "setup — интерактивная команда, запустите её в терминале"
   cat <<EOF
 Отправка резервных копий в ВАШ Telegram-бот (по желанию).
   1. В Telegram откройте @BotFather → /newbot → получите токен вида 123456:ABC…
-  2. Откройте своего нового бота и нажмите «Start» (или напишите ему что-нибудь).
+  2. Откройте своего нового бота и нажмите «Start» (отправьте /start).
   3. Придумайте пароль шифрования. Без него копию НЕ расшифровать — запишите его в менеджер паролей.
 Копии шифруются на сервере (AES-256) до отправки; в Telegram попадает только зашифрованный файл.
 Настройки сохраняются в $ENV_FILE (права 600). Отключить: удалите строки BACKUP_TELEGRAM_* из этого файла.
@@ -390,13 +442,12 @@ EOF
   [[ "$token" =~ ^[0-9]+:[A-Za-z0-9_-]+$ ]] || die "Токен не похож на токен бота (123456:ABC…)"
   export BACKUP_TELEGRAM_TOKEN=$token
   cur=$(env_get BACKUP_TELEGRAM_CHAT_ID)
-  read -rp "Chat id (Enter — определить автоматически по последнему сообщению боту)${cur:+ [$cur]}: " chat
+  read -rp "Chat id (Enter — определить автоматически: кто последним отправил боту /start)${cur:+ [$cur]}: " chat
   if [ -z "$chat" ] && [ -n "$cur" ]; then chat=$cur; fi
   if [ -z "$chat" ]; then
-    resp=$(tg_call getUpdates) || die "Не удалось связаться с Telegram"
-    chat=$(printf '%s' "$resp" | grep -o '"chat":{"id":-\{0,1\}[0-9]*' | tail -n 1 | grep -o -- '-\{0,1\}[0-9]*$' || true)
-    [ -n "$chat" ] || die "Бот ещё не получал сообщений. Напишите ему что-нибудь и запустите setup снова"
-    ok "Найден chat id: $chat"
+    detect_chat_id
+    chat=$DETECTED_CHAT
+    ok "Найден chat id: $chat${DETECTED_NAME:+ ($DETECTED_NAME)}"
   fi
   [[ "$chat" =~ ^-?[0-9]+$ ]] || die "Chat id — это число (например 123456789)"
   export BACKUP_TELEGRAM_CHAT_ID=$chat
@@ -553,6 +604,7 @@ case "$cmd" in
   --keep) export BACKUP_KEEP_DAILY=${2:-7} BACKUP_KEEP_WEEKLY=0; do_backup ;;   # старый синтаксис (cron)
   setup) setup ;;
   telegram-test) telegram_test ;;
-  -h|--help|help) sed -n '2,18p' "$SELF" | sed 's/^# \{0,1\}//' ;;
-  *) die "Неизвестная команда: $cmd (now | list | restore ФАЙЛ | setup | telegram-test)" ;;
+  telegram-chat-id) detect_chat_id; printf '%s\n' "$DETECTED_CHAT" ;;
+  -h|--help|help) sed -n '2,19p' "$SELF" | sed 's/^# \{0,1\}//' ;;
+  *) die "Неизвестная команда: $cmd (now | list | restore ФАЙЛ | setup | telegram-test | telegram-chat-id)" ;;
 esac

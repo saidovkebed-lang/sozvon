@@ -20,8 +20,35 @@ function stopTelegram() {
   tgState = null;
 }
 
+let tgAvailable = false;   // бот Astra настроен на сервере (/api/config → telegram)
+let tgLoginChallenge = null; // вход без пароля: токен ожидания «✅ Войти»
+let tgLoginTimer = null;
+
+/** Показать одну из форм экрана входа: main | 2fa | tglogin | forgot */
+function showPanel(name) {
+  $('#auth-form').hidden = name !== 'main';
+  $('#auth-2fa-form').hidden = name !== '2fa';
+  $('#auth-tglogin-form').hidden = name !== 'tglogin';
+  $('#auth-forgot-form').hidden = name !== 'forgot';
+  if (name !== 'tglogin') stopTgLogin();
+}
+
+function stopTgLogin() {
+  clearTimeout(tgLoginTimer); tgLoginTimer = null;
+  tgLoginChallenge = null;
+}
+
+/** /api/config: есть ли бот — тогда показываем «Войти через Telegram» и «Забыли пароль?» */
+export function setAuthTelegram(on) {
+  tgAvailable = !!on;
+  updateAlt();
+}
+function updateAlt() {
+  $('#auth-alt').hidden = !(tgAvailable && mode === 'login');
+}
+
 function show2fa(on) {
-  $('#auth-form').hidden = on;
+  showPanel(on ? '2fa' : 'main');
   $('#auth-2fa-form').hidden = !on;
   $('#auth-title').textContent = on ? 'Двухфакторная защита' : (mode === 'login' ? 'С возвращением!' : 'Создать аккаунт');
   $('#auth-subtitle').textContent = on
@@ -128,10 +155,74 @@ function applyMode() {
   $('#auth-toggle').textContent = login ? 'Зарегистрироваться' : 'Войти';
   $('#auth-password').autocomplete = login ? 'current-password' : 'new-password';
   $('#auth-error').textContent = '';
+  updateAlt();
+}
+
+/* ---------- вход без пароля через Telegram ---------- */
+function tgLoginStatus(text, state = 'ok') {
+  const box = $('#auth-tglogin-box');
+  box.hidden = !text;
+  box.dataset.state = state;
+  $('#auth-tglogin-status').textContent = text;
+}
+function openTgLogin() {
+  showPanel('tglogin');
+  $('#auth-title').textContent = 'Вход через Telegram';
+  $('#auth-subtitle').textContent = 'Без пароля — подтвердите вход в боте Astra';
+  $('#auth-tglogin-username').value = $('#auth-username').value.trim();
+  $('#auth-tglogin-error').textContent = '';
+  tgLoginStatus('');
+  $('#auth-tglogin-submit').hidden = false;
+  $('#auth-tglogin-username').focus();
+}
+function pollTgLogin() {
+  tgLoginTimer = null;
+  const ch = tgLoginChallenge;
+  if (!ch) return;
+  api.loginTelegramStatus(ch).then((res) => {
+    if (ch !== tgLoginChallenge) return;
+    if (res?.token) { stopTgLogin(); finishLogin(res.token); return; }
+    if (res?.twoFactor && res.challenge) {
+      // «✅ Войти» нажато, но включено приложение-аутентификатор: нужен код из него
+      stopTgLogin();
+      challenge = res.challenge;
+      methods = Array.isArray(res.methods) ? res.methods : ['totp', 'recovery'];
+      show2fa(true);
+      $('#auth-subtitle').textContent = 'Вход подтверждён в Telegram — введите код из приложения-аутентификатора';
+      return;
+    }
+    tgLoginTimer = setTimeout(pollTgLogin, 2000);
+  }).catch((ex) => {
+    if (ch !== tgLoginChallenge) return;
+    if (ex.code === 'challenge_invalid' || ex.code === 'challenge_denied' || ex.status === 401) {
+      stopTgLogin();
+      tgLoginStatus(ex.code === 'challenge_denied' ? 'Вход отклонён в Telegram («Это не я»).' : 'Время на подтверждение истекло. Отправьте запрос ещё раз.', 'error');
+      $('#auth-tglogin-submit').hidden = false;
+      return;
+    }
+    tgLoginTimer = setTimeout(pollTgLogin, 3000); // сеть — повторим
+  });
+}
+
+/* ---------- забыли пароль ---------- */
+function openForgot() {
+  showPanel('forgot');
+  $('#auth-title').textContent = 'Сброс пароля';
+  $('#auth-subtitle').textContent = 'Ссылку для сброса пришлёт бот Astra в Telegram';
+  $('#auth-forgot-username').value = $('#auth-username').value.trim();
+  $('#auth-forgot-error').textContent = '';
+  $('#auth-forgot-box').hidden = true;
+  $('#auth-forgot-username').focus();
+}
+function backToMain() {
+  showPanel('main');
+  applyMode();
+  $('#auth-username').focus();
 }
 
 export function showAuth(message = '') {
   if (challenge) show2fa(false);
+  else showPanel('main');
   $('#app').hidden = true;
   $('#auth-screen').hidden = false;
   $('#auth-error').textContent = message;
@@ -174,6 +265,52 @@ export function initAuth(onLoggedIn) {
       setToken(res.token);
       $('#auth-password').value = '';
       onLoggedIn(res.token);
+    } catch (ex) {
+      err.textContent = ex.message;
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  // Telegram: вход без пароля и сброс пароля
+  $('#auth-tg-login').addEventListener('click', openTgLogin);
+  $('#auth-forgot').addEventListener('click', (e) => { e.preventDefault(); openForgot(); });
+  $('#auth-tglogin-back').addEventListener('click', (e) => { e.preventDefault(); backToMain(); });
+  $('#auth-forgot-back').addEventListener('click', (e) => { e.preventDefault(); backToMain(); });
+  $('#auth-tglogin-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const username = $('#auth-tglogin-username').value.trim();
+    const err = $('#auth-tglogin-error');
+    if (username.length < 2) { err.textContent = 'Введите имя пользователя'; return; }
+    const btn = $('#auth-tglogin-submit');
+    btn.disabled = true;
+    err.textContent = '';
+    try {
+      const res = await api.loginTelegram(username);
+      tgLoginChallenge = res.challenge;
+      btn.hidden = true;
+      tgLoginStatus('Если для этого аккаунта включён вход через Telegram, бот Astra прислал запрос. Нажмите в нём «✅ Войти» — вход завершится сам.');
+      tgLoginTimer = setTimeout(pollTgLogin, 1500);
+    } catch (ex) {
+      err.textContent = ex.message;
+    } finally {
+      btn.disabled = false;
+    }
+  });
+  $('#auth-forgot-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const username = $('#auth-forgot-username').value.trim();
+    const err = $('#auth-forgot-error');
+    if (username.length < 2) { err.textContent = 'Введите имя пользователя'; return; }
+    const btn = $('#auth-forgot-submit');
+    btn.disabled = true;
+    err.textContent = '';
+    try {
+      const res = await api.passwordResetRequest(username);
+      const box = $('#auth-forgot-box');
+      box.hidden = false;
+      box.dataset.state = 'ok';
+      $('#auth-forgot-status').textContent = res.message;
     } catch (ex) {
       err.textContent = ex.message;
     } finally {

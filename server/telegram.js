@@ -1,14 +1,17 @@
-// Общий клиент Telegram Bot API: отправка (оповещения, коды входа) и приём обновлений (long polling).
+// Общий клиент Telegram Bot API: отправка (оповещения, коды входа, меню бота) и приём обновлений (long polling).
 // Без внешних зависимостей. Вебхук НЕ используется: сервер сам опрашивает getUpdates — так не нужен
 // входящий адрес, и это работает за NAT/без домена.
 //
 // Настройки (/etc/sozvon.env):
-//   TELEGRAM_BOT_TOKEN — бот для входа через Telegram (2FA); если не задан — ALERT_TELEGRAM_TOKEN,
+//   TELEGRAM_BOT_TOKEN — бот Astra (вход через Telegram, меню, уведомления); если не задан — ALERT_TELEGRAM_TOKEN,
 //                        затем BACKUP_TELEGRAM_TOKEN (тот же бот владельца, что для копий и оповещений).
 //   TELEGRAM_API       — адрес Bot API (для тестов); иначе ALERT_TELEGRAM_API / BACKUP_TELEGRAM_API.
 //   TELEGRAM_PROXY     — http://… : всегда через этот HTTP-прокси (CONNECT); off — только напрямую;
 //                        не задан — сначала напрямую, при сетевой ошибке через SPOTIFY_PROXY (VPN-прокси,
 //                        deploy/vpn-proxy.sh): api.telegram.org часто недоступен напрямую с VPS в РФ.
+//   TELEGRAM_POLLING   — 0: не опрашивать бота постоянно (только пока ждём привязку/подтверждение входа,
+//                        как до появления меню). По умолчанию опрос идёт всё время, пока задан токен.
+//   TELEGRAM_BUTTON_STYLE — 0: не использовать цветные кнопки (style) даже если Bot API их поддерживает.
 //
 // Токен бота никогда не попадает в журналы, ответы API и тексты ошибок (см. scrub()).
 import fs from 'node:fs';
@@ -20,7 +23,7 @@ import tls from 'node:tls';
 const DEFAULT_API = 'https://api.telegram.org';
 const trimApi = (s) => String(s || DEFAULT_API).replace(/\/+$/, '');
 
-/** Бот для входа через Telegram (2FA). */
+/** Бот Astra (вход через Telegram, меню). */
 export function botConfig() {
   const token = (process.env.TELEGRAM_BOT_TOKEN || process.env.ALERT_TELEGRAM_TOKEN || process.env.BACKUP_TELEGRAM_TOKEN || '').trim();
   const api = trimApi(process.env.TELEGRAM_API || process.env.ALERT_TELEGRAM_API || process.env.BACKUP_TELEGRAM_API);
@@ -38,7 +41,7 @@ export function telegramProxy() {
 export class TelegramError extends Error {
   constructor(message, { kind = 'api', status = 0, description = '', retryAfter = 0 } = {}) {
     super(message);
-    this.kind = kind;            // 'network' — Telegram недоступен; 'api' — Telegram ответил ошибкой; 'config'
+    this.kind = kind;            // 'network' — Telegram недоступен; 'api' — Telegram ответил ошибкой; 'config'; 'too_big'
     this.status = status;
     this.description = description;
     this.retryAfter = retryAfter;
@@ -52,13 +55,15 @@ function scrub(text, token) {
   return s.replace(/bot\d+:[\w-]{20,}/g, 'bot***');
 }
 
-/** POST JSON через HTTP-прокси (CONNECT-туннель) — как запросы к Spotify через VPN-прокси */
-function postViaProxy(url, json, proxyUrl, timeoutMs) {
+const tooBig = () => Object.assign(new Error('слишком большой ответ'), { code: 'ETOOBIG' });
+
+/** Запрос через HTTP-прокси (CONNECT-туннель) — как запросы к Spotify через VPN-прокси. → { status, buf } */
+function requestViaProxy(url, { method = 'POST', json = null, timeoutMs, maxBytes = 0 }, proxyUrl) {
   const proxy = new URL(proxyUrl);
   const target = new URL(url);
   const port = Number(target.port) || (target.protocol === 'https:' ? 443 : 80);
   const auth = proxy.username ? { 'proxy-authorization': `Basic ${Buffer.from(`${decodeURIComponent(proxy.username)}:${decodeURIComponent(proxy.password)}`).toString('base64')}` } : {};
-  const payload = Buffer.from(JSON.stringify(json));
+  const payload = json ? Buffer.from(JSON.stringify(json)) : null;
   return new Promise((resolve, reject) => {
     let req = null;
     const conn = http.request({ host: proxy.hostname, port: Number(proxy.port) || 80, method: 'CONNECT', path: `${target.hostname}:${port}`, headers: { host: `${target.hostname}:${port}`, ...auth } });
@@ -68,70 +73,147 @@ function postViaProxy(url, json, proxyUrl, timeoutMs) {
     conn.on('connect', (pres, socket) => {
       if (pres.statusCode !== 200) { socket.destroy(); fail(new Error(`прокси ответил ${pres.statusCode}`)); return; }
       const lib = target.protocol === 'https:' ? https : http;
+      const headers = { host: target.host, ...(payload ? { 'content-type': 'application/json', 'content-length': payload.length } : {}) };
       req = lib.request(target, {
-        method: 'POST',
-        headers: { host: target.host, 'content-type': 'application/json', 'content-length': payload.length },
+        method, headers,
         createConnection: () => (target.protocol === 'https:' ? tls.connect({ socket, servername: target.hostname }) : socket),
       }, (r) => {
         const chunks = [];
-        r.on('data', (c) => chunks.push(c));
-        r.on('end', () => { clearTimeout(timer); resolve({ status: r.statusCode, text: Buffer.concat(chunks).toString('utf8') }); });
+        let size = 0;
+        r.on('data', (c) => {
+          size += c.length;
+          if (maxBytes && size > maxBytes) { r.destroy(); req.destroy(); fail(tooBig()); return; }
+          chunks.push(c);
+        });
+        r.on('end', () => { clearTimeout(timer); resolve({ status: r.statusCode, buf: Buffer.concat(chunks) }); });
         r.on('error', fail);
       });
       req.on('error', fail);
-      req.end(payload);
+      req.end(payload || undefined);
     });
     conn.end();
   });
+}
+
+/** Прямой запрос (fetch) с ограничением размера ответа. → { status, buf } */
+async function requestDirect(url, { method = 'POST', json = null, timeoutMs, maxBytes = 0 }) {
+  const res = await fetch(url, {
+    method, headers: json ? { 'content-type': 'application/json' } : {}, body: json ? JSON.stringify(json) : undefined,
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  const len = Number(res.headers.get('content-length')) || 0;
+  if (maxBytes && len > maxBytes) { res.body?.cancel?.().catch(() => {}); throw tooBig(); }
+  const chunks = [];
+  let size = 0;
+  if (res.body) {
+    for await (const c of res.body) {
+      size += c.length;
+      if (maxBytes && size > maxBytes) throw tooBig();
+      chunks.push(Buffer.from(c));
+    }
+  }
+  return { status: res.status, buf: Buffer.concat(chunks) };
 }
 
 // Если напрямую Telegram не отвечает, следующие 10 минут сразу идём через запасной прокси (не ждём таймаут).
 const STICKY_PROXY_MS = 10 * 60_000;
 const directFailedUntil = new Map(); // адрес Bot API → до какого момента идём сразу через прокси
 
+/** Запрос к Bot API (метод или файл): «напрямую → VPN-прокси». Ошибки — TelegramError без токена. */
+async function transport(base, url, tok, opts) {
+  const { fixed, fallback } = telegramProxy();
+  const { timeoutMs } = opts;
+  const viaProxy = async (p) => {
+    try { return await requestViaProxy(url, { ...opts, timeoutMs: timeoutMs + 5_000 }, p); } catch (err) {
+      if (err.code === 'ETOOBIG') throw new TelegramError('Файл слишком большой', { kind: 'too_big' });
+      throw new TelegramError(`Telegram недоступен и через VPN-прокси (${scrub(err.code || err.message, tok)})`, { kind: 'network' });
+    }
+  };
+  if (fixed) return viaProxy(fixed);
+  if (fallback && (directFailedUntil.get(base) || 0) > Date.now()) return viaProxy(fallback);
+  try {
+    // long polling — полный срок; обычные запросы при запасном прокси — быстрый отказ
+    const out = await requestDirect(url, { ...opts, timeoutMs: fallback && timeoutMs <= 15_000 ? 10_000 : timeoutMs });
+    if (fallback) directFailedUntil.delete(base);
+    return out;
+  } catch (err) {
+    if (err.code === 'ETOOBIG') throw new TelegramError('Файл слишком большой', { kind: 'too_big' });
+    const why = scrub(err.cause?.code || err.name || 'сеть', tok);
+    if (!fallback) throw new TelegramError(`Telegram недоступен с этого сервера (${why}). Настройте VPN-прокси: sudo bash /opt/sozvon/deploy/vpn-proxy.sh`, { kind: 'network' });
+    directFailedUntil.set(base, Date.now() + STICKY_PROXY_MS);
+    return viaProxy(fallback);
+  }
+}
+
+// ---------- цветные кнопки: поля style (primary | success | danger) и icon_custom_emoji_id ----------
+// Появились в Bot API 9.4 (InlineKeyboardButton/KeyboardButton). Старый или сторонний Bot API-сервер может их
+// не знать, а «пропустить неизвестное поле» Telegram не умеет — поэтому определение по факту: отправляем со
+// style; если Bot API отвечает 400 из-за поля кнопки — повторяем без style/icon и запоминаем это на сутки
+// для этого бота. TELEGRAM_BUTTON_STYLE=0 — не использовать вовсе.
+const STYLE_KEYS = ['style', 'icon_custom_emoji_id'];
+const STYLE_ERR = /style|icon_custom_emoji|unknown field|can't parse inline keyboard|BUTTON_TYPE_INVALID|button.*invalid/i;
+const styleUnsupported = new Map(); // токен → до какого момента не отправлять style
+const styleOff = () => ['0', 'false', 'off', 'no'].includes(String(process.env.TELEGRAM_BUTTON_STYLE || '').toLowerCase());
+const hasStyle = (params) => Array.isArray(params?.reply_markup?.inline_keyboard)
+  && params.reply_markup.inline_keyboard.some((row) => Array.isArray(row) && row.some((b) => b && STYLE_KEYS.some((k) => k in b)));
+function stripStyle(params) {
+  const kb = params.reply_markup.inline_keyboard.map((row) => row.map((b) => {
+    const c = { ...b };
+    for (const k of STYLE_KEYS) delete c[k];
+    return c;
+  }));
+  return { ...params, reply_markup: { ...params.reply_markup, inline_keyboard: kb } };
+}
+/** Для тестов/диагностики: false — бот не принимает цветные кнопки; null — неизвестно/принимает. */
+export const buttonStyleSupported = (token = botConfig().token) => ((styleUnsupported.get(token) || 0) > Date.now() ? false : null);
+
 /**
  * Вызов метода Bot API. Возвращает body.result; иначе бросает TelegramError (без токена в тексте).
  * opts: { token, api } — другой бот (оповещения); timeoutMs — для long polling больше.
  */
-export async function tgCall(method, params = {}, { token, api, timeoutMs = 15_000 } = {}) {
+export async function tgCall(method, params = {}, opts = {}) {
+  const tok = opts?.token ?? botConfig().token;
+  if (hasStyle(params) && (styleOff() || (styleUnsupported.get(tok) || 0) > Date.now())) return rawCall(method, stripStyle(params), opts);
+  try {
+    return await rawCall(method, params, opts);
+  } catch (err) {
+    if (!(err instanceof TelegramError) || err.kind !== 'api' || err.status !== 400 || !hasStyle(params) || !STYLE_ERR.test(err.description)) throw err;
+    styleUnsupported.set(tok, Date.now() + 24 * 3600_000);
+    console.warn('[telegram] Bot API не принимает цветные кнопки (style) — отправляю без них');
+    return rawCall(method, stripStyle(params), opts);
+  }
+}
+
+async function rawCall(method, params, { token, api, timeoutMs = 15_000 } = {}) {
   const cfg = botConfig();
   const tok = token ?? cfg.token;
   const base = trimApi(api ?? cfg.api);
   if (!tok) throw new TelegramError('Telegram-бот не настроен', { kind: 'config' });
-  const url = `${base}/bot${tok}/${method}`;
-  const { fixed, fallback } = telegramProxy();
-  let status;
-  let raw;
-  const viaProxy = async (p) => {
-    try { ({ status, text: raw } = await postViaProxy(url, params, p, timeoutMs + 5_000)); } catch (err) {
-      throw new TelegramError(`Telegram недоступен и через VPN-прокси (${scrub(err.code || err.message, tok)})`, { kind: 'network' });
-    }
-  };
-  if (fixed) await viaProxy(fixed);
-  else if (fallback && (directFailedUntil.get(base) || 0) > Date.now()) await viaProxy(fallback);
-  else {
-    try {
-      const res = await fetch(url, {
-        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(params),
-        signal: AbortSignal.timeout(fallback && timeoutMs <= 15_000 ? 10_000 : timeoutMs), // long polling — полный срок
-      });
-      status = res.status;
-      raw = await res.text();
-      if (fallback) directFailedUntil.delete(base);
-    } catch (err) {
-      const why = scrub(err.cause?.code || err.name || 'сеть', tok);
-      if (!fallback) throw new TelegramError(`Telegram недоступен с этого сервера (${why}). Настройте VPN-прокси: sudo bash /opt/sozvon/deploy/vpn-proxy.sh`, { kind: 'network' });
-      directFailedUntil.set(base, Date.now() + STICKY_PROXY_MS);
-      await viaProxy(fallback);
-    }
-  }
+  const { status, buf } = await transport(base, `${base}/bot${tok}/${method}`, tok, { method: 'POST', json: params, timeoutMs });
   let body = null;
-  try { body = JSON.parse(raw); } catch { /* не JSON */ }
+  try { body = JSON.parse(buf.toString('utf8')); } catch { /* не JSON */ }
   if (status < 200 || status >= 300 || !body?.ok) {
     const description = scrub(String(body?.description || status), tok).slice(0, 200);
     throw new TelegramError(`Telegram ответил ошибкой: ${description}`, { kind: 'api', status, description, retryAfter: Number(body?.parameters?.retry_after) || 0 });
   }
   return body.result;
+}
+
+/**
+ * Скачать файл, присланный боту: getFile → <api>/file/bot<токен>/<file_path> (та же логика «напрямую → прокси»).
+ * Больше maxBytes — TelegramError kind 'too_big' (скачивание обрывается, лишнее в память не читается).
+ */
+export async function downloadFile(fileId, { maxBytes = 1024 * 1024, timeoutMs = 30_000 } = {}) {
+  const f = await tgCall('getFile', { file_id: fileId });
+  if (Number(f?.file_size) > maxBytes) throw new TelegramError('Файл слишком большой', { kind: 'too_big' });
+  if (typeof f?.file_path !== 'string' || !/^[\w./-]{1,256}$/.test(f.file_path) || f.file_path.includes('..')) {
+    throw new TelegramError('Telegram не отдал файл', { kind: 'api' });
+  }
+  const cfg = botConfig();
+  const base = trimApi(cfg.api);
+  const { status, buf } = await transport(base, `${base}/file/bot${cfg.token}/${f.file_path}`, cfg.token, { method: 'GET', timeoutMs, maxBytes });
+  if (status !== 200) throw new TelegramError(`Telegram не отдал файл (${status})`, { kind: 'api', status });
+  return buf;
 }
 
 /* ---------------- методы ---------------- */
@@ -144,7 +226,9 @@ export const editMessageText = (chatId, messageId, text, extra = {}, opts) =>
 export const answerCallbackQuery = (id, text = '', extra = {}, opts) =>
   tgCall('answerCallbackQuery', { callback_query_id: id, ...(text ? { text: String(text).slice(0, 190) } : {}), ...extra }, opts);
 
-export const setMyCommands = (commands, opts) => tgCall('setMyCommands', { commands }, opts);
+export const setMyCommands = (commands, extra = {}, opts) => tgCall('setMyCommands', { commands, ...extra }, opts);
+export const setChatMenuButton = (menuButton, extra = {}, opts) => tgCall('setChatMenuButton', { menu_button: menuButton, ...extra }, opts);
+export const deleteMessage = (chatId, messageId, opts) => tgCall('deleteMessage', { chat_id: chatId, message_id: messageId }, opts);
 
 let meCache = null; // { token, me, at }
 /** getMe (кэш на час): { id, username, first_name } — для ссылки t.me/<username>. */
@@ -157,15 +241,18 @@ export async function getMe() {
 }
 
 /* ---------------- приём обновлений: long polling getUpdates ---------------- */
-// Опрос идёт, только пока он кому-то нужен (wanted() — например, ждём нажатия «Start» при привязке,
-// «Это я»/«Это не я» при входе): бот владельца используется и для резервных копий (deploy/backup.sh setup
-// сам читает getUpdates, чтобы узнать chat id) — постоянный опрос забирал бы у него сообщения.
-// Смещение (offset) хранится в DATA_DIR/telegram-offset.json — после перезапуска старые обновления
-// повторно не обрабатываются.
+// Опрос идёт постоянно, пока задан токен (меню бота, ответы на уведомления). Раньше он шёл только «по
+// требованию», потому что deploy/backup.sh setup сам читал getUpdates, чтобы узнать chat id; теперь setup
+// при работающем сервере спрашивает chat id у сервера (admin.sock, команда tg-chats — см. server/tgbot.js),
+// а getUpdates вызывает, только когда служба остановлена. TELEGRAM_POLLING=0 — старое поведение (wanted()).
+// Смещение (offset) хранится в DATA_DIR/telegram-offset.json — после перезапуска старые обновления повторно
+// не обрабатываются; вдобавок последние update_id помнятся в памяти (повтор того же обновления не исполняется).
 const POLL_TIMEOUT_SEC = 25;
 const MAX_BACKOFF_MS = 60_000;
+const SEEN_MAX = 1000;
+export const continuousPolling = () => !['0', 'false', 'off', 'no'].includes(String(process.env.TELEGRAM_POLLING ?? '1').toLowerCase());
 
-export function createPoller({ dataDir, wanted, onUpdate, log = console }) {
+export function createPoller({ dataDir, wanted = () => true, onUpdate, log = console }) {
   const file = dataDir ? path.join(dataDir, 'telegram-offset.json') : null;
   let offset = 0;
   try { offset = Number(JSON.parse(fs.readFileSync(file, 'utf8')).offset) || 0; } catch { /* нет файла */ }
@@ -174,6 +261,8 @@ export function createPoller({ dataDir, wanted, onUpdate, log = console }) {
   let backoff = 0;
   let lastError = null;
   let wakeTimer = null;
+  const seen = new Set();
+  const want = () => continuousPolling() || wanted();
 
   const persist = () => {
     if (!file) return;
@@ -188,7 +277,7 @@ export function createPoller({ dataDir, wanted, onUpdate, log = console }) {
   async function loop() {
     running = true;
     try {
-      while (!stopped && botConfig().configured && wanted()) {
+      while (!stopped && botConfig().configured && want()) {
         let updates;
         try {
           updates = await tgCall('getUpdates', { offset, timeout: POLL_TIMEOUT_SEC, allowed_updates: ['message', 'callback_query'] },
@@ -206,8 +295,10 @@ export function createPoller({ dataDir, wanted, onUpdate, log = console }) {
         }
         if (!Array.isArray(updates)) { await sleep(1000); continue; }
         for (const u of updates) {
-          if (!Number.isFinite(u?.update_id)) continue;
+          if (!Number.isFinite(u?.update_id) || u.update_id < offset || seen.has(u.update_id)) continue;
           offset = Math.max(offset, u.update_id + 1);
+          seen.add(u.update_id);
+          if (seen.size > SEEN_MAX) seen.delete(seen.values().next().value);
           try { await onUpdate(u); } catch (err) { log.warn('[telegram] Ошибка обработки обновления:', err.message); }
         }
         if (updates.length) persist();
@@ -215,12 +306,12 @@ export function createPoller({ dataDir, wanted, onUpdate, log = console }) {
     } finally {
       running = false;
       // пока цикл завершался, могла появиться новая потребность
-      if (!stopped && botConfig().configured && wanted()) setImmediate(kick);
+      if (!stopped && botConfig().configured && want()) setTimeout(kick, 1000).unref?.();
     }
   }
 
   function kick() {
-    if (stopped || running || !botConfig().configured || !wanted()) return;
+    if (stopped || running || !botConfig().configured || !want()) return;
     loop().catch((err) => log.warn('[telegram] Опрос остановлен:', err.message));
   }
 

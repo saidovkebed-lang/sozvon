@@ -9,7 +9,8 @@
 // Telegram (server/tg2fa.js):
 //   POST /api/login/2fa/status          { challenge } → { token, user } (нажато «Это я») | { pending, telegram }
 //   POST /api/login/2fa/resend          { challenge } → { telegram }  (не чаще 1 раза в 30 с и 5 раз за 15 минут)
-//   POST /api/me/2fa/telegram/link      { password } → { link, bot, expiresAt }  (ссылка t.me/<бот>?start=…, 10 минут)
+//   POST /api/me/2fa/telegram/link      { password, passwordless? } → { link, bot, expiresAt }  (ссылка t.me/<бот>?start=…, 10 минут;
+//                                       passwordless — «Вход без пароля через Telegram», по умолчанию true)
 //   GET  /api/me/2fa/telegram/link      → { linked, pending, recoveryCodes? }    (опрос во время привязки)
 //   DELETE /api/me/2fa/telegram/link    — отменить ссылку
 //   POST /api/me/2fa/telegram/code      → { telegram }  (код для действия в настройках)
@@ -68,7 +69,7 @@ export function createTwoFactorRouter({ onUserUpdated = () => {}, onSessionsRevo
   router.post('/me/2fa/telegram/link', requireAuth, wrap(async (req, res) => {
     noBot(req);
     res.set('Cache-Control', 'no-store');
-    res.json(await startLink(req.user, req.body?.password));
+    res.json(await startLink(req.user, req.body?.password, { passwordless: req.body?.passwordless !== false }));
   }));
 
   router.get('/me/2fa/telegram/link', requireAuth, (req, res) => {

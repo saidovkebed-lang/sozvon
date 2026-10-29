@@ -57,6 +57,7 @@ Discord в России заблокирован, а созваниваться 
 
 **🔒 Надёжно**
 - двухфакторная защита входа: приложение-аутентификатор (Google Authenticator, Яндекс Ключ и др.) или Telegram — код и кнопка «Это я» от бота вашего сервера, без установки приложений;
+- **Telegram-бот Astra** с меню: личные сообщения и упоминания в Telegram, пока вас нет в Astra, и ответ прямо оттуда; вход без пароля кнопкой «✅ Войти», сброс пароля по ссылке, приглашения друзей — **[docs/TELEGRAM.md](docs/TELEGRAM.md)**;
 - ежедневные резервные копии, по желанию — зашифрованная копия в ваш Telegram;
 - никакой рекламы, аналитики и сторонних серверов: всё хранится у вас.
 
@@ -88,6 +89,7 @@ curl -fsSL https://raw.githubusercontent.com/saidovkebed-lang/sozvon/main/deploy
 | [DESKTOP.md](docs/DESKTOP.md) | приложение для ПК, демонстрация экрана, рация |
 | [BACKUP.md](docs/BACKUP.md) | резервные копии и восстановление |
 | [SECURITY.md](docs/SECURITY.md) | двухфакторная защита и безопасность |
+| [TELEGRAM.md](docs/TELEGRAM.md) | Telegram-бот: уведомления и ответы, вход без пароля, сброс пароля, приглашения |
 | [RECAP.md](docs/RECAP.md) | «Astra Итоги» и что собирается |
 | [DESIGN.md](docs/DESIGN.md) | тема «Космос», темы серверов, профили |
 
@@ -256,7 +258,7 @@ npm run bot
 | `BOT_TOKEN` | из `DATA_DIR/bot-token.txt` | токен бота. Если задан у сервера, его же нужно задать боту |
 | `BOT_IDLE_MS` | `120000` | (бот) через сколько миллисекунд простоя бот выходит из канала |
 | `YTDLP_PATH` | `yt-dlp` | путь к yt-dlp |
-| `YTDLP_COOKIES` / `YTDLP_PROXY` | — | cookies.txt для YouTube / прокси только для скачивания музыки и видео («Смотреть вместе») |
+| `YTDLP_COOKIES` / `YTDLP_PROXY` | `data/cookies.txt`, если есть / — | cookies.txt для YouTube / прокси только для скачивания музыки и видео («Смотреть вместе») |
 | `YTDLP_TIMEOUT_SEC` | `300` | максимум на скачивание одного трека (поиск и плейлисты — `YTDLP_META_TIMEOUT_SEC`, 90) |
 | `MUSIC_SEARCH_SOURCES` | `youtube,soundcloud` | где и в каком порядке искать треки |
 | `MUSIC_PLAYLIST_LIMIT` | `100` | сколько треков брать из плейлиста |
@@ -270,7 +272,7 @@ npm run bot
 | `WATCH_CACHE_GB` | `10` | «Смотреть вместе»: кэш видео в `data/watch`, ГБ; давно не смотренные удаляются (LRU) |
 | `WATCH_DOWNLOAD_TIMEOUT_MIN` / `WATCH_DOWNLOAD_CONCURRENCY` / `WATCH_IDLE_SEC` | `60` / `1` / `60` | время на одно скачивание; сколько видео качать одновременно; через сколько секунд после ухода всех из канала просмотр заканчивается |
 | `ALERT_TELEGRAM_TOKEN` / `ALERT_TELEGRAM_CHAT_ID` | `BACKUP_TELEGRAM_*` | бот и чат для оповещений о проблемах сервера (VPN, диск, бэкап, сертификат…) |
-| `TELEGRAM_BOT_TOKEN` | `ALERT_TELEGRAM_TOKEN`, затем `BACKUP_TELEGRAM_TOKEN` | бот для входа через Telegram (второй фактор); `TELEGRAM_PROXY` — `http://…` всегда через прокси, `off` — только напрямую (по умолчанию при недоступности — через `SPOTIFY_PROXY`). Подробно — [docs/SECURITY.md](docs/SECURITY.md#вход-через-telegram) |
+| `TELEGRAM_BOT_TOKEN` | `ALERT_TELEGRAM_TOKEN`, затем `BACKUP_TELEGRAM_TOKEN` | бот Astra: вход через Telegram (второй фактор), меню, уведомления и ответы, вход без пароля, сброс пароля ([docs/TELEGRAM.md](docs/TELEGRAM.md)); для ссылок нужен `PUBLIC_URL`; `TELEGRAM_PROXY` — `http://…` всегда через прокси, `off` — только напрямую (по умолчанию при недоступности — через `SPOTIFY_PROXY`). Подробно — [docs/SECURITY.md](docs/SECURITY.md#вход-через-telegram) |
 
 Все музыкальные настройки — в [docs/MUSIC.md](docs/MUSIC.md#все-настройки-музыки), «Смотреть вместе» — в [docs/WATCH.md](docs/WATCH.md).
 

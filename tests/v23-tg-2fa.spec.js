@@ -199,8 +199,8 @@ test.afterAll(async () => {
 
 test('привязка: пароль, ссылка t.me/<бот>?start=…, неверный токен игнорируется, ответ бота, коды восстановления один раз', async () => {
   const u = await register(A, 'tglink');
-  // опрос не идёт, пока нечего ждать (бот общий с резервными копиями)
-  expect(bot(TOKEN_A).calls.filter((c) => c.method === 'getUpdates')).toHaveLength(0);
+  // опрос идёт постоянно (меню бота, server/tgbot.js); backup.sh setup при работающем сервере getUpdates не вызывает
+  await waitFor(() => bot(TOKEN_A).calls.some((c) => c.method === 'getUpdates') || null, { message: 'постоянный опрос' });
   let st = await api(A, 'GET', '/api/me/2fa', { token: u.token });
   expect(st.json).toMatchObject({ enabled: false, telegram: { available: true, enabled: false } });
   expect((await api(A, 'POST', '/api/me/2fa/telegram/link', { token: u.token, body: { password: 'wrong' } })).status).toBe(400);
@@ -212,14 +212,15 @@ test('привязка: пароль, ссылка t.me/<бот>?start=…, не
   expect(l.json.expiresAt).toBeGreaterThan(Date.now() + 9 * 60_000);
   const startToken = new URL(l.json.link).searchParams.get('start');
 
-  // чужой/неверный токен — без привязки и без ответа
+  // чужой/неверный токен — без привязки: в ответ только меню непривязанного чата (на «привет» — ничего)
   const stranger = 4440001;
   startCmd(TOKEN_A, stranger, `/start ${'x'.repeat(32)}`);
   startCmd(TOKEN_A, stranger, '/start');
   startCmd(TOKEN_A, stranger, 'привет');
   await waitFor(() => bot(TOKEN_A).updates.length === 0 || null, { timeout: 8000, message: 'обновления прочитаны' });
-  await sleep(300);
-  expect(sentTo(TOKEN_A, stranger)).toHaveLength(0);
+  await sleep(500);
+  expect(sentTo(TOKEN_A, stranger).length).toBeLessThanOrEqual(2);
+  for (const m of sentTo(TOKEN_A, stranger)) expect(m.text).toMatch(/^👋 Это бот Astra/);
   expect((await api(A, 'GET', '/api/me/2fa/telegram/link', { token: u.token })).json).toMatchObject({ linked: false, pending: true });
 
   u.chat = ++chatSeq;
@@ -234,18 +235,13 @@ test('привязка: пароль, ссылка t.me/<бот>?start=…, не
   expect((await api(A, 'GET', '/api/me/2fa/telegram/link', { token: u.token })).json.recoveryCodes).toBeUndefined();
   await waitFor(() => sentTo(TOKEN_A, u.chat).length || null, { timeout: 5000, message: 'ответ бота' });
   expect(sentTo(TOKEN_A, u.chat)[0].text).toBe(`Аккаунт Astra «${u.username}» привязан. Здесь будут приходить коды входа.`);
-  // опрос остановился (ждать нечего); тот же токен второй раз (другой чат, пока идёт чужая привязка) — не сработает
-  await waitFor(async () => {
-    const before = bot(TOKEN_A).calls.length;
-    await sleep(1500);
-    return bot(TOKEN_A).calls.length === before || null;
-  }, { timeout: 10000, message: 'опрос остановлен' });
+  // тот же токен второй раз (другой чат, пока идёт чужая привязка) — не сработает
   const u2 = await register(A, 'tglink2');
   expect((await api(A, 'POST', '/api/me/2fa/telegram/link', { token: u2.token, body: { password: u2.password } })).status).toBe(200);
   startCmd(TOKEN_A, 4440002, `/start ${startToken}`);
   await waitFor(() => bot(TOKEN_A).updates.length === 0 || null, { timeout: 8000, message: 'обновления прочитаны' });
   await sleep(300);
-  expect(sentTo(TOKEN_A, 4440002)).toHaveLength(0);
+  for (const m of sentTo(TOKEN_A, 4440002)) expect(m.text).toMatch(/^👋 Это бот Astra/);
   expect((await api(A, 'GET', '/api/me/2fa/telegram/link', { token: u2.token })).json.linked).toBe(false);
   expect((await api(A, 'DELETE', '/api/me/2fa/telegram/link', { token: u2.token })).status).toBe(200);
   await waitFor(() => readDb(servers.A).users.find((x) => x.id === u.id).tgChatId === String(u.chat) || null, { message: 'db.json сохранён' });
@@ -272,7 +268,7 @@ test('просроченная ссылка не привязывает; Telegra
   startCmd(TOKEN_B, 6660001, `/start ${new URL(l.json.link).searchParams.get('start')}`);
   await sleep(1500);
   expect((await api(B, 'GET', '/api/me/2fa/telegram/link', { token: u.token })).json.linked).toBe(false);
-  expect(sentTo(TOKEN_B, 6660001)).toHaveLength(0);
+  for (const m of sentTo(TOKEN_B, 6660001)) expect(m.text).toMatch(/^👋 Это бот Astra/);
   // свежая ссылка — привязка и коды через прокси
   await link(B, TOKEN_B, u);
   const s1 = await loginStep1(B, u);

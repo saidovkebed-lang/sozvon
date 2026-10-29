@@ -11,6 +11,7 @@ import { execFile } from 'node:child_process';
 import { db } from '../db.js';
 import { isOnline } from '../model.js';
 import { ytdlpPath } from '../music-library.js';
+import { cookiesStatus } from '../cookies.js';
 import { recentLogs, errorsSince, botCheckFailures } from './logbuf.js';
 import { readJson } from './access.js';
 import { currentVersion, stateDir } from './update.js';
@@ -78,14 +79,9 @@ function ytdlpInfo() {
 }
 
 function cookiesInfo() {
-  const src = process.env.YTDLP_COOKIES;
-  if (!src) return { configured: false };
-  try {
-    const st = fs.statSync(src);
-    return { configured: true, exists: true, mtime: st.mtimeMs, ageDays: round1((Date.now() - st.mtimeMs) / 86400_000) };
-  } catch (err) {
-    return { configured: true, exists: false, error: err.code || 'нет доступа' };
-  }
+  // YTDLP_COOKIES или DATA_DIR/cookies.txt (присланный боту файл) — server/cookies.js
+  const { mtime, ...rest } = cookiesStatus();
+  return mtime ? { ...rest, mtime } : rest;
 }
 
 // ---------- VPN-прокси ----------

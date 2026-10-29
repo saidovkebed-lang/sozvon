@@ -3646,3 +3646,20 @@ body.has-lightbox { overflow: hidden; }
 .auth-tg[data-state="failed"] .auth-tg__text, .auth-tg[data-state="locked"] .auth-tg__text { color: var(--warn); }
 .auth-tg__resend { font-size: var(--fs-sm); }
 @media (max-width: 639.98px) { .twofa-codes { grid-template-columns: 1fr; } .twofa-actions { justify-content: stretch; } .twofa-actions .btn { flex: 1 1 auto; } }
+
+/* Telegram-бот на экране входа: «Войти через Telegram», «Забыли пароль?» (public/js/ui/auth.js) */
+.auth-alt { display: flex; flex-direction: column; align-items: center; gap: var(--sp-2); margin-top: var(--sp-3); padding-top: var(--sp-3); border-top: 1px solid var(--border, rgba(127, 127, 127, .2)); }
+.auth-alt__tg { display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-2); }
+.auth-alt__tg svg { color: #2aabee; flex: none; }
+.auth-alt__forgot { font-size: var(--fs-sm); font-weight: var(--fw-semibold); }
+.auth__hint { margin: var(--sp-2) 0 0; color: var(--text-muted); font-size: var(--fs-sm); line-height: 1.45; text-align: center; }
+.auth-tg[data-state="error"] .auth-tg__text { color: var(--warn); }
+.auth-tg[data-state="ok"] .auth-tg__text { color: var(--text); }
+/* «Уведомления» → «Telegram» (public/js/ui/telegram-settings.js) и галочка при привязке */
+.tg-settings { display: flex; flex-direction: column; gap: var(--sp-2); }
+.tg-pause { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.tg-pwless-confirm { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; }
+.tg-pwless-confirm[hidden] { display: none; }
+.tg-pwless-confirm .input { flex: 1 1 180px; min-width: 0; }
+.twofa-check { display: flex; gap: var(--sp-2); align-items: flex-start; margin: var(--sp-2) 0; font-size: var(--fs-sm); line-height: 1.4; cursor: pointer; }
+.twofa-check input { margin-top: 2px; flex: none; }

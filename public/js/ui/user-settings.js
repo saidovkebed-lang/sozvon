@@ -10,6 +10,7 @@ import { toast, toastOk, toastError } from './toasts.js';
 import { previewSound } from './sounds.js';
 import { codeLabel, comboFromEvent, isModifierCode, setCapturing } from './keybinds.js';
 import { canNotify, requestDesktopPermission } from './notifications.js';
+import { telegramSection, refreshTelegramSettings } from './telegram-settings.js';
 import { pushSupport, pushActive, enablePush, disablePush } from '../push.js';
 import { api } from '../api.js';
 import { profileCard } from './profile.js';
@@ -1071,6 +1072,7 @@ function pushRow() {
 function buildNotifications() {
   return [
     section('Push-уведомления', pushRow()),
+    section('Telegram', telegramSection({ onAccount: () => showSection('account', { focusPanel: true }) })),
     section('Звуки',
       switchRow('notifications.sounds', 'Звуки интерфейса', 'Короткие сигналы Astra. Выключите, чтобы отключить все звуки разом.'),
       soundRow('notifications.soundJoinLeave', 'Вход и выход', 'Кто-то зашёл в ваш голосовой канал или вышел из него.', 'join'),
@@ -1268,7 +1270,7 @@ function showSection(id, { focusPanel = false } = {}) {
   if (id === 'profile') fillProfileForm();
   if (id === 'about') { const dl = $('#about-download'); if (dl && !dl.dataset.loaded) { dl.dataset.loaded = '1'; renderDownloads(dl); } }
   if (id === 'about') $('#about-features')?.refresh?.();
-  if (id === 'notifications') { renderDesktopState(); renderPushState(); }
+  if (id === 'notifications') { renderDesktopState(); renderPushState(); refreshTelegramSettings(); }
   if (focusPanel) $('.settings__back', root).focus();
 }
 

@@ -11,6 +11,7 @@
 //
 // Ключи кэша (tracks[].sources в db.json): «<extractor>:<id>» (youtube:dQw4w9WgXcQ, soundcloud:293),
 // «spotify:<trackId>», «url:<host/path>» — по любому из них трек находится без вызова yt-dlp.
+import { cookiesSource } from './cookies.js';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
@@ -135,7 +136,7 @@ function cacheDir() {
 
 // cookies.txt копируем к себе: yt-dlp перезаписывает файл cookies, а /etc под ProtectSystem=strict только для чтения
 function cookiesArg() {
-  const src = process.env.YTDLP_COOKIES;
+  const src = cookiesSource(); // YTDLP_COOKIES или DATA_DIR/cookies.txt (server/cookies.js)
   if (!src) return [];
   try {
     const dst = path.join(cacheDir(), 'cookies.txt');
@@ -150,7 +151,7 @@ function cookiesArg() {
     }
     return ['--cookies', dst];
   } catch (err) {
-    console.warn(`[music] YTDLP_COOKIES=${src}: не читается (${err.code || err.message}) — работаю без cookies`);
+    console.warn(`[music] cookies ${src}: не читается (${err.code || err.message}) — работаю без cookies`);
     return [];
   }
 }
@@ -248,6 +249,17 @@ function explain(res, src, timeoutMs) {
   return (err.replace(/^.*?ERROR:\s*/, '').replace(/\[[^\]]+\]\s*/g, '') || `yt-dlp завершился с кодом ${res.code}`).slice(0, 200);
 }
 export { runYtDlp, explain as explainYtDlp, parseLastJson };
+
+/** Быстрая проверка YouTube с текущими cookies (поиск одного видео): { ok, error? }. */
+export async function probeYouTube({ timeoutMs = 60_000 } = {}) {
+  try {
+    const res = await runYtDlp(['--flat-playlist', '--skip-download', '--print', 'id', 'ytsearch1:lofi hip hop radio'], { timeoutMs, queue: false });
+    if (res.code === 0 && /^[\w-]{6,}$/m.test(res.stdout.trim())) return { ok: true };
+    return { ok: false, error: explain(res, 'youtube', timeoutMs) };
+  } catch (err) {
+    return { ok: false, error: String(err.message || err).slice(0, 300) };
+  }
+}
 const isBotCheck = (msg) => /не бот|cookies|не отвечает|403|429/.test(msg);
 
 function parseLastJson(stdout) {

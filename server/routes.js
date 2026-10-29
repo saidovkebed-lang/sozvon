@@ -18,6 +18,9 @@ import { importFromUrl, resolveInput, fetchPending, similarTracks } from './musi
 import { createPlaylistRouter } from './music-playlists.js';
 import { tracksAddedBy, BADGE_RULES } from './cosmetics.js';
 import { createTwoFactorRouter } from './twofa-routes.js';
+import { createTelegramRouter } from './tg-routes.js';
+import { telegramAvailable } from './tg2fa.js';
+import { emit as emitEvent } from './events.js';
 
 const limitMb = Number(process.env.UPLOAD_LIMIT_MB);
 export const ATTACHMENT_LIMIT_MB = Number.isFinite(limitMb) && limitMb > 0 ? limitMb : 100;
@@ -180,6 +183,7 @@ export function createApiRouter({
     }
     const out = await register(req.body);
     if (!exempt(ip)) registerByIp.hit(ip);
+    emitEvent('registered', db.data.users.find((u) => u.id === out.user.id));
     res.json(out);
   }));
 
@@ -219,6 +223,8 @@ export function createApiRouter({
   }));
 
   router.use(createTwoFactorRouter({ onUserUpdated, onSessionsRevoked, dataDir })); // 2FA: /login/2fa, /me/2fa/*
+  // Telegram: сброс пароля, вход без пароля, настройки уведомлений в боте (server/tg-routes.js)
+  router.use(createTelegramRouter({ onUserUpdated, onSessionsRevoked, getPublicUrl }));
 
   router.get('/config', wrap(async (_req, res) => {
     res.set('Cache-Control', 'no-store');
@@ -228,6 +234,7 @@ export function createApiRouter({
       forceRelay: forceRelay(),
       publicUrl: getPublicUrl(),
       botOnline: isBotOnline(),
+      telegram: telegramAvailable(), // бот Astra настроен: «Войти через Telegram», «Забыли пароль?»
     });
   }));
 

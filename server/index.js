@@ -23,6 +23,8 @@ import { startTunnel, getPublicUrl } from './tunnel.js';
 import { createSfu } from './sfu.js';
 import { initStats, flushStats, createRecapRouter } from './stats.js';
 import { initAdmin, mountAdmin } from './admin/index.js';
+import { initCookies } from './cookies.js';
+import { initTelegramBot } from './tgbot.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DATA_DIR = path.resolve(process.env.DATA_DIR || path.join(ROOT, 'data'));
@@ -46,6 +48,7 @@ fs.mkdirSync(downloadsDir, { recursive: true });
 const uploadsDir = path.join(DATA_DIR, 'uploads');
 fs.mkdirSync(uploadsDir, { recursive: true });
 initMusicLibrary(DATA_DIR);
+initCookies(DATA_DIR); // cookies YouTube: YTDLP_COOKIES или DATA_DIR/cookies.txt (server/cookies.js)
 initCovers(DATA_DIR);
 ensureBotUser();
 initBotToken(DATA_DIR);
@@ -96,6 +99,8 @@ app.use('/api', createApiRouter({
   onMusicPlaylists: realtime.emitMusicPlaylists,
   onMusicSettings: realtime.emitMusicSettings,
 }));
+// Telegram-бот Astra: меню, уведомления и ответы, приглашения (server/tgbot.js) — после createApiRouter (опрос бота)
+initTelegramBot({ dataDir: DATA_DIR, realtime });
 
 // Аватары/баннеры/иконки: имя файла содержит хэш — кэш «навсегда»
 for (const dir of ['avatars', 'banners', 'icons']) {
@@ -117,6 +122,17 @@ app.use('/media/downloads', express.static(downloadsDir, {
     if (/latest[\w.-]*\.yml$/i.test(filePath)) res.setHeader('Cache-Control', 'no-cache');
   },
 }));
+// Ссылка-приглашение из бота: /invite/<код> → приложение с полем «Присоединиться» (как ?invite=)
+app.get('/invite/:code', (req, res) => {
+  const code = String(req.params.code || '').toLowerCase();
+  res.redirect(302, /^[a-z0-9]{8}$/.test(code) ? `/?invite=${code}` : '/');
+});
+// Сброс пароля по ссылке из Telegram (server/pwreset.js); токен — во фрагменте #t=…, на сервер не приходит
+app.get(['/reset-password', '/reset-password/'], (_req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.set('Referrer-Policy', 'no-referrer');
+  res.sendFile(path.join(PUBLIC_DIR, 'reset-password.html'));
+});
 app.get(['/download', '/download/'], (_req, res) => {
   res.set('Cache-Control', 'no-cache');
   const page = path.join(PUBLIC_DIR, 'download.html');
