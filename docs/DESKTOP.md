@@ -114,6 +114,28 @@ process loopback, как в Discord и OBS): голоса звонка и муз
 
 В браузере (не в приложении) захват делает сам браузер — для игр показывайте экран из приложения для ПК.
 
+## «Слушает Spotify» — что играет на компьютере (Windows)
+
+Как в Discord: если на компьютере играет музыка, друзья видят в списке участников строку
+«🎵 Spotify: Исполнитель — Название», а в вашем профиле — карточку «Слушает Spotify» с обложкой, названием,
+исполнителем, альбомом и полосой прогресса, кнопками «Найти на YouTube» и «Включить в Astra» (добавить трек
+в очередь DJ Бота в голосовом канале зрителя — нужно право управлять музыкой).
+
+Astra берёт данные там же, где их показывает регулятор громкости Windows 10/11 (системные медиасессии):
+Spotify, Яндекс Музыка, VK Музыка, Apple Music / iTunes, AIMP, foobar2000, MusicBee, Winamp, VLC,
+«Медиаплеер» Windows, Telegram, Звук, Deezer, TIDAL, SoundCloud, YouTube Music (как приложение) и любые другие
+программы, которые сообщают Windows, что играют. Если плеер Windows ничего не сообщает (так бывает у старых
+плееров и некоторых плагинов), Astra его тоже не увидит.
+
+- **Пауза или остановка** — строка пропадает. Когда музыка играет у вас самой Astra (DJ Бот в голосовом канале),
+  показывается «Сейчас слушает» бота.
+- **Настройки** — «Настройки → Профиль → Конфиденциальность»: «Показывать, что я слушаю» выключает всё сразу
+  (программа слежения при этом не запускается); «Учитывать браузеры» (по умолчанию выключено: сайт браузер
+  Windows не называет, в статусе было бы «Chrome»); «Источники» — что сейчас сообщает Windows, с галочками.
+- Видно тем, с кем у вас общий сервер или личная переписка. Сервер ничего не сохраняет: данные живут в памяти,
+  пока вы в сети, и пропадают через 10 минут без обновлений. Обложку сервер находит сам (Deezer/iTunes, как у бота).
+- Работает на Windows 10 (1809+) и 11, только в приложении для ПК (в браузере Windows такие данные не отдаёт).
+
 ## Обновление
 
 Приложение само раз в несколько часов спрашивает у сервера, не вышла ли новая версия. Если вышла,
@@ -233,8 +255,26 @@ xvfb-run -a node scripts/smoke.mjs dist/linux-unpacked/sozvon --server=http://lo
 | `nativeCaptureControl(token, 'pause'\|'resume'\|'update'\|'stop', params?) → Promise<{ok, url?}>` | управление; после `update` — новый `url` |
 | `onNativeCaptureEnded(cb) → off()` | захват завершился сам: `{token, reason:'window-closed'\|'exit'}` |
 | `openServerSettings()` | открыть окно «Сервер…» |
+| `mediaWatch: boolean` | есть слежение «что играет» (Windows + `sozvon-capture.exe`) |
+| `setMediaWatch(on)` | запустить/остановить помощник `sozvon-capture.exe --media` (упал — перезапуск с паузой 1…60 с; «медиасессии недоступны» трижды подряд — остановка) |
+| `onMedia(cb(sessions)) → off()` | медиасессии Windows при каждом изменении (и раз в 5 с, пока играет): `[{app, title, artist, album, albumArtist, durationMs, positionMs, updatedAt, playing, current}]`; что показывать — решает страница (`public/js/media-sources.js`, `public/js/now-playing.js`) |
 
 Приложение добавляет к User-Agent строку `SozvonDesktop/<версия>`.
+
+### «Что играет»: протокол и проверка
+
+`sozvon-capture.exe --media` (C++/WinRT, `GlobalSystemMediaTransportControlsSessionManager`) печатает `READY`, затем
+строку JSON (UTF-8) на каждое изменение и раз в 5 с, пока что-то играет:
+`{"t":"media","sessions":[{"app":"Spotify.exe","title":…,"artist":…,"album":…,"albumArtist":…,"durationMs":…,"positionMs":…,"updatedAt":<unix мс>,"playing":true,"current":true}]}`
+(`positionMs` — на момент `updatedAt`; 0 — неизвестно). Опрос раз в секунду; «умерший» менеджер сессий (перезапуск
+проводника, выход из сна) запрашивается заново. Конец stdin — выход с кодом 0; медиасессии недоступны — код 4.
+Сборка — `cl … /std:c++20 …` (C++/WinRT нужны корутины C++20), `windowsapp.lib` подключается через `#pragma comment`.
+
+Проверка без релиза: workflow `native-check` (вручную или пуш в ветку `native-*`) собирает `sozvon-capture.exe`
+той же строкой, что и релиз, и запускает `desktop/scripts/capture-smoke.cjs` на `windows-latest` (в том числе
+`--media` со своей медиасессией из PowerShell — проверка кириллицы и экранирования). Тесты на Linux —
+`tests/v22-now-playing.spec.js` (подделка помощника `tests/fixtures/fake-capture.cjs --media`,
+`SOZVON_CAPTURE_FAKE_MEDIA=<файл JSON>|demo|unavailable`).
 
 ### Рация и игры с античитом
 

@@ -8,7 +8,7 @@ import { toastError } from './toasts.js';
 import { capabilities, toggleMemberRole, assignableRoles, kickMember, banMember, setServerMute } from './mod-actions.js';
 import { statusDot } from './members.js';
 import { badgeRow, validPreset } from './cosmetics.js';
-import { listeningOf, listeningSection } from './listening.js';
+import { listeningOf, listeningSection, pcListeningOf, pcListeningSection } from './listening.js';
 
 const MONTHS = ['янв.', 'февр.', 'мар.', 'апр.', 'мая', 'июн.', 'июл.', 'авг.', 'сент.', 'окт.', 'нояб.', 'дек.'];
 const fmtSince = (ms) => { const d = new Date(ms); return `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()} г.`; };
@@ -68,6 +68,9 @@ export function profileCard(u, { server = null, preview = false, onAction = null
   // «Сейчас слушает» — музыка бота в голосовом канале, который видит смотрящий (ui/listening.js)
   const listening = !preview ? listeningOf(u) : null;
   if (listening) sections.append(listeningSection(listening, { self: u.id === state.user?.id, onAction }));
+  // иначе — что играет у него на ПК («Слушает Spotify», приложение для Windows)
+  const pc = !preview && !listening ? pcListeningOf(u) : null;
+  if (pc) sections.append(pcListeningSection(pc, { self: u.id === state.user?.id }));
   if (u.about) {
     sections.append(h('section', { class: 'profile-popup__section' },
       h('h4', null, 'Обо мне'), h('div', { class: 'profile-popup__about' }, renderMarkdown(u.about))));

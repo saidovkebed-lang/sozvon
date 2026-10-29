@@ -32,6 +32,8 @@ const SECTIONS = [
 ];
 
 import { AVATAR_PALETTE } from './palette.js';
+import { mediaAvailable, currentSources, onSourcesChange } from '../now-playing.js';
+import { CATEGORY_LABELS } from '../media-sources.js';
 export { AVATAR_PALETTE };
 
 const MOBILE = '(max-width: 639.98px)';
@@ -586,8 +588,64 @@ function listeningPrivacyRow() {
   return h('div', { class: 'setting' },
     h('div', { class: 'setting__text' },
       h('label', { class: 'setting__label', for: id }, 'Показывать, что я слушаю'),
-      h('p', { class: 'setting__desc', id: `${id}-d` }, 'Когда в вашем голосовом канале играет DJ Бот, те, кто видит этот канал, увидят «🎵 Слушает: …» в профиле и списке участников и смогут нажать «Слушать вместе».')),
+      h('p', { class: 'setting__desc', id: `${id}-d` }, 'Когда в вашем голосовом канале играет DJ Бот, те, кто видит этот канал, увидят «🎵 Слушает: …» в профиле и списке участников и смогут нажать «Слушать вместе».'
+        + (mediaAvailable() ? ' А ещё — что играет у вас на компьютере: Spotify, Яндекс Музыка, AIMP и другие плееры («🎵 Spotify: Исполнитель — Название»).' : ''))),
     sw);
+}
+
+/** «Слушает Spotify / …» с ПК — только приложение для Windows: браузеры и список источников (now-playing.js) */
+let npList = null;
+let npSubscribed = false;
+function renderNpSources() {
+  const list = npList;
+  if (!list?.isConnected) return;
+  const hidden = prefs.get('activity.hiddenSources') || {};
+  const browsers = !!prefs.get('activity.browsers');
+  const srcs = currentSources();
+  const sig = JSON.stringify([srcs, hidden, browsers]);
+  if (list.dataset.sig === sig) return; // не перерисовывать без изменений (фокус на галочке не теряется)
+  list.dataset.sig = sig;
+  {
+    if (!srcs.length) {
+      list.replaceChildren(h('p', { class: 'setting__desc np-sources__empty' }, 'Сейчас Windows не сообщает ни об одном плеере. Включите музыку — источник появится здесь.'));
+      return;
+    }
+    list.replaceChildren(...srcs.map((src) => {
+      const id = `np-src-${src.id.replace(/[^a-z0-9-]/gi, '_')}`;
+      const off = src.category === 'browser' && !browsers;
+      const cb = h('input', { type: 'checkbox', class: 'np-source__cb', id, dataset: { source: src.id }, disabled: off });
+      cb.checked = !hidden[src.id] && !off;
+      cb.addEventListener('change', () => {
+        const map = { ...(prefs.get('activity.hiddenSources') || {}) };
+        if (cb.checked) delete map[src.id]; else map[src.id] = true;
+        prefs.set('activity.hiddenSources', map);
+      });
+      return h('label', { class: 'np-source' + (off ? ' is-disabled' : ''), for: id, title: off ? 'Включите «Учитывать браузеры»' : '' },
+        cb,
+        h('span', { class: 'np-source__name' }, src.name),
+        h('span', { class: 'np-source__cat' }, CATEGORY_LABELS[src.category] || ''),
+        src.playing ? h('span', { class: 'np-source__playing' }, 'играет') : null);
+    }));
+  }
+}
+function pcActivityBlock() {
+  if (!mediaAvailable()) return null;
+  npList = h('div', { class: 'np-sources', id: 'np-sources', role: 'group', 'aria-label': 'Источники в статусе' });
+  if (!npSubscribed) {
+    npSubscribed = true;
+    onSourcesChange(renderNpSources);
+    prefs.subscribe('activity.', renderNpSources);
+  }
+  queueMicrotask(renderNpSources);
+  const list = npList;
+  return h('div', { class: 'np-settings' },
+    switchRow('activity.browsers', 'Учитывать браузеры',
+      'Музыка и видео во вкладках браузера (YouTube, VK в браузере…). Сайт Windows не сообщает — в статусе будет «Chrome», «Edge» и т.п.'),
+    h('div', { class: 'setting setting--stack' },
+      h('div', { class: 'setting__text' },
+        h('span', { class: 'setting__label' }, 'Источники'),
+        h('p', { class: 'setting__desc' }, 'Что сейчас сообщает Windows. Снимите галочку, чтобы не показывать этот источник. Пауза — статус пропадает.')),
+      list));
 }
 
 function buildProfile() {
@@ -659,7 +717,7 @@ function buildProfile() {
         h('div', { class: 'setting__text' }, h('label', { class: 'setting__label', for: 'profile-theme-on' }, 'Цветная тема карточки'), h('p', { class: 'setting__desc' }, 'Градиент из двух цветов на фоне вашего профиля.')),
         themeSw),
       h('div', { class: 'profile-theme__colors' }, themeColor('profile-theme-primary', 'Основной'), themeColor('profile-theme-accent', 'Акцент'))),
-    section('Конфиденциальность', listeningPrivacyRow()),
+    section('Конфиденциальность', listeningPrivacyRow(), pcActivityBlock()),
     h('p', { class: 'form__error', id: 'profile-error', role: 'alert' }));
   const bar = h('div', { class: 'save-bar save-bar--sticky', id: 'profile-save-bar', hidden: true },
     h('span', { class: 'save-bar__text' }, 'Есть несохранённые изменения'),

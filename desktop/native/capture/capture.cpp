@@ -27,6 +27,11 @@
 //           stdout: строки "d VK" / "u VK" (десятичный виртуальный код) только для отслеживаемых клавиш;
 //           Enter цифрового блока — 256+VK_RETURN; цифры блока при выключенном NumLock приводятся к VK_NUMPAD*.
 //           stdin: "watch VK,VK…" — сменить список.
+// Медиа:    sozvon-capture.exe --media — что играет на ПК (системные медиасессии Windows 10/11, C++/WinRT
+//           GlobalSystemMediaTransportControlsSessionManager): "READY", затем строка JSON на каждое изменение
+//           (и не реже раза в 5 с, пока что-то играет): {"t":"media","sessions":[{"app":AUMID,"title","artist",
+//           "album","albumArtist","durationMs","positionMs","updatedAt" (unix мс: позиция — на этот момент; 0 — нет),
+//           "playing","current"}]}. Код выхода 4 — медиасессии недоступны.
 // stdin:    строки "pause" / "resume"; конец stdin — выход.
 // stderr:   журнал. Коды выхода: 0 — штатно, 2 — аргументы, 3 — окно закрыто, 4 — захват недоступен.
 
@@ -56,6 +61,15 @@
 #include <mmdeviceapi.h>
 #include <audioclient.h>
 #include <audioclientactivationparams.h>
+#include <chrono>
+#ifdef _MSC_VER
+// C++/WinRT (заголовки из Windows SDK) — только для режима --media
+#undef GetCurrentTime
+#include <winrt/base.h>
+#include <winrt/Windows.Foundation.h>
+#include <winrt/Windows.Foundation.Collections.h>
+#include <winrt/Windows.Media.Control.h>
+#endif
 
 #ifdef _MSC_VER
 #pragma comment(lib, "d3d11.lib")
@@ -67,6 +81,7 @@
 #pragma comment(lib, "ws2_32.lib")
 #pragma comment(lib, "ole32.lib")
 #pragma comment(lib, "mmdevapi.lib")
+#pragma comment(lib, "windowsapp.lib")
 #endif
 
 // ---------------------------------------------------------------- утилиты
@@ -529,6 +544,7 @@ struct Gdi {
 // ---------------------------------------------------------------- main
 struct Args {
   bool keys = false;   // режим «клавиши рации» (Raw Input)
+  bool media = false;  // режим «что играет» (системные медиасессии)
   DWORD audioPid = 0;  // режим «звук без процесса»
   bool hasMonitor = false;
   RECT monitor = {};
@@ -554,6 +570,7 @@ static bool parseArgs(int argc, char** argv, Args& a) {
     else if (!strcmp(k, "--fps") && v) { a.fps = atoi(v); i++; }
     else if (!strcmp(k, "--no-cursor")) a.cursor = false;
     else if (!strcmp(k, "--keys")) a.keys = true;
+    else if (!strcmp(k, "--media")) a.media = true;
     else if (!strcmp(k, "--watch") && v) { setWatch(v); i++; }
     else if (!strcmp(k, "--audio-exclude-pid") && v) { a.audioPid = (DWORD)strtoul(v, nullptr, 10); i++; }
     else if (!strcmp(k, "--listen")) a.listen = true;
@@ -565,7 +582,7 @@ static bool parseArgs(int argc, char** argv, Args& a) {
   a.maxH = std::min(std::max(a.maxH, 90), 2160);
   a.fps = std::min(std::max(a.fps, 1), 60);
   if (a.listen && (a.token.size() < 16 || a.origin.empty() || a.origin.find_first_of("\r\n") != std::string::npos)) return false;
-  return a.hasMonitor || a.hwnd || a.audioPid || a.keys;
+  return a.hasMonitor || a.hwnd || a.audioPid || a.keys || a.media;
 }
 
 // ---------------------------------------------------------------- клавиши рации (Raw Input)
@@ -633,6 +650,221 @@ static int runKeys() {
   DestroyWindow(wnd);
   return 0;
 }
+
+// ---------------------------------------------------------------- что играет (системные медиасессии)
+// Режим --media: то же, что показывает регулятор громкости Windows 10/11 (GlobalSystemMediaTransportControls):
+// Spotify, Яндекс Музыка, AIMP, браузеры… — всё, что публикует сессию. Опрос раз в секунду (дёшево и не зависит
+// от того, присылает ли плеер события). Строка JSON в stdout на каждое изменение и не чаще раза в 5 с, пока играет.
+static long long unixMsNow() {
+  FILETIME ft;
+  GetSystemTimeAsFileTime(&ft);
+  ULARGE_INTEGER u;
+  u.LowPart = ft.dwLowDateTime;
+  u.HighPart = ft.dwHighDateTime;
+  return (long long)((u.QuadPart - 116444736000000000ull) / 10000ull);
+}
+
+static void jsonEsc(std::string& out, const std::string& s) {
+  out += '"';
+  for (unsigned char c : s) {
+    if (c == '"') out += "\\\"";
+    else if (c == '\\') out += "\\\\";
+    else if (c < 0x20 || c == 0x7f) { char b[8]; snprintf(b, sizeof b, "\\u%04x", c); out += b; }
+    else out += (char)c;
+  }
+  out += '"';
+}
+
+struct MediaInfo {
+  std::string app, title, artist, album, albumArtist;
+  long long durationMs = 0, positionMs = 0, updatedAt = 0;
+  bool playing = false, current = false;
+  std::string key() const {  // без позиции: она меняется сама по себе
+    std::string k;
+    jsonEsc(k, app); jsonEsc(k, title); jsonEsc(k, artist); jsonEsc(k, album);
+    k += std::to_string(durationMs) + (playing ? "P" : "-") + (current ? "C" : "-");
+    return k;
+  }
+  // где сейчас трек (мс), с учётом времени после LastUpdatedTime
+  long long posAt(long long now) const {
+    long long p = positionMs;
+    if (playing && updatedAt > 0 && now > updatedAt) p += now - updatedAt;
+    if (durationMs > 0 && p > durationMs) p = durationMs;
+    return p < 0 ? 0 : p;
+  }
+};
+
+static std::string mediaJson(const std::vector<MediaInfo>& list) {
+  std::string s = "{\"t\":\"media\",\"sessions\":[";
+  for (size_t i = 0; i < list.size(); i++) {
+    const MediaInfo& m = list[i];
+    if (i) s += ',';
+    s += "{\"app\":"; jsonEsc(s, m.app);
+    s += ",\"title\":"; jsonEsc(s, m.title);
+    s += ",\"artist\":"; jsonEsc(s, m.artist);
+    s += ",\"album\":"; jsonEsc(s, m.album);
+    s += ",\"albumArtist\":"; jsonEsc(s, m.albumArtist);
+    s += ",\"durationMs\":" + std::to_string(m.durationMs);
+    s += ",\"positionMs\":" + std::to_string(m.positionMs);
+    s += ",\"updatedAt\":" + std::to_string(m.updatedAt);
+    s += ",\"playing\":"; s += m.playing ? "true" : "false";
+    s += ",\"current\":"; s += m.current ? "true" : "false";
+    s += '}';
+  }
+  s += "]}\n";
+  return s;
+}
+
+// Цикл опроса: changed/heartbeat. read(list) → false, если источник «умер» (запросить заново).
+template <class Read, class Reopen>
+static int mediaLoop(Read read, Reopen reopen) {
+  std::string lastKey;
+  std::vector<long long> lastPos;  // позиции на момент последней отправки (по порядку сессий)
+  long long lastSent = 0;
+  bool first = true;
+  std::vector<MediaInfo> list;
+  while (!g_quit) {
+    if (!read(list)) {
+      if (!reopen()) { for (int i = 0; i < 50 && !g_quit; i++) Sleep(100); }
+      continue;
+    }
+    long long now = unixMsNow();
+    std::string key;
+    bool anyPlaying = false;
+    for (const auto& m : list) { key += m.key(); key += '\n'; anyPlaying = anyPlaying || m.playing; }
+    bool changed = first || key != lastKey;
+    // перемотка: позиция ушла от ожидаемой больше чем на 2,5 с
+    if (!changed && lastPos.size() == list.size()) {
+      for (size_t i = 0; i < list.size(); i++) {
+        // позиция идёт сама, только если плеер сообщил, на какой момент она (updatedAt); иначе стоит на месте
+        long long expect = lastPos[i] + (list[i].playing && list[i].updatedAt > 0 ? now - lastSent : 0);
+        if (list[i].durationMs > 0 && expect > list[i].durationMs) expect = list[i].durationMs;
+        long long d = list[i].posAt(now) - expect;
+        if (d > 2500 || d < -2500) { changed = true; break; }
+      }
+    }
+    if (changed || (anyPlaying && now - lastSent >= 5000)) {
+      std::string line = mediaJson(list);
+      if (fwrite(line.data(), 1, line.size(), stdout) != line.size() || fflush(stdout)) break;  // приложение закрыло канал
+      lastKey = key;
+      lastSent = now;
+      lastPos.clear();
+      for (const auto& m : list) lastPos.push_back(m.posAt(now));
+      first = false;
+    }
+    for (int i = 0; i < 10 && !g_quit; i++) Sleep(100);
+  }
+  return 0;
+}
+
+#ifdef _MSC_VER
+static std::string utf8(const winrt::hstring& h) {
+  if (h.empty()) return std::string();
+  int n = WideCharToMultiByte(CP_UTF8, 0, h.c_str(), (int)h.size(), nullptr, 0, nullptr, nullptr);
+  std::string s(n > 0 ? n : 0, '\0');
+  if (n > 0) WideCharToMultiByte(CP_UTF8, 0, h.c_str(), (int)h.size(), &s[0], n, nullptr, nullptr);
+  if (s.size() > 1000) s.resize(1000);  // защита от мусора; приложение всё равно обрезает до 200
+  return s;
+}
+
+namespace wmc = winrt::Windows::Media::Control;
+namespace wf = winrt::Windows::Foundation;
+
+static wmc::GlobalSystemMediaTransportControlsSessionManager requestManager() {
+  auto op = wmc::GlobalSystemMediaTransportControlsSessionManager::RequestAsync();
+  if (op.wait_for(std::chrono::seconds(15)) != wf::AsyncStatus::Completed) return nullptr;
+  return op.GetResults();
+}
+
+static long long msOf(wf::TimeSpan t) {
+  return (long long)std::chrono::duration_cast<std::chrono::milliseconds>(t).count();
+}
+
+static bool readSessions(const wmc::GlobalSystemMediaTransportControlsSessionManager& mgr, std::vector<MediaInfo>& list) {
+  list.clear();
+  if (!mgr) return false;
+  std::string currentApp;
+  wf::Collections::IVectorView<wmc::GlobalSystemMediaTransportControlsSession> sessions{ nullptr };
+  try {
+    auto cur = mgr.GetCurrentSession();
+    if (cur) currentApp = utf8(cur.SourceAppUserModelId());
+    sessions = mgr.GetSessions();
+  } catch (...) {
+    return false;  // менеджер «умер» (перезапуск проводника, выход из сна) — запросим заново
+  }
+  for (const auto& s : sessions) {
+    try {
+      MediaInfo m;
+      m.app = utf8(s.SourceAppUserModelId());
+      auto op = s.TryGetMediaPropertiesAsync();
+      if (op.wait_for(std::chrono::seconds(3)) != wf::AsyncStatus::Completed) continue;
+      auto p = op.GetResults();
+      if (!p) continue;
+      m.title = utf8(p.Title());
+      m.artist = utf8(p.Artist());
+      m.album = utf8(p.AlbumTitle());
+      m.albumArtist = utf8(p.AlbumArtist());
+      if (m.title.empty() && m.artist.empty()) continue;
+      auto pb = s.GetPlaybackInfo();
+      m.playing = pb && pb.PlaybackStatus() == wmc::GlobalSystemMediaTransportControlsSessionPlaybackStatus::Playing;
+      m.current = !currentApp.empty() && m.app == currentApp;
+      try {
+        auto tl = s.GetTimelineProperties();
+        if (tl) {
+          long long start = msOf(tl.StartTime()), end = msOf(tl.EndTime()), pos = msOf(tl.Position());
+          m.durationMs = end > start ? end - start : 0;
+          m.positionMs = pos > start ? pos - start : 0;
+          // DateTime — такты по 100 нс от 1601 года; «не задано» — 0 или что-то до 2000 года
+          long long ticks = (long long)tl.LastUpdatedTime().time_since_epoch().count();
+          long long ms = (ticks - 116444736000000000ll) / 10000ll;
+          m.updatedAt = ms > 946684800000ll ? ms : 0;
+        }
+      } catch (...) {
+        m.durationMs = m.positionMs = m.updatedAt = 0;
+      }
+      if (m.durationMs < 0 || m.durationMs > 24ll * 3600 * 1000) m.durationMs = 0;
+      list.push_back(std::move(m));
+    } catch (...) {
+      // сессия закрылась между перечислением и чтением — пропускаем
+    }
+  }
+  return true;
+}
+
+static int runMedia() {
+  try {
+    winrt::init_apartment(winrt::apartment_type::multi_threaded);
+  } catch (const winrt::hresult_error& e) {
+    logf("WinRT недоступен (0x%08lx)", (unsigned long)e.code().value);
+    return 4;
+  }
+  wmc::GlobalSystemMediaTransportControlsSessionManager mgr{ nullptr };
+  try {
+    mgr = requestManager();
+  } catch (const winrt::hresult_error& e) {
+    logf("медиасессии недоступны (0x%08lx)", (unsigned long)e.code().value);
+    return 4;
+  } catch (...) {
+    mgr = nullptr;
+  }
+  if (!mgr) { logf("медиасессии недоступны (нет GlobalSystemMediaTransportControlsSessionManager)"); return 4; }
+  logf("медиа: системные медиасессии Windows");
+  fputs("READY\n", stdout);
+  fflush(stdout);
+  return mediaLoop(
+      [&](std::vector<MediaInfo>& list) { return readSessions(mgr, list); },
+      [&]() {
+        try { mgr = requestManager(); } catch (...) { mgr = nullptr; }
+        return (bool)mgr;
+      });
+}
+#else
+// Без MSVC (проверка синтаксиса mingw-w64): заголовков C++/WinRT нет — режим недоступен
+static int runMedia() {
+  logf("медиасессии: сборка без C++/WinRT");
+  return 4;
+}
+#endif
 
 // ---------------------------------------------------------------- звук без своего процесса
 // ActivateAudioInterfaceAsync завершается колбэком в другом потоке — ждём его событием
@@ -775,13 +1007,18 @@ static RECT monitorRect(HMONITOR m) {
 int main(int argc, char** argv) {
   Args a;
   if (!parseArgs(argc, argv, a)) {
-    fprintf(stderr, "usage: sozvon-capture (--monitor X,Y,W,H | --hwnd N | --audio-exclude-pid PID | --keys [--watch VK,…]) [--max-width W] [--max-height H] [--fps F] [--no-cursor] [--listen --token T --origin O]\n");
+    fprintf(stderr, "usage: sozvon-capture (--monitor X,Y,W,H | --hwnd N | --audio-exclude-pid PID | --keys [--watch VK,…] | --media) [--max-width W] [--max-height H] [--fps F] [--no-cursor] [--listen --token T --origin O]\n");
     return 2;
   }
   // физические пиксели во всех API (позиция курсора, рамка окна, координаты мониторов)
   typedef BOOL(WINAPI * SetCtx)(HANDLE);
   if (auto f = (SetCtx)(void*)GetProcAddress(GetModuleHandleA("user32.dll"), "SetProcessDpiAwarenessContext")) f((HANDLE)-4 /* PER_MONITOR_AWARE_V2 */);
   else SetProcessDPIAware();
+  if (a.media) {  // текстовый режим: строки JSON (UTF-8) в stdout, конец stdin — выход
+    _setmode(_fileno(stdout), _O_BINARY);
+    CreateThread(nullptr, 0, stdinThread, nullptr, 0, nullptr);
+    return runMedia();
+  }
   if (a.keys) {  // текстовый режим: stdin-команды и строки d/u в stdout
     CreateThread(nullptr, 0, stdinThread, nullptr, 0, nullptr);
     return runKeys();

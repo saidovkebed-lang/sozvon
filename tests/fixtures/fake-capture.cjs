@@ -39,6 +39,67 @@ if (argv.includes('--keys')) {
   process.stdin.on('end', () => { log('exit keys'); process.exit(0); });
   return;
 }
+// --media: «что играет» — "READY", затем строки {"t":"media","sessions":[…]} (как настоящий помощник: на каждое
+//   изменение и раз в 5 с, пока что-то играет). SOZVON_CAPTURE_FAKE_MEDIA:
+//   путь к JSON-файлу — {sessions:[…]} (текущее состояние; файл перечитывается при изменении — тест управляет им)
+//     или [{at: мс от старта, sessions:[…]}, …] (сценарий); 'demo' — Spotify играет → пауза → играет браузер;
+//   'unavailable' — выход с кодом 4 (как Windows без медиасессий). updatedAt не задан — «сейчас».
+if (argv.includes('--media')) {
+  const src = process.env.SOZVON_CAPTURE_FAKE_MEDIA || '';
+  log(`media-start ${src}`);
+  if (src === 'unavailable') { process.stderr.write('[capture] медиасессии недоступны\n'); process.exit(4); }
+  const spotify = { app: 'Spotify.exe', title: 'Bohemian Rhapsody', artist: 'Queen', album: 'A Night at the Opera', durationMs: 354000, positionMs: 30000, playing: true };
+  const DEMO = [
+    { at: 0, sessions: [spotify] },
+    { at: 4000, sessions: [{ ...spotify, positionMs: 34000, playing: false }] },
+    { at: 8000, sessions: [{ ...spotify, positionMs: 34000, playing: false }, { app: 'chrome', title: 'Rick Astley - Never Gonna Give You Up (Official Video)', artist: '', durationMs: 213000, positionMs: 1000, playing: true }] },
+  ];
+  const started = Date.now();
+  let lastSig = '';
+  let lastSent = 0;
+  let fileSig = '';
+  let fileState = null;
+  const readFile = () => {
+    try {
+      const st = fs.statSync(src);
+      const sig = `${st.mtimeMs}:${st.size}`;
+      if (sig !== fileSig) { fileSig = sig; fileState = JSON.parse(fs.readFileSync(src, 'utf8')); }
+    } catch { /* файл пишется — в следующий раз */ }
+    return fileState;
+  };
+  const currentSessions = () => {
+    const data = src === 'demo' ? DEMO : readFile();
+    if (Array.isArray(data)) {
+      const t = Date.now() - started;
+      let cur = [];
+      for (const step of data) if (t >= (step.at || 0)) cur = step.sessions || [];
+      return cur;
+    }
+    return data?.sessions || [];
+  };
+  const stamped = new Map(); // ключ состояния сессии → updatedAt (позиция «на тот момент»)
+  const tick = () => {
+    const now = Date.now();
+    const list = currentSessions().map((s) => {
+      const k = JSON.stringify(s);
+      if (!stamped.has(k)) stamped.set(k, now);
+      return { app: '', title: '', artist: '', album: '', albumArtist: '', durationMs: 0, positionMs: 0, playing: false, current: false, ...s, updatedAt: s.updatedAt ?? stamped.get(k) };
+    });
+    const sig = JSON.stringify(list);
+    if (sig !== lastSig || (list.some((s) => s.playing) && now - lastSent >= 5000)) {
+      lastSig = sig;
+      lastSent = now;
+      process.stdout.write(`${JSON.stringify({ t: 'media', sessions: list })}\n`);
+    }
+  };
+  process.stdout.write('READY\n');
+  tick();
+  setInterval(tick, 200);
+  process.stdin.on('data', () => {});
+  process.stdin.on('end', () => { log('exit media'); process.exit(0); });
+  process.stdout.on('error', () => process.exit(0));
+  return;
+}
 if (audioPid && process.env.SOZVON_CAPTURE_FAKE_AUDIO === 'unavailable') {
   log(`audio-unavailable ${audioPid}`);
   process.stderr.write('[capture] process loopback недоступен (0x80070057)\n');

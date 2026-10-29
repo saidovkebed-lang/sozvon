@@ -25,6 +25,7 @@ import { observeStats, noteMemberJoined, startStats } from './stats.js';
 import { cleanServerTheme, markStreamed } from './cosmetics.js';
 import { createAdminOps } from './admin/ops.js';
 import { itemCover } from './music-library.js';
+import { cleanListening, createListeningStore, ListeningError } from './pc-listening.js';
 
 const serverRoom = (id) => `server:${id}`;
 const userRoom = (id) => `user:${id}`;
@@ -99,6 +100,45 @@ export function attachRealtime(io, { uploadsDir, dataDir = path.dirname(uploadsD
     io.to(rooms).except(userRoom(userId)).emit('presence', { userId, online, status: online ? (u?.status || 'online') : 'offline' });
     io.to(userRoom(userId)).emit('presence', { userId, online: true, status: u?.status || 'online' });
   }
+
+  // ---------- «Слушает Spotify / …» с ПК (server/pc-listening.js) ----------
+  const pcListening = createListeningStore();
+  const listeningHidden = (u) => !u || u.isBot || u.showListening === false || u.status === 'invisible';
+  /** Кому видно: участники общих серверов + собеседники по ЛС + сам пользователь (другие вкладки) */
+  function listeningRooms(userId) {
+    const rooms = new Set(userServers(userId).map((s) => serverRoom(s.id)));
+    for (const d of userDms(userId)) rooms.add(userRoom(dmOther(d, userId)));
+    rooms.add(userRoom(userId));
+    return [...rooms];
+  }
+  function emitListening(userId) {
+    io.to(listeningRooms(userId)).emit('listening', { userId, listening: pcListening.view(userId) });
+  }
+  function clearListening(userId, socketId = null) {
+    if (pcListening.clear(userId, socketId)) emitListening(userId);
+  }
+  /** Для bootstrap: кто из видимых пользователю сейчас что-то слушает */
+  function listeningFor(userId) {
+    const out = {};
+    for (const uid of pcListening.userIds()) {
+      if (uid !== userId && !sharesServer(uid, userId) && !userDms(uid).some((d) => dmOther(d, uid) === userId)) continue;
+      const v = pcListening.view(uid);
+      if (v) out[uid] = v;
+    }
+    return out;
+  }
+  /** Новый участник сервера: ему — кто из участников что слушает, участникам — что слушает он */
+  function syncListeningOnJoin(server, userId) {
+    for (const uid of server.memberIds) {
+      if (uid === userId) continue;
+      const v = pcListening.view(uid);
+      if (v) io.to(userRoom(userId)).emit('listening', { userId: uid, listening: v });
+    }
+    const mine = pcListening.view(userId);
+    if (mine) io.to(serverRoom(server.id)).except(userRoom(userId)).emit('listening', { userId, listening: mine });
+  }
+  const listeningSweep = setInterval(() => { for (const uid of pcListening.expire()) emitListening(uid); }, 30_000);
+  listeningSweep.unref();
 
   /** server:updated каждому участнику — персонально (каналы/инвайт/баны по его правам). */
   function emitServerUpdated(server) {
@@ -359,6 +399,7 @@ export function attachRealtime(io, { uploadsDir, dataDir = path.dirname(uploadsD
         dms: listDms(user.id),
         notifications: listNotifications(user.id).filter((n) => canSeeNotification(n, user.id)),
         pushKey: pushPublicKey(),
+        listening: listeningFor(user.id),
       };
     });
 
@@ -396,6 +437,7 @@ export function attachRealtime(io, { uploadsDir, dataDir = path.dirname(uploadsD
       }
       io.in(userRoom(user.id)).socketsJoin(serverRoom(server.id));
       emitServerUpdated(server);
+      syncListeningOnJoin(server, user.id);
       return { server: publicServer(server, user.id) };
     });
 
@@ -935,7 +977,20 @@ export function attachRealtime(io, { uploadsDir, dataDir = path.dirname(uploadsD
       forwardCommand({ command: cmd, args: str(args).trim().slice(0, 500), user, serverId: channel.serverId, textChannelId: null });
     });
 
+    // «Слушает Spotify / …»: приложение для ПК присылает, что играет (null/{} — ничего). Хранится только в памяти.
+    on('presence:listening', (payload) => {
+      const np = (() => { try { return cleanListening(payload); } catch (e) { if (e instanceof ListeningError) fail(e.message); throw e; } })();
+      const me = findUser(user.id);
+      if (!np) { clearListening(user.id); return { listening: null }; }
+      if (listeningHidden(me)) { clearListening(user.id); return { listening: null, hidden: true }; }
+      if (!pcListening.allow(user.id)) fail('Слишком часто — подождите пару секунд');
+      pcListening.set(user.id, np, socket.id);
+      emitListening(user.id);
+      return { listening: pcListening.view(user.id) };
+    });
+
     socket.on('disconnect', () => {
+      clearListening(user.id, socket.id);
       voice.leave(socket);
       if (removeOnlineSocket(user.id, socket.id) && findUser(user.id)?.status !== 'invisible') emitPresence(user.id);
     });
@@ -1052,6 +1107,7 @@ export function attachRealtime(io, { uploadsDir, dataDir = path.dirname(uploadsD
     if (others.length) io.to(others).except(userRoom(userRec.id)).emit('user:updated', { user: publicUser(userRec) });
     voice.updateUser(userRec);
     if (statusChanged) emitPresence(userRec.id);
+    if (listeningHidden(userRec)) clearListening(userRec.id); // скрыл «что я слушаю» или стал невидимкой
   }
 
   // Истёкшие кастомные статусы — сбросить и разослать

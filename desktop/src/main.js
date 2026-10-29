@@ -11,6 +11,7 @@ const path = require('node:path');
 const fs = require('node:fs');
 const { buildCodeMap, parseCombo, comboToAccelerator, codeToVks } = require('./keymap');
 const { createKeyWatch } = require('./key-watch');
+const { createMediaWatch } = require('./media-watch');
 const { createUpdater } = require('./updater');
 const { createNativeCapture } = require('./native-capture');
 
@@ -232,6 +233,16 @@ const keyWatch = createKeyWatch({
 });
 const useKeyWatch = () => (IS_WIN || !!process.env.SOZVON_CAPTURE_FAKE) && !keyWatchFailed && !!require('./native-capture').helperCommand();
 
+// «Слушает Spotify / …» (Windows): помощник --media, пока страница просит (настройка «Показывать, что я слушаю»)
+let mediaWatchFailed = false;
+const mediaWatch = createMediaWatch({
+  helperCommand: () => require('./native-capture').helperCommand(),
+  onMedia: (sessions) => sendToPage('desktop:media', sessions),
+  onUnavailable: () => { mediaWatchFailed = true; sendToPage('desktop:media', []); },
+  log: (m) => console.log(m),
+});
+const mediaWatchAvailable = () => (IS_WIN || !!process.env.SOZVON_CAPTURE_FAKE) && !mediaWatchFailed && !!require('./native-capture').helperCommand();
+
 function loadHook() {
   if (hook !== null) return hook;
   try {
@@ -407,11 +418,13 @@ function createMainWindow() {
   wc.on('did-start-navigation', (d) => {
     if (!d?.isMainFrame || d.isSameDocument) return;
     nativeCapture.stopAll();
+    mediaWatch.stop(); // новая страница сама попросит снова (setMediaWatch)
     // страница перезагружается — из голоса она вышла: вернуть экономию в фоне и снять хук рации
     if (voiceState.inVoice) { voiceState = { ...voiceState, inVoice: false }; applyHotkeys(); applyBackgroundMode(); }
   });
   wc.on('render-process-gone', (_e, d) => {
     nativeCapture.stopAll();
+    mediaWatch.stop();
     console.error('[renderer gone]', d.reason);
     if (d.reason !== 'clean-exit') setTimeout(() => loadServer(), 1000);
   });
@@ -847,7 +860,7 @@ function fromAppWindow(e) {
 
 function setupIpc() {
   ipcMain.on('desktop:info', (e) => {
-    e.returnValue = { version: app.getVersion(), platform: process.platform, serverOrigin: serverOrigin(), nativeCapture: nativeCaptureOn() };
+    e.returnValue = { version: app.getVersion(), platform: process.platform, serverOrigin: serverOrigin(), nativeCapture: nativeCaptureOn(), mediaWatch: mediaWatchAvailable() };
   });
   ipcMain.on('desktop:settings', (e, s) => {
     if (!fromPage(e) || !s || typeof s !== 'object') return;
@@ -863,6 +876,14 @@ function setupIpc() {
     voiceState = { inVoice: !!s.inVoice, muted: !!s.muted, deafened: !!s.deafened };
     if (wasIn !== voiceState.inVoice) { applyHotkeys(); applyBackgroundMode(); } // рация и фон — только в голосовом
     updateTray();
+  });
+  ipcMain.on('desktop:media-watch', (e, on) => {
+    if (!fromPage(e)) return;
+    if (on === true && mediaWatchAvailable()) {
+      const was = mediaWatch.running;
+      mediaWatch.start();
+      if (was) sendToPage('desktop:media', mediaWatch.last); // страница переподключилась — повторить последнее
+    } else if (mediaWatch.running) mediaWatch.stop();
   });
   ipcMain.on('desktop:badge', (e, n) => { if (fromPage(e)) setBadge(n); });
   ipcMain.on('desktop:focus', (e) => { if (fromPage(e)) showMain(); });
@@ -951,6 +972,7 @@ app.on('will-quit', () => {
   nativeCapture.stopAll();
   try { if (hook && hook.running) hook.mod.uIOhook.stop(); } catch { /* ignore */ }
   keyWatch.stop();
+  mediaWatch.stop();
 });
 
 // Smoke-тест (SOZVON_SMOKE=1): после загрузки страницы печатаем в stdout, что выдал бы обработчик демонстрации экрана

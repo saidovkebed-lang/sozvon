@@ -52,6 +52,10 @@ export const DEFAULTS = Object.freeze({
   'stream.autoWatch': false,         // сразу смотреть чужие трансляции (иначе — по кнопке «Смотреть»)
   'stream.selfPreview': false,       // показывать себе превью своего экрана (тратит процессор)
 
+  // --- Активность: «Слушает Spotify / …» с ПК (приложение для Windows, now-playing.js) ---
+  'activity.browsers': false,        // учитывать браузеры (сайт неизвестен: YouTube, ВК в браузере…)
+  'activity.hiddenSources': {},      // { [sourceId]: true } — источники, которые не показывать
+
   // --- Горячие клавиши (строка вида 'Ctrl+Shift+M'; '' = не назначено) ---
   'keybinds.toggleMute': 'Ctrl+Shift+M',
   'keybinds.toggleDeafen': 'Ctrl+Shift+D',

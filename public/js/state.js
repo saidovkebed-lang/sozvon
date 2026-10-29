@@ -28,6 +28,7 @@ export const state = {
   lastDm: null,            // последний открытый ЛС (кнопка «Главная»)
   notifications: [],       // «Входящие»: [{id, type, channelId, serverId, author, preview, count, createdAt, read}]
   pushKey: null,           // публичный ключ VAPID сервера (null — push выключен)
+  pcListening: {},         // userId -> что играет у него на ПК {source, title, artist, album, durationMs, positionMs, at, cover?}
 };
 
 const subs = new Map();
