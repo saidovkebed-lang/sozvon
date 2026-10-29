@@ -191,7 +191,7 @@ export function createApiRouter({
       if (wait) tooMany(res, wait, 'Слишком много неудачных попыток входа.');
     }
     try {
-      const out = await login(req.body);
+      const out = await login(req.body, { ip, ua: req.get('user-agent') || '' });
       loginByUser.clear(userKey);
       res.json(out);
     } catch (e) {
@@ -218,7 +218,7 @@ export function createApiRouter({
     res.json({ ok: true });
   }));
 
-  router.use(createTwoFactorRouter({ onUserUpdated, onSessionsRevoked })); // 2FA: /login/2fa, /me/2fa/*
+  router.use(createTwoFactorRouter({ onUserUpdated, onSessionsRevoked, dataDir })); // 2FA: /login/2fa, /me/2fa/*
 
   router.get('/config', wrap(async (_req, res) => {
     res.set('Cache-Control', 'no-store');

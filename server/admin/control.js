@@ -21,7 +21,7 @@ function findTarget(name) {
 
 export function adminList() {
   return listAdmins().map((u) => ({
-    id: u.id, username: u.username, flag: u.instanceAdmin === true, env: isEnvAdmin(u), totpEnabled: u.totpEnabled === true,
+    id: u.id, username: u.username, flag: u.instanceAdmin === true, env: isEnvAdmin(u), totpEnabled: u.totpEnabled === true, tg2fa: u.tg2fa === true,
   }));
 }
 

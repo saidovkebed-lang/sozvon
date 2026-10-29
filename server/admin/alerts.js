@@ -6,11 +6,9 @@
 // адрес Bot API (для тестов), ALERT_INTERVAL_MS (по умолчанию 300000; 0 — без периодических проверок).
 // Пороги: ALERT_DISK_PCT (85), ALERT_RAM_PCT (90), ALERT_BACKUP_MAX_HOURS (36), ALERT_CERT_DAYS (14),
 // ALERT_ERROR_BURST (20 ошибок за 5 минут), ALERT_COOKIES_MAX_DAYS (30). Других внешних сервисов нет.
-import http from 'node:http';
-import https from 'node:https';
 import os from 'node:os';
 import path from 'node:path';
-import tls from 'node:tls';
+import { sendMessage as tgSendMessage } from '../telegram.js';
 import { readJson, writeJsonAtomic, getSettings, updateSettings } from './access.js';
 import { collectHealth } from './health.js';
 
@@ -44,78 +42,15 @@ export function telegramConfig() {
   return { token, chat, api, configured: !!(token && chat), source };
 }
 
-/** POST JSON через HTTP-прокси (CONNECT-туннель) — как запросы к Spotify через VPN-прокси */
-function postViaProxy(url, json, proxyUrl, timeoutMs) {
-  const proxy = new URL(proxyUrl);
-  const target = new URL(url);
-  const port = Number(target.port) || (target.protocol === 'https:' ? 443 : 80);
-  const auth = proxy.username ? { 'proxy-authorization': `Basic ${Buffer.from(`${decodeURIComponent(proxy.username)}:${decodeURIComponent(proxy.password)}`).toString('base64')}` } : {};
-  const payload = Buffer.from(JSON.stringify(json));
-  return new Promise((resolve, reject) => {
-    let req = null;
-    const conn = http.request({ host: proxy.hostname, port: Number(proxy.port) || 80, method: 'CONNECT', path: `${target.hostname}:${port}`, headers: { host: `${target.hostname}:${port}`, ...auth } });
-    const timer = setTimeout(() => { req?.destroy(); conn.destroy(); reject(new Error('таймаут')); }, timeoutMs);
-    const fail = (e) => { clearTimeout(timer); reject(e); };
-    conn.on('error', fail);
-    conn.on('connect', (pres, socket) => {
-      if (pres.statusCode !== 200) { socket.destroy(); fail(new Error(`прокси ответил ${pres.statusCode}`)); return; }
-      const lib = target.protocol === 'https:' ? https : http;
-      req = lib.request(target, {
-        method: 'POST',
-        headers: { host: target.host, 'content-type': 'application/json', 'content-length': payload.length },
-        createConnection: () => (target.protocol === 'https:' ? tls.connect({ socket, servername: target.hostname }) : socket),
-      }, (r) => {
-        const chunks = [];
-        r.on('data', (c) => chunks.push(c));
-        r.on('end', () => { clearTimeout(timer); resolve({ status: r.statusCode, text: Buffer.concat(chunks).toString('utf8') }); });
-        r.on('error', fail);
-      });
-      req.on('error', fail);
-      req.end(payload);
-    });
-    conn.end();
-  });
-}
-
-/**
- * Telegram из РФ бывает недоступен напрямую. TELEGRAM_PROXY=http://… — всегда через него, =off — только напрямую;
- * иначе сначала напрямую (быстрый отказ), при сетевой ошибке — через VPN-прокси SPOTIFY_PROXY (deploy/vpn-proxy.sh).
- */
-function telegramProxy() {
-  const fixed = (process.env.TELEGRAM_PROXY || '').trim();
-  if (fixed === 'off') return { fixed: null, fallback: null };
-  if (fixed) return { fixed, fallback: null };
-  return { fixed: null, fallback: (process.env.SPOTIFY_PROXY || '').trim() || null };
-}
-
-/** Отправить сообщение в Telegram. Токен в ответы/журналы не попадает. */
+/** Отправить сообщение в Telegram (общий клиент server/telegram.js: напрямую → VPN-прокси). Токен в ответы/журналы не попадает. */
 export async function sendTelegram(text) {
   const cfg = telegramConfig();
   if (!cfg.configured) throw new Error('Telegram не настроен: задайте ALERT_TELEGRAM_TOKEN и ALERT_TELEGRAM_CHAT_ID (или BACKUP_TELEGRAM_*) в /etc/sozvon.env');
-  const url = `${cfg.api}/bot${cfg.token}/sendMessage`;
-  const json = { chat_id: cfg.chat, text: String(text).slice(0, 4000), disable_web_page_preview: true };
-  const { fixed, fallback } = telegramProxy();
-  let status;
-  let raw;
-  const viaProxy = async (p) => {
-    try { ({ status, text: raw } = await postViaProxy(url, json, p, 20_000)); } catch (err) {
-      throw new Error(`Telegram недоступен и через VPN-прокси (${err.code || err.message})`);
-    }
-  };
-  if (fixed) await viaProxy(fixed);
-  else {
-    try {
-      const res = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(json), signal: AbortSignal.timeout(fallback ? 10_000 : 15_000) });
-      status = res.status;
-      raw = await res.text();
-    } catch (err) {
-      if (!fallback) throw new Error(`Telegram недоступен с этого сервера (${err.cause?.code || err.name || 'сеть'}). Настройте VPN-прокси: sudo bash /opt/sozvon/deploy/vpn-proxy.sh`);
-      await viaProxy(fallback);
-    }
+  try {
+    await tgSendMessage(cfg.chat, text, {}, { token: cfg.token, api: cfg.api, timeoutMs: 15_000 });
+  } catch (err) {
+    throw new Error(err.message); // TelegramError → обычная ошибка (текст уже без токена)
   }
-  let body = null;
-  try { body = JSON.parse(raw); } catch { /* не JSON */ }
-  if (status < 200 || status >= 300 || !body?.ok) throw new Error(`Telegram ответил ошибкой: ${String(body?.description || status).slice(0, 200)}`);
   return true;
 }
 

@@ -3,25 +3,120 @@ import { api, setToken } from '../api.js';
 
 let mode = 'login';
 let challenge = null;      // 2FA: токен второго шага входа (5 минут, одноразовый)
+let methods = [];          // способы второго шага: 'totp' | 'telegram' | 'recovery'
 let recoveryMode = false;
+let onDone = null;
+let pollTimer = null;      // Telegram: опрос «нажато ли „Это я“»
+let tickTimer = null;      // обратный отсчёт до повторной отправки
+let resendAt = 0;
+let tgState = null;
+
+const hasTg = () => methods.includes('telegram');
+const hasTotp = () => methods.includes('totp');
+
+function stopTelegram() {
+  clearTimeout(pollTimer); pollTimer = null;
+  clearInterval(tickTimer); tickTimer = null;
+  tgState = null;
+}
 
 function show2fa(on) {
   $('#auth-form').hidden = on;
   $('#auth-2fa-form').hidden = !on;
   $('#auth-title').textContent = on ? 'Двухфакторная защита' : (mode === 'login' ? 'С возвращением!' : 'Создать аккаунт');
-  $('#auth-subtitle').textContent = on ? 'Введите код, чтобы завершить вход' : (mode === 'login' ? 'Рады видеть тебя снова в Astra' : 'Придумай имя и пароль — и зови друзей');
+  $('#auth-subtitle').textContent = on
+    ? (hasTg() ? 'Подтвердите вход в Telegram или введите код' : 'Введите код, чтобы завершить вход')
+    : (mode === 'login' ? 'Рады видеть тебя снова в Astra' : 'Придумай имя и пароль — и зови друзей');
   $('#auth-2fa-error').textContent = '';
+  $('#auth-2fa-tg').hidden = !(on && hasTg());
   if (on) { set2faMode(false); $('#auth-2fa-code').value = ''; $('#auth-2fa-code').focus(); }
-  else { challenge = null; $('#auth-password').focus(); }
+  else { challenge = null; methods = []; stopTelegram(); $('#auth-password').focus(); }
+}
+
+function codeLabel() {
+  if (hasTg() && hasTotp()) return 'Код из Telegram или приложения-аутентификатора';
+  if (hasTg()) return 'Код из Telegram';
+  return 'Код из приложения-аутентификатора';
 }
 
 function set2faMode(recovery) {
   recoveryMode = recovery;
   const input = $('#auth-2fa-code');
-  $('#auth-2fa-label').textContent = recovery ? 'Код восстановления' : 'Код из приложения-аутентификатора';
+  $('#auth-2fa-label').textContent = recovery ? 'Код восстановления' : codeLabel();
   input.inputMode = recovery ? 'text' : 'numeric';
   input.placeholder = recovery ? 'xxxxx-xxxxx' : '000000';
-  $('#auth-2fa-recovery').textContent = recovery ? 'Ввести код из приложения' : 'Использовать код восстановления';
+  $('#auth-2fa-recovery').textContent = recovery
+    ? (hasTg() && !hasTotp() ? 'Ввести код из Telegram' : 'Ввести код из приложения')
+    : 'Использовать код восстановления';
+}
+
+/* ---------- Telegram ---------- */
+function renderTelegram(t) {
+  if (!t) return;
+  tgState = t;
+  const text = $('#auth-2fa-tg-text');
+  const box = $('#auth-2fa-tg');
+  box.dataset.state = t.state;
+  resendAt = Date.now() + (t.resendIn || 0) * 1000;
+  const alt = hasTotp() ? 'код из приложения-аутентификатора или код восстановления' : 'код восстановления';
+  const msg = {
+    sending: 'Отправляем код в Telegram…',
+    sent: 'Код отправлен в Telegram. Нажмите «✅ Это я» в боте — вход завершится сам — или введите код здесь.',
+    failed: `Не удалось отправить код: Telegram недоступен с сервера. Введите ${alt}.`,
+    locked: t.error || `Вход по коду из Telegram временно приостановлен. Введите ${alt}.`,
+    unavailable: `Вход через Telegram сейчас недоступен на сервере. Введите ${alt}.`,
+    limited: 'Код уже отправляли недавно — новый можно запросить чуть позже.',
+    none: 'Код ещё не отправлен — запросите его кнопкой ниже.',
+  }[t.state] || 'Код отправлен в Telegram.';
+  text.textContent = msg;
+  updateResend();
+  if (['failed', 'locked', 'unavailable'].includes(t.state) && !recoveryMode && !hasTotp()) set2faMode(true);
+}
+
+function updateResend() {
+  const btn = $('#auth-2fa-resend');
+  const st = tgState?.state;
+  const hide = st === 'locked' || st === 'unavailable';
+  btn.hidden = hide;
+  const left = Math.ceil((resendAt - Date.now()) / 1000);
+  btn.disabled = left > 0 || st === 'sending';
+  btn.textContent = left > 0 ? `Отправить код ещё раз (через ${left} с)` : 'Отправить код ещё раз';
+}
+
+function startTelegram(initial) {
+  stopTelegram();
+  renderTelegram(initial || { state: 'sending', resendIn: 30 });
+  tickTimer = setInterval(updateResend, 1000);
+  const poll = async () => {
+    pollTimer = null;
+    if (!challenge) return;
+    const ch = challenge;
+    try {
+      const res = await api.login2faStatus(ch);
+      if (ch !== challenge) return;
+      if (res?.token) { finishLogin(res.token); return; }
+      if (res?.telegram) renderTelegram(res.telegram);
+    } catch (ex) {
+      if (ch !== challenge) return;
+      if (ex.code === 'challenge_invalid' || ex.code === 'challenge_denied') {
+        show2fa(false);
+        $('#auth-error').textContent = ex.message;
+        return;
+      }
+      // сеть/лимит — просто повторим позже
+    }
+    if (challenge === ch) pollTimer = setTimeout(poll, 2000);
+  };
+  pollTimer = setTimeout(poll, 1500);
+}
+
+function finishLogin(token) {
+  challenge = null;
+  stopTelegram();
+  setToken(token);
+  $('#auth-2fa-code').value = '';
+  show2fa(false);
+  onDone?.(token);
 }
 
 function applyMode() {
@@ -49,6 +144,7 @@ export function hideAuth() {
 }
 
 export function initAuth(onLoggedIn) {
+  onDone = onLoggedIn;
   applyMode();
   $('#auth-toggle').addEventListener('click', (e) => {
     e.preventDefault();
@@ -69,8 +165,10 @@ export function initAuth(onLoggedIn) {
       const res = mode === 'login' ? await api.login(username, password) : await api.register(username, password);
       if (res?.twoFactor && res.challenge) { // пароль верен, нужен второй шаг
         challenge = res.challenge;
+        methods = Array.isArray(res.methods) ? res.methods : ['totp', 'recovery'];
         $('#auth-password').value = '';
         show2fa(true);
+        if (hasTg()) startTelegram(res.telegram);
         return;
       }
       setToken(res.token);
@@ -86,22 +184,35 @@ export function initAuth(onLoggedIn) {
   // 2FA: второй шаг
   $('#auth-2fa-recovery').addEventListener('click', (e) => { e.preventDefault(); set2faMode(!recoveryMode); $('#auth-2fa-code').focus(); });
   $('#auth-2fa-back').addEventListener('click', (e) => { e.preventDefault(); show2fa(false); });
+  $('#auth-2fa-resend').addEventListener('click', async () => {
+    if (!challenge) return;
+    const btn = $('#auth-2fa-resend');
+    btn.disabled = true;
+    try {
+      const res = await api.login2faResend(challenge);
+      renderTelegram(res.telegram);
+      $('#auth-2fa-error').textContent = '';
+    } catch (ex) {
+      if (ex.code === 'challenge_invalid') { show2fa(false); $('#auth-error').textContent = ex.message; return; }
+      $('#auth-2fa-error').textContent = ex.message;
+      updateResend();
+    }
+  });
   $('#auth-2fa-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const err = $('#auth-2fa-error');
     const code = $('#auth-2fa-code').value.trim();
     if (!code) { err.textContent = 'Введите код'; return; }
-    if (!recoveryMode && !/^\d{6}$/.test(code.replace(/\s/g, ''))) { err.textContent = 'Код — 6 цифр из приложения'; return; }
+    if (!recoveryMode && !/^\d{6}$/.test(code.replace(/\s/g, ''))) {
+      err.textContent = hasTg() && !hasTotp() ? 'Код — 6 цифр из Telegram' : 'Код — 6 цифр из приложения';
+      return;
+    }
     const btn = $('#auth-2fa-submit');
     btn.disabled = true;
     err.textContent = '';
     try {
       const res = await api.login2fa(challenge, code);
-      challenge = null;
-      setToken(res.token);
-      $('#auth-2fa-code').value = '';
-      show2fa(false);
-      onLoggedIn(res.token);
+      finishLogin(res.token);
     } catch (ex) {
       if (ex.code === 'challenge_invalid') { show2fa(false); $('#auth-error').textContent = ex.message; return; }
       err.textContent = ex.message;

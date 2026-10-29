@@ -16,7 +16,7 @@ import { profileCard } from './profile.js';
 import { cosmeticsSettings, syncCosmetics } from './cosmetics.js';
 import { openCropper } from './cropper.js';
 import { renderDownloads } from '../download.js';
-import { twoFactorBlocks, refresh as refreshTwoFactor } from './two-factor.js';
+import { twoFactorBlocks, refresh as refreshTwoFactor, tgCodeButton } from './two-factor.js';
 
 export const APP_VERSION = '3.0.0';
 const GITHUB_URL = 'https://github.com/saidovkebed-lang/sozvon';
@@ -327,7 +327,9 @@ function renderAccountCard() {
   $('.account-card__name', card).textContent = displayName(u);
   $('.account-card__tag', card).textContent = `@${u.username} · имя пользователя изменить нельзя`;
   const pw2fa = $('#settings-password-2fa');
-  if (pw2fa) pw2fa.hidden = !u.totpEnabled; // 2FA: смена пароля требует свежий код
+  if (pw2fa) pw2fa.hidden = !(u.totpEnabled || u.tg2faEnabled); // 2FA: смена пароля требует свежий код
+  const pwTg = $('#settings-password-tg');
+  if (pwTg) pwTg.hidden = !u.tg2faEnabled;
   $$('[data-color]', dlg()).forEach((b) => {
     const on = b.dataset.color.toLowerCase() === color.toLowerCase();
     b.classList.toggle('is-selected', on);
@@ -398,9 +400,11 @@ function buildAccount() {
       h('div', { class: 'field' },
         h('label', { class: 'field__label', for: 'settings-confirm-password' }, 'Повторите новый пароль'),
         h('input', { class: 'input', id: 'settings-confirm-password', type: 'password', autocomplete: 'new-password', required: true }))),
-    h('div', { class: 'field', id: 'settings-password-2fa', hidden: !state.user?.totpEnabled },
+    h('div', { class: 'field', id: 'settings-password-2fa', hidden: !(state.user?.totpEnabled || state.user?.tg2faEnabled) },
       h('label', { class: 'field__label', for: 'settings-password-code' }, 'Код двухфакторной защиты'),
-      h('input', { class: 'input', id: 'settings-password-code', type: 'text', inputmode: 'numeric', autocomplete: 'one-time-code', maxlength: '12', placeholder: '000000 или код восстановления' })),
+      h('input', { class: 'input', id: 'settings-password-code', type: 'text', inputmode: 'numeric', autocomplete: 'one-time-code', maxlength: '12', placeholder: '000000 или код восстановления' }),
+      h('div', { class: 'twofa-actions twofa-actions--start', id: 'settings-password-tg', hidden: !state.user?.tg2faEnabled },
+        tgCodeButton(null, 'settings-password-tg-send'))),
     h('p', { class: 'form__error', id: 'settings-password-error', role: 'alert' }),
     h('div', { class: 'form__actions' },
       h('button', { type: 'submit', class: 'btn btn--primary' }, 'Сменить пароль')));
@@ -416,7 +420,7 @@ function buildAccount() {
     if (newPassword.length < 4) return fail('Новый пароль должен быть не короче 4 символов', $('#settings-new-password'));
     if (newPassword !== confirm) return fail('Пароли не совпадают', $('#settings-confirm-password'));
     if (newPassword === oldPassword) return fail('Новый пароль совпадает с текущим', $('#settings-new-password'));
-    const need2fa = !!state.user?.totpEnabled;
+    const need2fa = !!(state.user?.totpEnabled || state.user?.tg2faEnabled);
     const code = need2fa ? $('#settings-password-code').value.trim() : undefined;
     if (need2fa && !code) return fail('Введите код двухфакторной защиты', $('#settings-password-code'));
     err.textContent = '';

@@ -13,8 +13,9 @@ import { findUser, findServer, findChannel, serverChannels, publicServer, public
 import { Limiter } from '../rate-limit.js';
 import {
   isInstanceAdmin, isEnvAdmin, requireAdmin2FA, admin2faRequired, listAdmins, mustChangePassword,
-  unlockSession, sessionUnlockedUntil, lockSession, unlockMinutes,
+  unlockSession, sessionUnlockedUntil, lockSession, unlockMinutes, adminAllowTg2fa,
 } from './access.js';
+import { startAdminUnlock, adminUnlockState, resetTelegramFields, setSecurityHook } from '../tg2fa.js';
 import { audit, readAudit } from './audit.js';
 import { collectHealth } from './health.js';
 import { alertsInfo, setToggles, sendTelegram, runChecks, telegramConfig } from './alerts.js';
@@ -81,7 +82,7 @@ function userRow(u) {
     servers: userServers(u.id).length, sessions: sessions.length,
     flags: {
       admin: isInstanceAdmin(u), envAdmin: isEnvAdmin(u), banned: !!u.instanceBan,
-      mustChangePassword: mustChangePassword(u), totpEnabled: u.totpEnabled === true,
+      mustChangePassword: mustChangePassword(u), totpEnabled: u.totpEnabled === true, tg2fa: u.tg2fa === true, // chat id — никогда
     },
     ban: u.instanceBan ? { at: u.instanceBan.at, reason: u.instanceBan.reason || '', by: brief(findUser(u.instanceBan.by)) } : null,
   };
@@ -92,6 +93,8 @@ const match = (q, ...fields) => !q || fields.some((f) => String(f || '').toLower
 export function createAdminRouter({ realtime }) {
   const ops = () => realtime.adminOps;
   const router = express.Router();
+  // события безопасности 2FA через Telegram («Это не я») — в журнал аудита
+  setSecurityHook((user, action, details, ip) => audit(user, action, user ? { type: 'user', id: user.id, name: user.username } : null, details, ip));
   router.use(express.json({ limit: '100kb' }));
 
   // ---------- вход: заблокированный аккаунт не получает сессию; временный пароль — флаг в ответе ----------
@@ -115,7 +118,7 @@ export function createAdminRouter({ realtime }) {
   });
 
   // ---------- заблокированные токены и обязательная смена временного пароля ----------
-  const ALLOWED_WITH_TEMP = new Set(['GET /me', 'POST /me/password', 'GET /config', 'GET /admin/me', 'GET /me/flags', 'GET /app/latest', 'GET /push/key', 'POST /push/unsubscribe']);
+  const ALLOWED_WITH_TEMP = new Set(['GET /me', 'POST /me/password', 'POST /me/2fa/telegram/code', 'GET /config', 'GET /admin/me', 'GET /me/flags', 'GET /app/latest', 'GET /push/key', 'POST /push/unsubscribe']);
   router.use((req, res, next) => {
     const [scheme, value] = String(req.get('authorization') || '').split(' ');
     if (!/^bearer$/i.test(scheme || '')) return next();
@@ -141,6 +144,8 @@ export function createAdminRouter({ realtime }) {
       active: admin && requireAdmin2FA(req.user),
       require2fa: admin ? admin2faRequired() : undefined,
       totpEnabled: admin ? req.user.totpEnabled === true : undefined,
+      tg2faEnabled: admin ? req.user.tg2fa === true : undefined,
+      allowTg2fa: admin ? adminAllowTg2fa() : undefined,
       unlocked: admin ? sessionUnlockedUntil(req.token) > Date.now() : undefined,
       unlockMinutes: admin ? unlockMinutes() : undefined,
       mustChangePassword: mustChangePassword(req.user),
@@ -155,12 +160,36 @@ export function createAdminRouter({ realtime }) {
       if (req.isBot || !isInstanceAdmin(req.user)) return res.status(404).json({ error: 'Не найдено' });
       if (!requireAdmin2FA(req.user)) return res.status(403).json({ error: MSG_2FA, code: 'admin_2fa_required' });
       if (admin2faRequired()) {
-        const method = requireRecent2FA(req, req.body?.code); // 403 totp_required / totp_invalid, 429 totp_locked
+        const allowTg = adminAllowTg2fa() && req.user.tg2fa === true;
+        let method;
+        if (allowTg && typeof req.body?.tgRequest === 'string' && !req.body?.code) {
+          // опрос после «Прислать код в Telegram»: нажата ли «✅ Это я» в боте
+          const st = adminUnlockState(req.user, req.token, req.body.tgRequest);
+          if (st === 'denied') return res.status(403).json({ error: 'Отклонено в Telegram («Это не я»)', code: 'tg_denied' });
+          if (st !== 'approved') return res.json({ ok: false, pending: st === 'pending', state: st });
+          method = 'telegram';
+        } else {
+          // код из приложения, из Telegram (если разрешено) или код восстановления
+          method = requireRecent2FA(req, req.body?.code, { tg: allowTg ? { kind: 'admin', session: req.token } : null }); // 403 totp_required / totp_invalid, 429 totp_locked
+        }
         const until = unlockSession(req.token);
         audit(req.user, 'admin.unlock', null, { method, minutes: unlockMinutes() }, req.ip);
         return res.json({ ok: true, until });
       }
       res.json({ ok: true, until: null });
+    } catch (e) { next(e); }
+  });
+
+  // прислать код (и кнопки «Это я» / «Это не я») в Telegram — назначение «Открыть админ-панель»
+  router.post('/admin/unlock/telegram', requireAuth, (req, res, next) => {
+    try {
+      if (req.isBot || !isInstanceAdmin(req.user)) return res.status(404).json({ error: 'Не найдено' });
+      if (!requireAdmin2FA(req.user)) return res.status(403).json({ error: MSG_2FA, code: 'admin_2fa_required' });
+      if (!adminAllowTg2fa() || req.user.tg2fa !== true) {
+        return res.status(403).json({ error: 'Для админ-панели нужен код из приложения-аутентификатора', code: 'tg_not_allowed' });
+      }
+      res.set('Cache-Control', 'no-store');
+      res.json(startAdminUnlock(req.user, req.token, { ip: req.ip, ua: req.get('user-agent') || '' }));
     } catch (e) { next(e); }
   });
 
@@ -397,8 +426,9 @@ export function createAdminRouter({ realtime }) {
     u.passwordHash = hash;
     u.mustChangePassword = { hash, at: Date.now(), by: req.user.id };
     let totpReset = false;
-    if (req.body?.resetTotp === true) { // потерян телефон с 2FA: поля модуля 2FA (user.totp*)
+    if (req.body?.resetTotp === true) { // потерян телефон с 2FA: поля модулей 2FA (user.totp*, Telegram — user.tg*)
       for (const k of Object.keys(u)) if (/^totp/i.test(k)) { delete u[k]; totpReset = true; }
+      if (resetTelegramFields(u)) totpReset = true;
     }
     const tokens = revokeSessions(u.id);
     realtime.disconnectSessions(u.id, tokens);

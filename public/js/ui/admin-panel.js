@@ -157,19 +157,43 @@ function showUnlockGate(section) {
     maxlength: '20', placeholder: '123 456', 'aria-label': 'Код двухфакторной защиты',
   });
   const btn = h('button', { type: 'submit', class: 'btn btn--primary', id: 'admin-unlock-submit' }, 'Открыть админ-панель');
+  // Telegram (если разрешено ADMIN_ALLOW_TG_2FA): код и кнопка «Это я» в боте, назначение «Открыть админ-панель»
+  const tgOk = adminState.info?.tg2faEnabled && adminState.info?.allowTg2fa;
+  let tgPoll = null;
+  const tgBtn = tgOk ? h('button', { type: 'button', class: 'btn btn--ghost', id: 'admin-unlock-tg' }, icon('i-send'), 'Прислать код в Telegram') : null;
+  const opened = () => { clearTimeout(tgPoll); adminState.info = { ...adminState.info, unlocked: true }; show(section || current); };
+  tgBtn?.addEventListener('click', async () => {
+    err.textContent = '';
+    tgBtn.disabled = true;
+    try {
+      const r = await adminFetch('POST', '/api/admin/unlock/telegram');
+      err.textContent = 'Код отправлен в Telegram — введите его или нажмите «✅ Это я» в боте.';
+      const poll = async () => {
+        if (!form.isConnected) return;
+        try {
+          const st = await adminFetch('POST', '/api/admin/unlock', { tgRequest: r.requestId });
+          if (st?.ok) { opened(); return; }
+          if (st && !st.pending) { err.textContent = st.state === 'failed' ? 'Не удалось отправить код: Telegram недоступен с сервера.' : 'Код истёк — запросите новый.'; return; }
+        } catch (ex) { err.textContent = ex.message; return; }
+        tgPoll = setTimeout(poll, 2000);
+      };
+      clearTimeout(tgPoll);
+      tgPoll = setTimeout(poll, 1500);
+    } catch (ex) { err.textContent = ex.message; }
+    setTimeout(() => { tgBtn.disabled = false; }, 30_000);
+  });
   const form = h('form', { class: 'admin-gate', id: 'admin-unlock-gate', novalidate: true },
     icon('i-lock', 'admin-gate__icon'),
     h('h3', null, 'Введите код двухфакторной защиты, чтобы открыть админ-панель'),
-    h('p', null, `Код из приложения-аутентификатора (или код восстановления). Админ-панель будет открыта на этом устройстве ${adminState.info?.unlockMinutes || 30} минут.`),
-    code, err, btn);
+    h('p', null, `${tgOk ? 'Код из приложения-аутентификатора, из Telegram' : 'Код из приложения-аутентификатора'} (или код восстановления). Админ-панель будет открыта на этом устройстве ${adminState.info?.unlockMinutes || 30} минут.`),
+    code, err, h('div', { class: 'admin-gate__actions' }, tgBtn || '', btn));
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     err.textContent = '';
     btn.disabled = true;
     try {
       await adminFetch('POST', '/api/admin/unlock', { code: code.value.replace(/\s+/g, '') });
-      adminState.info = { ...adminState.info, unlocked: true };
-      show(section || current);
+      opened();
     } catch (ex) {
       err.textContent = ex.message;
       code.select();
@@ -414,7 +438,7 @@ function flagBadges(f) {
   return [
     f.admin ? h('span', { class: 'admin-badge admin-badge--accent' }, f.envAdmin ? 'админ (env)' : 'админ') : null,
     f.banned ? h('span', { class: 'admin-badge admin-badge--danger' }, 'заблокирован') : null,
-    f.totpEnabled ? h('span', { class: 'admin-badge admin-badge--ok' }, '2FA') : null,
+    f.totpEnabled || f.tg2fa ? h('span', { class: 'admin-badge admin-badge--ok' }, f.totpEnabled ? '2FA' : '2FA (Telegram)') : null,
     f.mustChangePassword ? h('span', { class: 'admin-badge admin-badge--warn' }, 'временный пароль') : null,
   ];
 }
@@ -470,7 +494,7 @@ async function openUser(id) {
       type: 'button', class: 'btn btn--sm', id: 'admin-user-reset', disabled: me,
       onclick: async () => {
         const cb = h('input', { type: 'checkbox', id: 'admin-reset-totp' });
-        const extra = u.flags.totpEnabled ? h('label', { class: 'admin-check' }, cb, 'Также выключить 2FA (потерян телефон)') : null;
+        const extra = u.flags.totpEnabled || u.flags.tg2fa ? h('label', { class: 'admin-check' }, cb, 'Также выключить 2FA (потерян телефон)') : null;
         if (!await ask({ title: `Сбросить пароль ${name}?`, text: 'Будет создан временный пароль — он покажется один раз. Все сеансы завершатся; при входе нужно будет придумать новый пароль.', extra, ok: 'Сбросить' })) return;
         const res = await doAction(() => adminFetch('POST', `/api/admin/users/${id}/reset-password`, { resetTotp: !!cb.checked }));
         if (!res) return;
