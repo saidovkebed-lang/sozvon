@@ -174,7 +174,8 @@ test.describe('v6: свой захват экрана (приложение дл
       await expect.poll(() => kindOfMyScreen(win), { timeout: 20000 }).toBe('MediaStreamTrack');
       await watchScreen(pb);
       await expect.poll(() => pb.locator('.tile--screen video').evaluate((v) => v.videoWidth), { timeout: 20000 }).toBeGreaterThan(0);
-      expect(readLog()).toBe(''); // sozvon-capture не запускался
+      // sozvon-capture для экрана не запускался (режим --media — «что играет» — работает сам по себе, v22)
+      expect(readLog().split('\n').filter((l) => l && !/ media/.test(l))).toEqual([]);
     } finally {
       await app.close().catch(() => {});
     }

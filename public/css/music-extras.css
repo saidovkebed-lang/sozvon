@@ -118,3 +118,22 @@ button.eq-preset:hover { background: var(--bg-4, var(--bg-5)); filter: brightnes
 .profile-listening__where { display: flex; align-items: center; gap: 4px; font-size: var(--fs-xs); color: var(--text-faint); }
 .profile-listening__join { margin-top: var(--sp-2); width: 100%; justify-content: center; }
 .profile-listening__reason { margin: 4px 0 0; font-size: var(--fs-xs); color: var(--text-faint); }
+
+/* ---------- «Слушает Spotify / …» с ПК (ui/listening.js, now-playing.js) ---------- */
+.profile-listening__album { font-size: var(--fs-xs); color: var(--text-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.profile-listening--pc .cover--md { width: 64px; height: 64px; }
+.np-progress { display: flex; align-items: center; gap: var(--sp-2); margin-top: var(--sp-2); font-size: var(--fs-xs); color: var(--text-faint); font-variant-numeric: tabular-nums; }
+.np-progress__track { position: relative; flex: 1; height: 4px; border-radius: 2px; background: var(--bg-4); overflow: hidden; }
+.np-progress__fill { position: absolute; inset: 0 auto 0 0; background: var(--accent); border-radius: inherit; transition: width 1s linear; }
+.profile-listening__actions { display: flex; gap: var(--sp-2); margin-top: var(--sp-2); }
+.profile-listening__actions .btn { flex: 1; justify-content: center; text-decoration: none; min-width: 0; }
+.np-sources { display: flex; flex-direction: column; gap: 6px; margin-top: var(--sp-2); }
+.np-source { display: flex; align-items: center; gap: var(--sp-2); padding: 6px 10px; border-radius: var(--r-sm); background: var(--bg-2); cursor: pointer; }
+.np-source.is-disabled { opacity: 0.55; cursor: default; }
+.np-source__cb { accent-color: var(--accent); width: 16px; height: 16px; margin: 0; }
+.np-source__name { font-weight: var(--fw-semibold); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.np-source__cat { font-size: var(--fs-xs); color: var(--text-faint); }
+.np-source__playing { margin-left: auto; font-size: var(--fs-xs); color: var(--ok); }
+.setting--stack { flex-direction: column; align-items: stretch; }
+@media (prefers-reduced-motion: reduce) { .np-progress__fill { transition: none; } }
+.np-settings { display: flex; flex-direction: column; gap: var(--sp-2); }

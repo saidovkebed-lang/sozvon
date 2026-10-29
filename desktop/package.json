@@ -15,7 +15,7 @@
     "dist:win": "electron-builder --win nsis zip --x64",
     "dist:linux": "electron-builder --linux AppImage --x64",
     "dist": "electron-builder --win nsis zip --x64 --linux AppImage --x64",
-    "check": "node --check src/main.js && node --check src/preload.js && node --check src/setup-preload.js && node --check src/keymap.js && node --check src/native-capture.js"
+    "check": "node --check src/main.js && node --check src/preload.js && node --check src/setup-preload.js && node --check src/keymap.js && node --check src/native-capture.js && node --check src/media-watch.js"
   },
   "dependencies": {
     "electron-updater": "6.8.9",

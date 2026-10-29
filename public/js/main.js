@@ -35,6 +35,7 @@ import { initProfile, closeProfile } from './ui/profile.js';
 import { initPing, measureNow } from './ping.js';
 import { initStream } from './ui/stream.js';
 import { initDesktop } from './desktop.js';
+import { initNowPlaying } from './now-playing.js';
 import { initAuthDownload } from './download.js';
 import { setDndCheck } from './ui/sounds.js';
 import { toggleMute, toggleDeafen } from './voice/voice.js';
@@ -80,6 +81,7 @@ function initUi() {
   initAvatarHover();
   setDndCheck(() => state.user?.status === 'dnd');
   initDesktop({ toggleMute, toggleDeafen, setPttPressed: (p) => audioEngine.setPttPressed(p) });
+  initNowPlaying(); // «Слушает Spotify / …» с ПК (только приложение для Windows)
   initDms(sock.on);
   initInbox(sock.on);
   initPush();
@@ -176,6 +178,13 @@ function initSocketEvents() {
     setUserOnline(userId, online, status);
     notify('presence');
   });
+  // «Слушает Spotify / …» с ПК (server/pc-listening.js): позиция — на момент отправки, отсчитываем от своего «сейчас»
+  sock.on('listening', ({ userId, listening } = {}) => {
+    if (typeof userId !== 'string') return;
+    if (listening && typeof listening === 'object') state.pcListening[userId] = { ...listening, at: Date.now() };
+    else delete state.pcListening[userId];
+    notify('presence');
+  });
   sock.on('bot:status', ({ online }) => {
     state.botOnline = !!online;
     for (const s of state.servers) for (const m of s.members) if (m.isBot) m.online = !!online;
@@ -199,6 +208,8 @@ async function onConnect() {
   state.dms = res.dms || [];
   state.notifications = res.notifications || [];
   state.pushKey = res.pushKey || null;
+  state.pcListening = {};
+  for (const [uid, np] of Object.entries(res.listening || {})) if (np && typeof np === 'object') state.pcListening[uid] = { ...np, at: Date.now() };
   state.voice = res.voice || {};
   state.music = {};
   for (const ms of Object.values(res.music || {})) music.setState(ms);

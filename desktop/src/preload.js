@@ -63,6 +63,15 @@ if (allowed) {
     }, { ok: false }),
     onNativeCaptureEnded: subscribe('desktop:native-capture-ended', ([m]) => [{ token: String(m?.token || ''), reason: String(m?.reason || '') }]),
     openServerSettings: () => send('desktop:open-server-settings'),
+    // «Слушает Spotify / …» (Windows): что играет на ПК — системные медиасессии (помощник --media)
+    mediaWatch: !!info.mediaWatch,
+    setMediaWatch: (on) => send('desktop:media-watch', on === true),
+    onMedia: subscribe('desktop:media', ([list]) => [(Array.isArray(list) ? list : []).slice(0, 20).map((s) => ({
+      app: String(s?.app || ''), title: String(s?.title || ''), artist: String(s?.artist || ''),
+      album: String(s?.album || ''), albumArtist: String(s?.albumArtist || ''),
+      durationMs: Number(s?.durationMs) || 0, positionMs: Number(s?.positionMs) || 0, updatedAt: Number(s?.updatedAt) || 0,
+      playing: s?.playing === true, current: s?.current === true,
+    }))]),
   }));
 }
 
