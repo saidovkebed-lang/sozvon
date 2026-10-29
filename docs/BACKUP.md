@@ -159,3 +159,10 @@ curl -fsS http://127.0.0.1:3000/api/config && echo OK
 `BACKUP_TELEGRAM_PART_SIZE` (по умолчанию `45M`), `BACKUP_TELEGRAM_MAX_PARTS` (20).
 `BACKUP_ASSUME_YES=1` и `BACKUP_RESTORE_ENV=y|n` — восстановление без вопросов.
 Тесты: `tests/v13-backup.spec.js`.
+
+### Если Telegram недоступен с сервера
+
+С российских VPS `api.telegram.org` бывает недоступен или сильно замедлен. Тогда копии и уведомления
+сами идут через ваш VPN-прокси (тот же, что для Spotify — `deploy/vpn-proxy.sh`): сначала Astra пробует
+напрямую, при ошибке — через `SPOTIFY_PROXY`. Задать свой прокси только для Telegram: `TELEGRAM_PROXY=http://…`
+в `/etc/sozvon.env` (`TELEGRAM_PROXY=off` — только напрямую).

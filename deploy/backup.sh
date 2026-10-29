@@ -269,13 +269,37 @@ telegram_enabled() {
 }
 
 # tg_call МЕТОД [curl -F/-d аргументы…] — токен передаётся через stdin (-K -), в списке процессов его не видно.
+# Telegram из РФ бывает недоступен напрямую — тогда через VPN-прокси (тот же, что для Spotify, deploy/vpn-proxy.sh).
+# TELEGRAM_PROXY=http://… — всегда через него; TELEGRAM_PROXY=off — только напрямую;
+# иначе: сначала напрямую (быстрый отказ), при сетевой ошибке — через SPOTIFY_PROXY, если он задан.
 tg_call() {
-  local method=$1 token
+  local method=$1 token proxy fixed rc out
   shift
   token=$(conf BACKUP_TELEGRAM_TOKEN)
   [ -n "$token" ] || { warn "Не задан BACKUP_TELEGRAM_TOKEN"; return 1; }
-  printf 'url = "%s/bot%s/%s"\n' "$(TG_API)" "$token" "$method" \
-    | curl -sS --max-time "${BACKUP_TELEGRAM_TIMEOUT:-600}" --retry 2 -K - "$@"
+  fixed=$(conf TELEGRAM_PROXY)
+  proxy=$fixed
+  [ -n "$proxy" ] || proxy=$(conf SPOTIFY_PROXY)
+  [ "$fixed" = off ] && proxy=""
+  _tg() { # _tg [proxy] args…
+    local px=$1; shift
+    printf 'url = "%s/bot%s/%s"\n' "$(TG_API)" "$token" "$method" \
+      | curl -sS --connect-timeout 10 --max-time "$maxt" --speed-limit 512 --speed-time 25 --retry 1 ${px:+-x "$px"} -K - "$@"
+  }
+  # «зависшее» соединение (Telegram замедлен) обрываем: сообщения — за 30 с, файлы — по низкой скорости
+  local maxt=30
+  [ "$method" = sendDocument ] && maxt=${BACKUP_TELEGRAM_TIMEOUT:-600}
+  if [ -n "$fixed" ] && [ "$fixed" != off ]; then _tg "$fixed" "$@"; return; fi
+  rc=0
+  out=$(_tg "" "$@" 2>/dev/null) || rc=$?
+  if [ "$rc" -eq 0 ]; then printf '%s' "$out"; return 0; fi
+  if [ -n "$proxy" ]; then
+    warn "Telegram напрямую недоступен (curl $rc) — пробую через VPN-прокси ${proxy%%@*}"
+    _tg "$proxy" "$@"
+    return
+  fi
+  warn "Telegram недоступен с этого сервера (curl $rc). Настройте VPN-прокси: sudo bash /opt/sozvon/deploy/vpn-proxy.sh"
+  return "$rc"
 }
 tg_ok() { grep -q '"ok"[[:space:]]*:[[:space:]]*true'; }
 
