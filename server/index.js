@@ -237,7 +237,13 @@ function shutdown(signal) {
 process.on('SIGINT', () => shutdown('SIGINT'));
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('exit', () => { flushStats(); flushSync(); });
+// Журнал (stdout/stderr) оборвался — например, перезапуск journald или закрытый канал родителя: писать некуда.
+// Без этого каждая запись давала EPIPE → uncaughtException → новая запись в тот же канал → EPIPE… — вечный цикл
+// со 100% процессора и сохранением базы на каждом круге.
+const brokenPipe = (err) => err?.code === 'EPIPE' || err?.code === 'ERR_STREAM_DESTROYED';
+for (const stream of [process.stdout, process.stderr]) stream.on('error', (err) => { if (!brokenPipe(err)) throw err; });
 process.on('uncaughtException', (err) => {
+  if (brokenPipe(err)) return;
   console.error('[server] Необработанная ошибка:', err);
   flushSync();
 });

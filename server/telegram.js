@@ -279,6 +279,7 @@ export function createPoller({ dataDir, wanted = () => true, onUpdate, log = con
     try {
       while (!stopped && botConfig().configured && want()) {
         let updates;
+        const startedAt = Date.now();
         try {
           updates = await tgCall('getUpdates', { offset, timeout: POLL_TIMEOUT_SEC, allowed_updates: ['message', 'callback_query'] },
             { timeoutMs: (POLL_TIMEOUT_SEC + 10) * 1000 });
@@ -294,6 +295,9 @@ export function createPoller({ dataDir, wanted = () => true, onUpdate, log = con
           continue;
         }
         if (!Array.isArray(updates)) { await sleep(1000); continue; }
+        // Telegram держит пустой getUpdates до POLL_TIMEOUT_SEC; если ответ пришёл мгновенно и пустой
+        // (сбойный прокси, заглушка), не долбим его в цикле — не чаще раза в секунду
+        if (!updates.length && Date.now() - startedAt < 1000) await sleep(1000 - (Date.now() - startedAt));
         for (const u of updates) {
           if (!Number.isFinite(u?.update_id) || u.update_id < offset || seen.has(u.update_id)) continue;
           offset = Math.max(offset, u.update_id + 1);

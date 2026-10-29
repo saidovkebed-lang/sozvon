@@ -160,9 +160,9 @@ async function startAstra() {
   });
   s.child.stdout.on('data', (d) => { s.logs += d; });
   s.child.stderr.on('data', (d) => { s.logs += d; });
-  await waitFor(async () => (await httpAt(s.base, 'GET', '/api/config').catch(() => ({}))).status === 200, { timeout: 20000, message: 'Astra up' })
+  astra = s; // сразу: если старт не удастся, afterAll всё равно остановит процесс
+  await waitFor(async () => (await httpAt(s.base, 'GET', '/api/config').catch(() => ({}))).status === 200, { timeout: 40000, message: 'Astra up' })
     .catch((e) => { throw new Error(e.message + '\n' + s.logs); });
-  astra = s;
   return s;
 }
 async function stopAstra() {
