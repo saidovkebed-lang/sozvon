@@ -102,8 +102,12 @@ test.describe('v11: трансляции через SFU', () => {
     // качество: maxBitrate/maxFramerate 720p30 на сендере SFU; смена на лету
     const enc = () => pa.evaluate(() => window.__sozvon.rtc.screenEncodings().filter((e) => e.peer === 'sfu'));
     await expect.poll(async () => (await enc())[0]?.maxBitrate, { timeout: 10000 }).toBe(2_500_000);
+    // при нехватке канала/процессора — держать частоту кадров, а не разрешение (было 2–3 к/с у зрителей)
+    const canDegrade = await pa.evaluate(() => 'degradationPreference' in (window.__sozvon.rtc.sfu.producers.video?.rtpSender?.getParameters() || {}));
+    if (canDegrade) await expect.poll(async () => (await enc())[0]?.degradation, { timeout: 10000 }).toBe('maintain-framerate');
     await pa.evaluate(async () => (await import('/js/voice/voice.js')).setStreamQuality('1080p60'));
     await expect.poll(async () => (await enc())[0], { timeout: 10000 }).toMatchObject({ maxBitrate: 6_000_000, maxFramerate: 60 });
+    if (canDegrade) expect((await enc())[0].degradation).toBe('balanced');
 
     // B выходит из трансляции → у стримера 1 зритель; C продолжает смотреть
     await pb.locator('#stage-grid .tile--screen .tile__unwatch').click();

@@ -11,11 +11,13 @@ import { music } from '../music.js';
 import { api } from '../api.js';
 import { prefs } from '../prefs.js';
 
-/** Качество демонстрации (SPEC-v3 §2.4) */
+/** Качество демонстрации (SPEC-v3 §2.4).
+ * hint 'motion' везде: с 'detail' браузер при нехватке канала/процессора держит разрешение ценой кадров —
+ * у зрителей игра шла 2–3 кадра в секунду. «Исходное» ограничено 1440p: 4K/60 не тянет ни кодировщик, ни канал. */
 export const STREAM_QUALITY = {
-  '720p30': { label: '720p 30', video: { width: { ideal: 1280, max: 1280 }, height: { ideal: 720, max: 720 }, frameRate: { ideal: 30, max: 30 } }, maxBitrate: 2_500_000, maxFramerate: 30, hint: 'detail' },
+  '720p30': { label: '720p 30', video: { width: { ideal: 1280, max: 1280 }, height: { ideal: 720, max: 720 }, frameRate: { ideal: 30, max: 30 } }, maxBitrate: 2_500_000, maxFramerate: 30, hint: 'motion' },
   '1080p60': { label: '1080p 60', video: { width: { ideal: 1920, max: 1920 }, height: { ideal: 1080, max: 1080 }, frameRate: { ideal: 60, max: 60 } }, maxBitrate: 6_000_000, maxFramerate: 60, hint: 'motion' },
-  source: { label: 'Исходное', video: { frameRate: { ideal: 60, max: 60 } }, maxBitrate: 8_000_000, maxFramerate: 60, hint: 'detail' },
+  source: { label: 'Исходное', video: { width: { max: 2560 }, height: { max: 1440 }, frameRate: { ideal: 60, max: 60 } }, maxBitrate: 8_000_000, maxFramerate: 60, hint: 'motion' },
 };
 
 // свой захват (приложение для ПК, Windows): размер и частота кадров для помощника
@@ -40,9 +42,10 @@ rtc.onScreenViewers = (n) => {
 
 function screenParams(q) {
   const Q = STREAM_QUALITY[q] || STREAM_QUALITY['720p30'];
-  // 60 к/с: «balanced» — при нехватке канала понемногу и кадры, и разрешение (а не обвал до 480p ради 60 к/с)
+  // при нехватке канала/процессора: 30 к/с — держим кадры (снижается разрешение), 60 к/с — понемногу и то и другое;
+  // «maintain-resolution» тут нельзя: он роняет частоту до 2–3 к/с
   return { maxBitrate: Q.maxBitrate, maxFramerate: Q.maxFramerate,
-    degradation: Q.maxFramerate >= 60 ? 'balanced' : 'maintain-resolution' };
+    degradation: Q.maxFramerate >= 60 ? 'balanced' : 'maintain-framerate' };
 }
 
 let joining = false;

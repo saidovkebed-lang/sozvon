@@ -60,7 +60,9 @@ export function applySenderParams(sender, want) {
   try { p = sender.getParameters(); } catch { return; }
   if (!p.encodings || !p.encodings.length) return; // до negotiation encodings пусты — применим позже
   const e = p.encodings[0];
-  if (e.maxBitrate === want.maxBitrate && e.maxFramerate === want.maxFramerate) return;
+  // degradationPreference сравниваем тоже: в SFU битрейт/частота уже заданы при produce, и без этого он не применялся
+  if (e.maxBitrate === want.maxBitrate && e.maxFramerate === want.maxFramerate
+    && (!want.degradation || p.degradationPreference === want.degradation)) return;
   e.maxBitrate = want.maxBitrate;
   e.maxFramerate = want.maxFramerate;
   if (want.degradation) p.degradationPreference = want.degradation;
@@ -578,11 +580,11 @@ class RtcManager {
     for (const p of this.peers.values()) {
       for (const s of p.senders.screen) {
         if (s.track?.kind !== 'video') continue;
-        try { out.push({ peer: p.id, ...(s.getParameters().encodings?.[0] || {}) }); } catch { /* ignore */ }
+        try { const r = s.getParameters(); out.push({ peer: p.id, ...(r.encodings?.[0] || {}), degradation: r.degradationPreference }); } catch { /* ignore */ }
       }
     }
     const s = this.sfuScreen && this.sfu.producers.video?.rtpSender;
-    if (s) try { out.push({ peer: 'sfu', ...(s.getParameters().encodings?.[0] || {}) }); } catch { /* ignore */ }
+    if (s) try { const r = s.getParameters(); out.push({ peer: 'sfu', ...(r.encodings?.[0] || {}), degradation: r.degradationPreference }); } catch { /* ignore */ }
     return out;
   }
 
