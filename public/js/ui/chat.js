@@ -1,4 +1,4 @@
-// Текстовый чат: сообщения, группировка, история, typing, вложения, composer
+// Текстовый чат: сообщения, группировка, история, typing, вложения, composer; реакции — ui/reactions.js
 import { $, h, icon, avatar, fmtDate, fmtClock, fmtSize, renderMarkdown, safeColor, displayName } from '../util.js';
 import { openLightbox } from './lightbox.js';
 import { state, subscribe, notify, getChannel, getServer, findUser } from '../state.js';
@@ -8,6 +8,7 @@ import { emit, emitAck } from '../socket.js';
 import { api } from '../api.js';
 import { loadHistory, isLoading } from '../nav.js';
 import { toast, toastError } from './toasts.js';
+import { reactionsEl, reactButton, initReactions } from './reactions.js';
 
 const GROUP_MS = 5 * 60 * 1000;
 const TYPING_SEND_MS = 2500;
@@ -102,19 +103,24 @@ function messageEl(m, prev) {
   if (m.attachments?.length) body.append(h('div', { class: 'message__attachments' }, m.attachments.map(attachmentEl)));
   // «Astra Итоги»: объявление бота — кнопка открывает итоги (ui/recap.js)
   if (m.recap?.period) body.append(h('button', { type: 'button', class: 'btn btn--sm btn--primary recap-open-btn', dataset: { recapServer: m.recap.serverId, recapPeriod: m.recap.period } }, '📊 Открыть Итоги'));
+  const reactions = reactionsEl(m); // ui/reactions.js
+  if (reactions) body.append(reactions);
   const mentioned = !m.system && author.id !== state.user?.id && (m.mentionEveryone || mentionsMe(m.content));
   const el = h('div', {
     class: 'message' + (grouped ? ' message--grouped' : '') + (m.system ? ' message--system' : '') + (mentioned ? ' message--mention' : ''),
     dataset: { messageId: m.id, authorId: author.id || '' },
   }, avatar(who), body);
+  // панель действий при наведении: реакция, удаление
   const canDelete = !m.system && state.user && (author.id === state.user.id || (!!server && can(server, 'MANAGE_MESSAGES', m.channelId)));
+  const actions = [reactButton(m)];
   if (canDelete) {
-    el.append(h('button', {
-      type: 'button', class: 'icon-btn message__delete',
+    actions.push(h('button', {
+      type: 'button', class: 'icon-btn message__action message__delete',
       'aria-label': 'Удалить сообщение', title: 'Удалить сообщение',
       dataset: { deleteMessage: m.id },
     }, icon('i-trash', 'icon--sm')));
   }
+  if (actions.some(Boolean)) el.append(h('div', { class: 'message__actions' }, actions));
   return el;
 }
 
@@ -331,6 +337,7 @@ export function initChat(on) {
   subscribe('typing', renderTyping);
   setInterval(renderTyping, 1000);
 
+  initReactions(on);
   on('message:new', ({ message }) => { if (message) addMessage(message); });
   on('message:deleted', ({ channelId, messageId }) => {
     const list = state.messages[channelId];
