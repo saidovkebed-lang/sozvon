@@ -1,0 +1,118 @@
+/* «События сервера» (js/ui/events.js): кнопка в шапке, окно со списком и формой, карточка-напоминание */
+
+/* кнопка-календарь: событие в ближайшие сутки — акцентом */
+#btn-events.is-soon { color: var(--accent-text); }
+.badge-count--event { background: var(--accent); }
+
+/* окно */
+.events-modal { width: min(640px, calc(100vw - 2 * var(--sp-4))); }
+.events-modal [hidden] { display: none !important; }
+.events-modal .modal__header h3 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.events-list { gap: var(--sp-3); min-height: 160px; }
+.events__empty { display: grid; justify-items: center; gap: var(--sp-2); padding: var(--sp-8) var(--sp-4); text-align: center; color: var(--text-faint); }
+.events__empty .icon { width: 40px; height: 40px; opacity: 0.6; }
+.events__empty p { margin: 0; }
+.events__hint { max-width: 380px; font-size: var(--fs-sm); line-height: var(--lh); }
+
+/* карточка события */
+.event-card {
+  display: flex; gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--bg-3);
+  color: var(--text);
+}
+.event-card.is-focus { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-soft-strong); }
+.event-card--live { border-color: var(--ok-soft); background: linear-gradient(0deg, var(--ok-soft), var(--ok-soft)), var(--bg-3); }
+.event-card--past { opacity: 0.65; }
+.event-card__date {
+  flex: none;
+  display: grid; justify-items: center; align-content: center;
+  width: 52px; height: 56px;
+  border-radius: var(--r-md);
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  line-height: 1.1;
+}
+.event-card__month { font-size: var(--fs-xs); font-weight: var(--fw-semibold); text-transform: uppercase; letter-spacing: 0.04em; }
+.event-card__day { font-size: var(--fs-xl); font-weight: var(--fw-bold); color: var(--text); }
+.event-card__main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.event-card__when { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px var(--sp-2); font-size: var(--fs-sm); color: var(--text-muted); }
+.event-card__time { font-weight: var(--fw-semibold); color: var(--accent-text); }
+.event-card__rel.is-live { color: var(--ok); font-weight: var(--fw-semibold); }
+.event-card__rel.is-live::before { content: ""; display: inline-block; width: 8px; height: 8px; margin-right: 5px; border-radius: 50%; background: var(--ok); vertical-align: 1px; }
+.event-card__title { margin: 0; font-size: var(--fs-lg); line-height: var(--lh-tight); overflow-wrap: anywhere; }
+.event-card__desc { margin: 0; font-size: var(--fs-md); line-height: var(--lh); color: var(--text-message, var(--text)); white-space: pre-wrap; overflow-wrap: anywhere; }
+.event-card__meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px var(--sp-3); font-size: var(--fs-sm); color: var(--text-muted); }
+.event-card__meta b { color: var(--text); font-weight: var(--fw-semibold); }
+.event-card__channel, .event-card__author { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.event-card__author .avatar { --size: 20px; font-size: 10px; }
+.event-card__people { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); font-size: var(--fs-sm); color: var(--text-muted); }
+.event-card__avatars { display: inline-flex; align-items: center; }
+.event-card__avatars .avatar { box-shadow: 0 0 0 2px var(--bg-3); }
+.event-card__avatars .avatar + .avatar { margin-left: -6px; }
+.event-card__more { margin-left: 6px; font-weight: var(--fw-semibold); color: var(--text); }
+.event-card__actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); margin-top: 2px; }
+.event-card__manage { display: inline-flex; gap: 2px; margin-left: auto; }
+
+/* «Иду» / «Может быть» / «Не иду» */
+.event-rsvp { display: inline-flex; padding: 2px; gap: 2px; border-radius: var(--r-pill); background: var(--bg-2); border: 1px solid var(--border); }
+.event-rsvp__btn {
+  display: inline-flex; align-items: center; gap: 4px;
+  min-height: 30px; padding: 0 var(--sp-3);
+  border-radius: var(--r-pill);
+  font-size: var(--fs-sm); font-weight: var(--fw-medium);
+  color: var(--text-muted);
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+.event-rsvp__btn:hover { background: var(--bg-4); color: var(--text); }
+.event-rsvp__btn.is-on { background: var(--accent); color: var(--text-on-accent); }
+.event-rsvp__btn--going.is-on { background: var(--ok-strong); color: #fff; }
+.event-rsvp__btn--no.is-on { background: var(--bg-5); color: var(--text); }
+
+/* форма */
+.events-form__when { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3); }
+.events-form__desc { resize: vertical; min-height: 72px; }
+.events-form__tz:empty { display: none; }
+
+/* карточка-напоминание (in-app) */
+.event-reminder {
+  position: fixed; right: var(--sp-4); bottom: var(--sp-4);
+  z-index: calc(var(--z-toast) + 1);
+  display: flex; align-items: center; gap: var(--sp-3);
+  width: min(440px, calc(100vw - 2 * var(--sp-4)));
+  padding: var(--sp-3) var(--sp-3) var(--sp-3) var(--sp-4);
+  border: 1px solid var(--accent-soft-strong);
+  border-radius: var(--r-lg);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-lg);
+  color: var(--text);
+  animation: menu-in var(--dur) var(--ease-out) both;
+}
+.event-reminder__icon { flex: none; display: grid; place-items: center; width: 40px; height: 40px; border-radius: var(--r-md); background: var(--accent-soft); color: var(--accent-text); }
+.event-reminder__text { flex: 1; min-width: 0; display: grid; gap: 1px; }
+.event-reminder__src { font-size: var(--fs-xs); font-weight: var(--fw-semibold); color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.event-reminder__title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.event-reminder__when { font-size: var(--fs-sm); color: var(--text-muted); }
+.event-reminder__actions { flex: none; display: flex; align-items: center; gap: var(--sp-1); }
+
+/* «Входящие»: напоминание о событии */
+.inbox-item--event { cursor: pointer; }
+.inbox-item__event-icon { flex: none; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: var(--accent-soft); color: var(--accent-text); }
+.inbox-item__event-icon .icon { width: 14px; height: 14px; }
+.inbox-item__event-actions { display: flex; gap: var(--sp-2); margin: 4px 0 2px; }
+
+@media (max-width: 639.98px) {
+  .events-modal { width: 100vw; max-height: 100dvh; height: 100dvh; border-radius: 0; border: 0; }
+  .events-modal .modal__header { padding: var(--sp-3) var(--sp-2) var(--sp-2) var(--sp-4); }
+  .events-modal .modal__body { padding: var(--sp-2) var(--sp-3) var(--sp-4); }
+  .event-card { padding: var(--sp-3); gap: var(--sp-2); }
+  .event-card__date { width: 44px; height: 50px; }
+  .event-rsvp { flex: 1 1 100%; }
+  .event-rsvp__btn { flex: 1; justify-content: center; padding: 0 var(--sp-2); min-height: 36px; }
+  .event-card__join { flex: 1; min-height: 36px; }
+  .events-form__when { grid-template-columns: 1fr; }
+  .event-reminder { left: var(--sp-2); right: var(--sp-2); bottom: var(--sp-2); width: auto; flex-wrap: wrap; }
+  .event-reminder__actions { flex: 1 1 100%; justify-content: flex-end; }
+}

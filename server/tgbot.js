@@ -133,6 +133,7 @@ function helpMenu(linked) {
   const text = [
     '❓ Бот Astra умеет:',
     '• 💬 присылать личные сообщения и упоминания, пока вас нет в Astra; чтобы ответить — ответьте (reply) на уведомление или нажмите «↩️ Ответить» (только текст);',
+    '• 📅 напоминать о событиях серверов, на которые вы идёте, — за 15 минут и в момент начала;',
     '• 🔐 сбросить пароль по одноразовой ссылке, выйти на всех устройствах, отвязать Telegram;',
     '• 🔓 входить в Astra без пароля — кнопкой «✅ Войти» здесь (включается в настройках Astra);',
     '• 🎟 давать ссылку-приглашение на ваш сервер.',
@@ -147,13 +148,15 @@ function notifyMenu(u) {
   const n = notifySettings(u);
   const lines = ['💬 Уведомления в Telegram', 'Пересылать сюда:'];
   lines.push(`${onOff(n.dm)} личные сообщения`, `${onOff(n.mention)} упоминания @${u.username}`, `${onOff(n.everyone)} @everyone и @here`);
+  lines.push(`${onOff(n.events)} напоминания о событиях серверов`);
   lines.push(`${onOff(n.onlyAway)} только когда меня нет в Astra`);
   if (u.status === 'dnd') lines.push('', '⛔ У вас статус «Не беспокоить» — уведомления не приходят.');
   if (n.pauseUntil) lines.push('', `⏸ Пауза до ${new Date(n.pauseUntil).toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`);
   lines.push('', 'То же — в Astra: «Настройки» → «Уведомления» → «Telegram».');
   const kb = [
     [btn(`${onOff(n.dm)} ЛС`, 'nt:dm'), btn(`${onOff(n.mention)} Упоминания`, 'nt:mention')],
-    [btn(`${onOff(n.everyone)} @everyone`, 'nt:everyone'), btn(`${onOff(n.onlyAway)} Только не в Astra`, 'nt:away')],
+    [btn(`${onOff(n.everyone)} @everyone`, 'nt:everyone'), btn(`${onOff(n.events)} События`, 'nt:events')],
+    [btn(`${onOff(n.onlyAway)} Только не в Astra`, 'nt:away')],
     n.pauseUntil ? [btn('▶️ Снять паузу', 'np:0', 'success')] : [btn('⏸ Пауза 1 ч', 'np:60'), btn('⏸ Пауза 8 ч', 'np:480')],
     [back()],
   ];
@@ -296,6 +299,37 @@ async function relayNotification(userId, n, message, { active }) {
     const drop = relays.size - RELAY_MAX;
     let i = 0;
     for (const k of relays.keys()) { if (i++ >= drop) break; relays.delete(k); }
+  }
+}
+
+/* ---------------- напоминания о событиях серверов → Telegram ---------------- */
+function fmtEventTime(ms, tz) {
+  const opts = { hour: '2-digit', minute: '2-digit' };
+  try { return new Date(ms).toLocaleTimeString('ru-RU', { ...opts, ...(tz ? { timeZone: tz } : {}) }); } catch {
+    return new Date(ms).toLocaleTimeString('ru-RU', opts);
+  }
+}
+
+async function relayEventReminder(userId, info, { active }) {
+  const u = findUser(userId);
+  if (!u || u.isBot || u.tg2fa !== true || !u.tgChatId || blocked(u) || !telegramAvailable()) return;
+  const s = notifySettings(u);
+  if (!s.events || s.pauseUntil || u.status === 'dnd' || (s.onlyAway && active)) return;
+  if (!relayAllowed(u.id)) return;
+  const head = info.kind === 'start' ? `📅 Событие начинается · ${info.serverName}` : `📅 Скоро событие · ${info.serverName}`;
+  const lines = [head, info.kind === 'start' ? info.text : `${info.text}, в ${fmtEventTime(info.startAt, u.tz)}`];
+  if (info.channelName) lines.push(`🔊 ${info.channelName}`);
+  if (info.rsvp === 'maybe') lines.push('', 'Вы отметили «Может быть».');
+  const base = publicBase();
+  const join = info.channelId && base ? `${base}/?join=${encodeURIComponent(info.channelId)}` : null;
+  const open = base ? `${base}/?event=${encodeURIComponent(info.eventId)}` : null;
+  const kb = [];
+  if (urlButtonOk(join)) kb.push([urlBtn('🎧 Подключиться', join, 'primary')]);
+  else if (urlButtonOk(open)) kb.push([urlBtn('🌐 Открыть', open)]);
+  try {
+    await sendMessage(String(u.tgChatId), lines.join('\n'), kb.length ? { reply_markup: { inline_keyboard: kb } } : {});
+  } catch (err) {
+    console.warn(`[tgbot] Напоминание о событии не отправлено (${u.username}): ${err.message}`);
   }
 }
 
@@ -623,7 +657,7 @@ async function onCallback(q) {
   if (data === 'i') return render(inviteMenu(u));
 
   // уведомления
-  let mm = data.match(/^nt:(dm|mention|everyone|away)$/);
+  let mm = data.match(/^nt:(dm|mention|everyone|events|away)$/);
   if (mm) {
     const key = mm[1] === 'away' ? 'onlyAway' : mm[1];
     updateNotifySettings(u, { [key]: !notifySettings(u)[key] });
@@ -790,6 +824,7 @@ export function initTelegramBot({ dataDir, realtime }) {
     await show(String(u.tgChatId), null, `${v.text}\n\nСюда будут приходить личные сообщения и упоминания, пока вас нет в Astra (настройка — «💬 Уведомления»).`, v.kb).catch(() => {});
   });
   onEvent('notify', relayNotification);
+  onEvent('event-reminder', relayEventReminder); // «События сервера» (server/schedule-events.js)
   onEvent('registered', (u) => noteNewcomer(u, { registered: true }));
   onEvent('joined', (server, u) => noteNewcomer(u, { server: server.id }));
   setInterval(() => {

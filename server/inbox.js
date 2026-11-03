@@ -3,6 +3,8 @@
 //   dms:           [{ id, userIds: [a, b], createdAt, lastAt, hidden: { userId: true } }]
 //   readState:     { userId: { channelId|dmId: ts } }
 //   notifications: { userId: [{ id, type, channelId, serverId, messageId, authorId, preview, count, createdAt, read }] }
+//                  type 'event' — напоминание о событии сервера (server/schedule-events.js): + eventId, kind
+//                  ('soon' | 'start'), startAt; channelId — голосовой канал события или null, messageId — null
 //   pushSubs:      { userId: [{ endpoint, keys: {p256dh, auth}, createdAt, ua }] }
 import crypto from 'node:crypto';
 import { db, save, newId } from './db.js';
@@ -109,7 +111,26 @@ export function publicNotification(n) {
     serverName: srv?.name || null, channelName: ch?.name || null,
     messageId: n.messageId, author: publicUser(findUser(n.authorId)),
     preview: n.preview, count: n.count || 1, createdAt: n.createdAt, read: !!n.read,
+    ...(n.type === 'event' ? { eventId: n.eventId, kind: n.kind, startAt: n.startAt } : {}),
   };
+}
+
+/** Напоминание о событии сервера во «Входящие» (kind: 'soon' | 'start'). Возвращает публичный вид. */
+export function addEventNotification(userId, { kind, event }) {
+  const d = ensure();
+  const list = (d.notifications[userId] ||= []);
+  // прошлое напоминание о том же событии заменяется новым («скоро» → «начинается»)
+  const old = list.findIndex((x) => x.type === 'event' && x.eventId === event.id);
+  if (old >= 0) list.splice(old, 1);
+  const n = {
+    id: newId(), type: 'event', kind, eventId: event.id, startAt: event.startAt,
+    channelId: event.channelId || null, serverId: event.serverId, messageId: null, authorId: event.authorId,
+    preview: event.title, count: 1, createdAt: Date.now(), read: false,
+  };
+  list.push(n);
+  if (list.length > MAX_NOTIFICATIONS) list.splice(0, list.length - MAX_NOTIFICATIONS);
+  save();
+  return publicNotification(n);
 }
 
 /**

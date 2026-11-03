@@ -29,6 +29,7 @@ export const state = {
   notifications: [],       // «Входящие»: [{id, type, channelId, serverId, author, preview, count, createdAt, read}]
   pushKey: null,           // публичный ключ VAPID сервера (null — push выключен)
   pcListening: {},         // userId -> что играет у него на ПК {source, title, artist, album, durationMs, positionMs, at, cover?}
+  scheduledEvents: {},     // «События сервера»: eventId -> {id, serverId, title, description, startAt, channelId, authorId, rsvp, me, canManage}
 };
 
 const subs = new Map();

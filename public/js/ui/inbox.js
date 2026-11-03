@@ -1,16 +1,19 @@
 // «Входящие» (как в Discord): упоминания, @everyone и личные сообщения — колокольчик в шапке со счётчиком.
 // Клик по записи открывает канал/чат; открытие канала отмечает его уведомления прочитанными (channel:read).
+// Напоминания о событиях сервера (type 'event') открывают окно событий; «Подключиться» — голосовой канал события.
 import { $, h, icon, avatar, displayName, fmtDate, safeMediaUrl, initials } from '../util.js';
 import { state, subscribe, notify, inboxUnread, getServer, getChannel } from '../state.js';
 import { emitAck } from '../socket.js';
 import { selectChannel } from '../nav.js';
 import { toastError } from './toasts.js';
+import { openEvents } from './events.js';
 
 let panel = null;
 let filter = 'all'; // all | unread
 
 /** Что случилось: «упомянул(а) вас» / «@everyone» / «личное сообщение» */
 function actionOf(n) {
+  if (n.type === 'event') return n.kind === 'start' ? 'событие начинается' : 'скоро событие';
   if (n.type === 'dm') return n.count > 1 ? `личные сообщения · ${n.count}` : 'личное сообщение';
   return n.type === 'everyone' ? '@everyone' : 'упомянул(а) вас';
 }
@@ -24,6 +27,14 @@ function sourceEl(n) {
   const srv = getServer(n.serverId);
   const ch = getChannel(n.channelId);
   const srvName = srv?.name || n.serverName || 'Сервер';
+  if (n.type === 'event') {
+    const pic = safeMediaUrl(srv?.icon);
+    return h('span', { class: 'inbox-item__source', title: `${srvName} · события` },
+      h('span', { class: 'inbox-item__src-icon' }, pic ? h('img', { src: pic, alt: '' }) : initials(srvName)),
+      h('span', { class: 'inbox-item__src-server' }, srvName),
+      h('span', { class: 'inbox-item__src-sep', 'aria-hidden': 'true' }, '›'),
+      h('span', { class: 'inbox-item__src-channel' }, ch ? `🔊 ${ch.name}` : 'события'));
+  }
   const chName = ch?.name || n.channelName || 'канал';
   const pic = safeMediaUrl(srv?.icon);
   return h('span', { class: 'inbox-item__source', title: `${srvName} · #${chName}` },
@@ -33,7 +44,27 @@ function sourceEl(n) {
     h('span', { class: 'inbox-item__src-channel' }, `#${chName}`));
 }
 
+/** Напоминание о событии: не <button> — внутри своя кнопка «Подключиться» */
+function eventItemEl(n) {
+  const ch = n.channelId ? getChannel(n.channelId) : null;
+  return h('div', {
+    class: 'inbox-item inbox-item--event' + (n.read ? '' : ' is-unread'), role: 'listitem', tabindex: '0',
+    dataset: { notificationId: n.id, eventId: n.eventId, serverId: n.serverId },
+  }, h('span', { class: 'inbox-item__event-icon' }, icon('i-calendar')),
+  h('span', { class: 'inbox-item__text' },
+    sourceEl(n),
+    h('span', { class: 'inbox-item__top' },
+      h('span', { class: 'inbox-item__who' }, n.preview || 'Событие'),
+      h('span', { class: 'inbox-item__where' }, actionOf(n))),
+    n.startAt ? h('span', { class: 'inbox-item__preview' }, `Начало в ${new Date(n.startAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}`) : null,
+    ch ? h('span', { class: 'inbox-item__event-actions' },
+      h('button', { type: 'button', class: 'btn btn--primary btn--sm', dataset: { eventJoin: ch.id } }, icon('i-headphones', 'icon--sm'), 'Подключиться')) : null,
+    h('time', { class: 'inbox-item__time', datetime: new Date(n.createdAt).toISOString() }, fmtDate(n.createdAt))),
+  n.read ? null : h('span', { class: 'inbox-item__dot', 'aria-label': 'Не прочитано' }));
+}
+
 function itemEl(n) {
+  if (n.type === 'event') return eventItemEl(n);
   return h('button', {
     type: 'button', class: 'inbox-item' + (n.read ? '' : ' is-unread'), role: 'listitem',
     dataset: { notificationId: n.id, channelId: n.channelId },
@@ -73,7 +104,7 @@ function renderPanel() {
   $('#inbox-read-all').disabled = !inboxUnread();
   $('#inbox-list').replaceChildren(...(list.length ? list.map(itemEl) : [h('div', { class: 'inbox__empty' },
     icon('i-inbox', 'icon--lg'),
-    h('p', null, filter === 'unread' ? 'Всё прочитано' : 'Здесь появятся упоминания вас и личные сообщения'))]));
+    h('p', null, filter === 'unread' ? 'Всё прочитано' : 'Здесь появятся упоминания вас, личные сообщения и напоминания о событиях'))]));
 }
 
 function build() {
@@ -95,13 +126,19 @@ function build() {
       try { await emitAck('notification:read', { all: true }); } catch (ex) { toastError(ex); }
       return;
     }
+    if (e.target.closest('[data-event-join]')) { closeInbox(); return; } // подключение — events.js
     const item = e.target.closest('.inbox-item');
     if (item) {
       closeInbox();
       const n = state.notifications.find((x) => x.id === item.dataset.notificationId);
       if (n && !n.read) emitAck('notification:read', { ids: [n.id] }).catch(() => {});
-      selectChannel(item.dataset.channelId);
+      if (item.dataset.eventId) openEvents(item.dataset.serverId, item.dataset.eventId);
+      else selectChannel(item.dataset.channelId);
     }
+  });
+  panel.addEventListener('keydown', (e) => {
+    const item = e.target.closest?.('.inbox-item--event');
+    if (item && e.target === item && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); item.click(); }
   });
   return panel;
 }
@@ -132,14 +169,17 @@ export function closeInbox() {
 export const isInboxOpen = () => !!panel && !panel.hidden;
 
 function upsert(n) {
-  state.notifications = [n, ...state.notifications.filter((x) => x.id !== n.id)]
+  // напоминание о событии одно на событие: «начинается» заменяет «скоро» (как на сервере)
+  const same = (x) => x.id === n.id || (n.type === 'event' && x.type === 'event' && x.eventId === n.eventId);
+  state.notifications = [n, ...state.notifications.filter((x) => !same(x))]
     .sort((a, b) => b.createdAt - a.createdAt).slice(0, 100);
 }
 
 /** Канал/сервер удалили или доступ пропал (кик, бан, роль) — его уведомления больше не показываем */
 function pruneInaccessible() {
   const visible = new Set(state.servers.flatMap((s) => s.channels.map((c) => c.id)));
-  const keep = state.notifications.filter((n) => n.type === 'dm' || visible.has(n.channelId));
+  const servers = new Set(state.servers.map((s) => s.id));
+  const keep = state.notifications.filter((n) => n.type === 'dm' || (n.type === 'event' ? servers.has(n.serverId) : visible.has(n.channelId)));
   if (keep.length === state.notifications.length) return;
   state.notifications = keep;
   notify('inbox');
@@ -167,9 +207,9 @@ export function initInbox(on) {
     upsert(notification);
     notify('inbox');
   });
-  on('notification:removed', ({ id, messageId } = {}) => {
+  on('notification:removed', ({ id, messageId, eventId } = {}) => {
     const before = state.notifications.length;
-    state.notifications = state.notifications.filter((n) => (id ? n.id !== id : n.messageId !== messageId));
+    state.notifications = state.notifications.filter((n) => (id ? n.id !== id : eventId ? n.eventId !== eventId : n.messageId !== messageId));
     if (state.notifications.length !== before) notify('inbox');
   });
   on('read:state', ({ notificationIds } = {}) => {

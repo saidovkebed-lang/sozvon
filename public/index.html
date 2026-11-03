@@ -25,6 +25,7 @@
   <link rel="stylesheet" href="/css/astra2.css">
   <link rel="stylesheet" href="/css/admin.css">
   <link rel="stylesheet" href="/css/music-extras.css">
+  <link rel="stylesheet" href="/css/events.css">
 </head>
 <body>
   <!-- ===== Экран входа ===== -->
@@ -199,6 +200,9 @@
         <h2 class="main__title" id="channel-title">Astra</h2>
         <div class="main__topic" id="channel-topic"></div>
         <div class="main__actions">
+          <button class="icon-btn icon-btn--badge" id="btn-events" type="button" aria-label="События сервера" aria-haspopup="dialog" title="События сервера" hidden>
+            <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-calendar"/></svg>
+          </button>
           <button class="icon-btn icon-btn--badge" id="btn-inbox" type="button" aria-label="Входящие" aria-haspopup="dialog" aria-expanded="false" title="Входящие">
             <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-inbox"/></svg>
           </button>
@@ -618,6 +622,50 @@
       </form>
       <p class="form__error" id="pl-pick-error" data-error></p>
     </div>
+  </dialog>
+
+  <!-- ===== События сервера (список и форма строит js/ui/events.js) ===== -->
+  <dialog class="modal modal--wide events-modal" id="modal-events" aria-labelledby="modal-events-title">
+    <div class="modal__header">
+      <h3 id="modal-events-title">События</h3>
+      <button class="btn btn--primary btn--sm" id="btn-event-new" type="button"><svg class="icon icon--sm" aria-hidden="true"><use href="/assets/icons.svg#i-plus"/></svg> Создать</button>
+      <button class="icon-btn" type="button" data-close aria-label="Закрыть">
+        <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-close"/></svg>
+      </button>
+    </div>
+    <div class="modal__body events-list" id="events-list" role="list" aria-label="События сервера"></div>
+    <form class="form events-form" id="event-form" novalidate hidden>
+      <div class="modal__body">
+        <div class="field">
+          <label class="field__label" for="event-title">Название</label>
+          <input class="input" id="event-title" name="title" maxlength="100" required placeholder="Катка в 21:00" autocomplete="off">
+        </div>
+        <div class="field">
+          <label class="field__label" for="event-description">Описание <span class="field__optional">— необязательно</span></label>
+          <textarea class="input events-form__desc" id="event-description" name="description" maxlength="1000" rows="3" placeholder="Что будем делать, что взять с собой"></textarea>
+        </div>
+        <div class="events-form__when">
+          <div class="field">
+            <label class="field__label" for="event-date">Дата</label>
+            <input class="input" id="event-date" name="date" type="date" required>
+          </div>
+          <div class="field">
+            <label class="field__label" for="event-time">Время</label>
+            <input class="input" id="event-time" name="time" type="time" required>
+          </div>
+        </div>
+        <p class="field__hint events-form__tz" id="event-tz"></p>
+        <div class="field">
+          <label class="field__label" for="event-channel">Где <span class="field__optional">— необязательно</span></label>
+          <select class="input" id="event-channel" name="channelId"></select>
+        </div>
+        <p class="form__error" id="event-form-error" role="alert" data-error></p>
+      </div>
+      <div class="modal__footer">
+        <button class="btn btn--ghost" type="button" id="event-form-cancel">Отмена</button>
+        <button class="btn btn--primary" type="submit" id="event-form-submit">Создать</button>
+      </div>
+    </form>
   </dialog>
 
   <dialog class="modal" id="modal-confirm" aria-labelledby="modal-confirm-title">

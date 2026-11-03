@@ -5,7 +5,7 @@
 //   POST  /api/login/telegram           { username } → { challenge, expiresAt }   (ответ всегда одинаковый)
 //   POST  /api/login/telegram/status    { challenge } → { pending } | { token, user } | { twoFactor, challenge, methods }
 //   GET   /api/me/telegram              → { available, linked, account, bot, notify, passwordless }
-//   PATCH /api/me/telegram              { notify?: {dm, mention, everyone, onlyAway}, pauseMinutes?, passwordless?, password? }
+//   PATCH /api/me/telegram              { notify?: {dm, mention, everyone, events, onlyAway}, pauseMinutes?, passwordless?, password? }
 //                                       (включить вход без пароля — только с паролем; выключить — без)
 import express from 'express';
 import { requireAuth, HttpError, createSession } from './auth.js';
