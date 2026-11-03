@@ -4,6 +4,7 @@
 //   notify     (userId, notification, message, { active })  — новое уведомление («Входящие»/push)
 //   registered (user)                                      — новый аккаунт
 //   joined     (server, user, { via })                     — пользователь вошёл на сервер
+//   event-reminder (userId, info, { active })              — напоминание о событии сервера (server/schedule-events.js)
 const subs = new Map();
 
 export function on(event, fn) {

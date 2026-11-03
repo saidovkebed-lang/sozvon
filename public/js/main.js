@@ -17,6 +17,7 @@ import { toast } from './ui/toasts.js';
 import { selectServer, selectChannel, restoreLast, revalidateSelection, reportView, initReadTracking } from './nav.js';
 import { initDms } from './ui/dms.js';
 import { initInbox } from './ui/inbox.js';
+import { initEvents, setEvents, openEvents, joinEventChannel } from './ui/events.js';
 import { initPush, syncPushSubscription, disablePush } from './push.js';
 import { openServerModal } from './ui/servers.js';
 import { initVoiceSocket, resetVoice, joinVoice, leaveVoice } from './voice/voice.js';
@@ -84,12 +85,16 @@ function initUi() {
   initNowPlaying(); // «Слушает Spotify / …» с ПК (только приложение для Windows)
   initDms(sock.on);
   initInbox(sock.on);
+  initEvents(sock.on); // «События сервера»
   initPush();
   initReadTracking();
   initSocketEvents();
   // клик по push-уведомлению, когда Astra уже открыт: service worker просит открыть чат
   navigator.serviceWorker?.addEventListener('message', (e) => {
     if (e.data?.type === 'sozvon:open' && typeof e.data.channelId === 'string') openFromLink(e.data.channelId);
+    // напоминание о событии: «Подключиться» — в голосовой канал, иначе — карточка события
+    if (e.data?.type === 'sozvon:join' && typeof e.data.channelId === 'string') joinEventChannel(e.data.channelId);
+    if (e.data?.type === 'sozvon:event' && typeof e.data.eventId === 'string') openEventFromLink(e.data.eventId);
   });
 
   $('#btn-logout').addEventListener('click', logout);
@@ -121,6 +126,14 @@ function openFromLink(channelId) {
   const known = state.servers.some((s) => s.channels.some((c) => c.id === channelId)) || state.dms.some((d) => d.id === channelId);
   if (!known) return false;
   selectChannel(channelId);
+  return true;
+}
+
+/** Открыть событие сервера по ссылке (?event=… из push/Telegram) */
+function openEventFromLink(eventId) {
+  const ev = eventId && state.scheduledEvents[eventId];
+  if (!ev) return false;
+  openEvents(ev.serverId, ev.id);
   return true;
 }
 
@@ -209,6 +222,7 @@ async function onConnect() {
   state.notifications = res.notifications || [];
   state.pushKey = res.pushKey || null;
   state.pcListening = {};
+  setEvents(res.scheduledEvents);
   for (const [uid, np] of Object.entries(res.listening || {})) if (np && typeof np === 'object') state.pcListening[uid] = { ...np, at: Date.now() };
   state.voice = res.voice || {};
   state.music = {};
@@ -223,10 +237,13 @@ async function onConnect() {
     const last = restoreLast();
     const params = new URLSearchParams(location.search);
     const invite = params.get('invite');
-    const link = params.get('c');
-    if (link) history.replaceState(null, '', location.pathname);
+    // ?join=<голосовой канал> (кнопка «Подключиться» в напоминании из Telegram) — открываем канал, подключение — по клику
+    const link = params.get('c') || params.get('join');
+    const eventLink = params.get('event');
+    if (link || eventLink) history.replaceState(null, '', location.pathname);
     if (!invite) maybeShowInstallHint();
     if (!openFromLink(link)) selectServer(getServer(last) ? last : (last === null && state.lastDm ? null : state.servers[0]?.id || null), { auto: true });
+    if (eventLink) openEventFromLink(eventLink);
     if (invite) {
       history.replaceState(null, '', location.pathname);
       openServerModal('join');

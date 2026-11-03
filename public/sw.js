@@ -4,7 +4,8 @@
 //  - статика (/css, /js, /assets, манифест): stale-while-revalidate;
 //  - /api/, /socket.io/, /media/ и любые не-GET запросы SW не трогает вообще.
 // Push: личные сообщения и упоминания (сервер шлёт, только когда ни одно окно Astra не на виду);
-// клик по уведомлению открывает нужный чат в уже открытом окне или в новом.
+// клик по уведомлению открывает нужный чат в уже открытом окне или в новом. Напоминание о событии сервера —
+// с кнопкой «Подключиться» (если у события есть голосовой канал).
 // При изменении списка/логики — поднять VERSION: старые кэши удалятся при activate.
 
 const VERSION = 'v4-astra-2.2.2'; // 2.2.2: попап профиля не прыгает в угол при перерисовке списка участников
@@ -34,6 +35,7 @@ const SHELL = [
   '/js/download.js',
   '/js/ui/auth.js', '/js/ui/two-factor.js', '/js/qr.js', // 2FA
   '/js/ui/telegram-settings.js', // «Уведомления» → «Telegram»
+  '/css/events.css', '/js/ui/events.js', // «События сервера»
   '/js/ui/chat.js', '/js/ui/lightbox.js', '/js/ui/dms.js', '/js/ui/inbox.js', '/js/push.js',
   '/js/ui/members.js',
   '/js/ui/modals.js',
@@ -176,21 +178,28 @@ self.addEventListener('push', (event) => {
     // иконка сервера / аватар автора ЛС — чтобы было видно, откуда уведомление
     icon: typeof data.icon === 'string' && data.icon.startsWith('/') && !data.icon.startsWith('//') ? data.icon : '/assets/icons/icon-192.png',
     badge: '/assets/icons/icon-192.png',
-    data: { url: typeof data.url === 'string' && data.url.startsWith('/') ? data.url : '/', channelId: data.channelId || null },
+    data: {
+      url: typeof data.url === 'string' && data.url.startsWith('/') ? data.url : '/', channelId: data.channelId || null,
+      eventId: typeof data.eventId === 'string' ? data.eventId : null, joinChannelId: typeof data.joinChannelId === 'string' ? data.joinChannelId : null,
+    },
+    ...(data.type === 'event' && typeof data.joinChannelId === 'string' ? { actions: [{ action: 'join', title: 'Подключиться' }] } : {}),
   }));
 });
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const { url = '/', channelId = null } = event.notification.data || {};
+  const { url = '/', channelId = null, eventId = null, joinChannelId = null } = event.notification.data || {};
+  const join = event.action === 'join' && joinChannelId;
   event.waitUntil((async () => {
     const wins = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
     const win = wins.find((w) => new URL(w.url).origin === self.location.origin);
     if (win) {
       await win.focus().catch(() => {});
-      win.postMessage({ type: 'sozvon:open', channelId });
+      if (join) win.postMessage({ type: 'sozvon:join', channelId: joinChannelId });
+      else if (eventId) win.postMessage({ type: 'sozvon:event', eventId });
+      else win.postMessage({ type: 'sozvon:open', channelId });
       return;
     }
-    await self.clients.openWindow(url);
+    await self.clients.openWindow(join ? `/?join=${encodeURIComponent(joinChannelId)}` : url);
   })());
 });

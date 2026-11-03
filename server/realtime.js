@@ -27,6 +27,7 @@ import { createAdminOps } from './admin/ops.js';
 import { itemCover } from './music-library.js';
 import { cleanListening, createListeningStore, ListeningError } from './pc-listening.js';
 import { emit as emitEvent } from './events.js';
+import { createScheduleEvents } from './schedule-events.js';
 
 const serverRoom = (id) => `server:${id}`;
 const userRoom = (id) => `user:${id}`;
@@ -206,6 +207,8 @@ export function attachRealtime(io, { uploadsDir, dataDir = path.dirname(uploadsD
   /** Хоть одна вкладка/окно на виду — push не нужен, хватит уведомления внутри приложения */
   const hasVisibleClient = (userId) => userSocketsOf(userId).some((s) => s.data.view?.visible);
   const nameOf = (u) => (u?.displayName || u?.username || 'Кто-то');
+  // «События сервера» (server/schedule-events.js): планировщик напоминаний + sevent:* в сокете
+  const schedule = createScheduleEvents(io, { hasVisibleClient });
 
   /** Новое уведомление во «Входящие» + push на устройства, где Astra сейчас не открыт */
   function notifyUser(userId, { type, channelId, serverId = null, message }) {
@@ -254,6 +257,7 @@ export function attachRealtime(io, { uploadsDir, dataDir = path.dirname(uploadsD
   function canSeeNotification(n, userId) {
     if (n.type === 'dm') return isDmMember(findDm(n.channelId), userId);
     const server = findServer(n.serverId);
+    if (n.type === 'event') return !!server && isMember(server, userId); // канал события необязателен
     return !!server && isMember(server, userId) && !!findChannel(n.channelId) && canViewChannel(server, n.channelId, userId);
   }
 
@@ -454,6 +458,7 @@ export function attachRealtime(io, { uploadsDir, dataDir = path.dirname(uploadsD
     socket.data.view = { channelId: null, visible: false };
     if (addOnlineSocket(user.id, socket.id) && user.status !== 'invisible') emitPresence(user.id);
     watch.attach(socket, user);
+    schedule.attach(socket, user);
 
     // обёртка: ack обязателен, ошибки → {ok:false,error}
     const on = (event, handler) => socket.on(event, async (payload, ack) => {
@@ -489,6 +494,7 @@ export function attachRealtime(io, { uploadsDir, dataDir = path.dirname(uploadsD
         notifications: listNotifications(user.id).filter((n) => canSeeNotification(n, user.id)),
         pushKey: pushPublicKey(),
         listening: listeningFor(user.id),
+        scheduledEvents: schedule.listFor(user.id),
       };
     });
 

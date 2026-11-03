@@ -1,14 +1,15 @@
 // Настройки Telegram-бота у пользователя (db.json, поле user.tgNotify) и публичный адрес Astra для ссылок.
-//   tgNotify: { dm, mention, everyone, onlyAway, pauseUntil }
+//   tgNotify: { dm, mention, everyone, events, onlyAway, pauseUntil }
 //     dm / mention / everyone — какие события пересылать в Telegram (по умолчанию: ЛС и упоминания — да,
 //                               @everyone — нет, чтобы не заваливать чат);
+//     events    — напоминания о событиях сервера, на которые я иду / может быть (server/schedule-events.js), да;
 //     onlyAway  — «только когда я не в Astra» (нет открытой видимой вкладки/окна; как у push), по умолчанию да;
 //     pauseUntil — пауза до момента (мс), 0 — без паузы.
 // Статус «Не беспокоить» (dnd) выключает пересылку так же, как push.
 import { getPublicUrl } from './tunnel.js';
 
-export const NOTIFY_DEFAULTS = { dm: true, mention: true, everyone: false, onlyAway: true, pauseUntil: 0 };
-const BOOL_KEYS = ['dm', 'mention', 'everyone', 'onlyAway'];
+export const NOTIFY_DEFAULTS = { dm: true, mention: true, everyone: false, events: true, onlyAway: true, pauseUntil: 0 };
+const BOOL_KEYS = ['dm', 'mention', 'everyone', 'events', 'onlyAway'];
 const MAX_PAUSE_MS = 7 * 24 * 3600_000;
 
 export function notifySettings(user) {
