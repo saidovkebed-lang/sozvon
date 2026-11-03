@@ -192,6 +192,21 @@ function onKey(e) {
 }
 function onResize() { closeProfile(false); }
 
+// Список участников/голосовой канал перерисовываются (статусы, «Слушает Spotify», войс) — старый якорь
+// выкинут из DOM, его прямоугольник нулевой, и попап прыгал в левый верхний угол. Ищем такой же элемент заново.
+function liveAnchor() {
+  const a = popup?.anchor;
+  if (!a || a.isConnected) return a;
+  const id = a.dataset?.userId;
+  const cls = a.classList?.[0];
+  const fresh = id && cls ? document.querySelector(`.${CSS.escape(cls)}[data-user-id="${CSS.escape(id)}"]`) : null;
+  if (fresh) {
+    fresh.classList.add('is-profile-open');
+    popup.anchor = fresh;
+  }
+  return fresh;
+}
+
 function placePopup(el, anchor, at) {
   const pad = 12;
   const vw = document.documentElement.clientWidth;
@@ -199,6 +214,8 @@ function placePopup(el, anchor, at) {
   if (vw < 640) { el.classList.add('profile-popup--sheet'); return; }
   // offset*, а не getBoundingClientRect: во время анимации появления (scale 0.96) прямоугольник меньше настоящего
   const r = { width: el.offsetWidth, height: el.offsetHeight };
+  // якоря больше нет (и замены не нашлось) — попап остаётся на месте
+  if (!at && !anchor?.isConnected) return;
   const a = at ? { left: at.x, right: at.x, top: at.y, bottom: at.y } : anchor.getBoundingClientRect();
   // справа от якоря, а если не влезает (колонка участников справа) — слева
   let left = a.right + pad;
@@ -227,7 +244,7 @@ export function openProfile(userId, anchor, { serverId = null, at = null } = {})
   anchor?.classList?.add('is-profile-open');
   placePopup(wrap, anchor, at);
   // баннер/аватар догружаются и меняют высоту — переставить, чтобы попап не упирался в край экрана
-  wrap.addEventListener('load', () => { if (popup?.el === wrap) placePopup(wrap, popup.anchor, popup.at); }, true);
+  wrap.addEventListener('load', () => { if (popup?.el === wrap) placePopup(wrap, liveAnchor(), popup.at); }, true);
   wrap.focus({ preventScroll: true });
   setTimeout(() => {
     document.addEventListener('pointerdown', onOutside, true);
@@ -243,7 +260,7 @@ function refreshPopup() {
   if (!u) { closeProfile(false); return; }
   if (popup.el.querySelector('.role-picker')) return; // не сбивать выбор роли
   popup.el.replaceChildren(profileCard(u, { server, onAction: () => closeProfile(false) }));
-  placePopup(popup.el, popup.anchor, popup.at);
+  placePopup(popup.el, liveAnchor(), popup.at);
 }
 
 /* ============================================================

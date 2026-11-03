@@ -35,6 +35,28 @@ test.describe('audit: профиль у другого пользователя'
     await expect(pop).toBeHidden();
   });
 
+  test('попап профиля из списка участников не прыгает в левый угол, когда список перерисовывается (статусы, музыка)', async ({ makePage }) => {
+    const { pb, ua } = await twoUsersOneServer(makePage, 'Попап');
+    const aId = (await http('GET', '/api/me', { token: ua.token })).json.user.id;
+    await openTextChannel(pb);
+    const member = pb.locator(`#members .member[data-user-id="${aId}"]`);
+    await member.click();
+    const pop = pb.locator('.profile-layer');
+    await expect(pop).toBeVisible();
+    const pos = () => pop.evaluate((el) => ({ left: el.offsetLeft, top: el.offsetTop }));
+    const memberBox = await member.boundingBox();
+    const before = await pos();
+    expect(before.left, 'попап слева от колонки участников, вплотную').toBeGreaterThan(memberBox.x - 400);
+    // A меняет статус → у B список участников строится заново (старый элемент-якорь выкинут из DOM)
+    for (const status of ['dnd', 'idle', 'online']) {
+      expect((await http('PATCH', '/api/me', { token: ua.token, body: { status } })).status).toBe(200);
+      await expect(member.locator(`[data-status="${status}"]`)).toHaveCount(1);
+    }
+    await expect(pop).toBeVisible();
+    expect(await pos()).toEqual(before);
+    await expect(member).toHaveClass(/is-profile-open/);
+  });
+
   test('лимиты профиля: about 191, pronouns 41, displayName 33, кривой цвет, неизвестный статус → 400 по-русски', async ({ makePage }) => {
     const p = await makePage();
     const reg = await (await import('./fixtures/api.js')).registerApi();
