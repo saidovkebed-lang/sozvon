@@ -55,7 +55,7 @@ const SHELL = [
   '/js/ui/mod-actions.js',
   '/js/ui/profile.js',
   '/js/ui/cropper.js',
-  '/js/ui/stream.js',
+  '/js/ui/stream.js', '/js/ui/stream-health.js', '/js/voice/stream-stats.js', // качество трансляции
   '/js/ui/palette.js',
   '/js/voice/media.js',
   '/js/voice/native-capture.js',

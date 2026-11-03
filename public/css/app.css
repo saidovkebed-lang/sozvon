@@ -3426,6 +3426,49 @@ body.dl-page {
 @media (hover: none) { .tile__unwatch { opacity: 1; } }
 .tile--screen:not(.tile--video) .tile__expand { display: none; }
 
+/* Качество трансляции (ui/stream-health.js): стримеру — значок у «LIVE» и точка на кнопке «Демонстрация»,
+   зрителю — «к/с · разрешение» по наведению */
+.tile__q {
+  --qc: var(--text-faint);
+  position: absolute; top: var(--sp-2); left: calc(var(--sp-2) + 52px); z-index: 2;
+  display: inline-flex; align-items: center; gap: 5px;
+  height: 20px; padding: 0 7px;
+  border-radius: var(--r-pill);
+  background: rgba(8, 9, 12, 0.74); color: #fff;
+  font-size: 11px; font-weight: var(--fw-semibold); font-variant-numeric: tabular-nums; white-space: nowrap;
+  transition: background var(--dur-fast);
+}
+.tile__q:hover, .tile__q[aria-expanded="true"] { background: rgba(8, 9, 12, 0.9); }
+.tile__q-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--qc); box-shadow: 0 0 0 2px color-mix(in srgb, var(--qc) 30%, transparent); }
+.tile__q[data-level="good"], .ctrl__q[data-level="good"] { --qc: var(--ok); }
+.tile__q[data-level="mid"], .ctrl__q[data-level="mid"] { --qc: var(--warn); }
+.tile__q[data-level="bad"], .ctrl__q[data-level="bad"] { --qc: var(--danger); }
+.ctrl__q {
+  --qc: var(--text-faint);
+  position: absolute; top: 1px; right: 1px; z-index: 1;
+  width: 11px; height: 11px; border-radius: 50%;
+  background: var(--qc); box-shadow: 0 0 0 2px var(--bg-0);
+  pointer-events: none;
+}
+.ctrl__q[hidden] { display: none; }
+.tile__rx {
+  position: absolute; top: var(--sp-2); left: calc(var(--sp-2) + 52px); z-index: 2;
+  height: 20px; padding: 0 7px; line-height: 20px;
+  border-radius: var(--r-pill);
+  background: rgba(8, 9, 12, 0.74); color: #fff;
+  font-size: 11px; font-weight: var(--fw-semibold); font-variant-numeric: tabular-nums; white-space: nowrap;
+  opacity: 0; pointer-events: none;
+  transition: opacity var(--dur-fast);
+}
+.tile:hover > .tile__rx { opacity: 1; }
+.stage__grid.has-focus .tile:not(.tile--focused) > .tile__rx,
+.stage__grid.has-focus .tile:not(.tile--focused) > .tile__q { display: none; }
+.stream-popup .ping-popup__big { white-space: nowrap; }
+.stream-popup__advice {margin-top: var(--sp-3); padding: var(--sp-2) var(--sp-3); border-radius: var(--r-md); background: var(--bg-3); font-size: var(--fs-sm); line-height: 1.4; color: var(--text); }
+.stream-popup__advice.is-warn { background: color-mix(in srgb, var(--warn) 14%, transparent); }
+.stream-popup__foot { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); margin-top: var(--sp-3); }
+.stream-popup__foot .ping-popup__hint { margin: 0; }
+
 /* Медиа в чате: кнопка-превью фото, встроенные видео/аудио */
 .message__image-link { display: block; padding: 0; border: 0; background: none; cursor: zoom-in; border-radius: var(--r-md, 8px); max-width: min(100%, 420px); }
 .message__image-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
