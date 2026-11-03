@@ -8,6 +8,7 @@ import { moreButton } from './context-menu.js';
 import { audioEngine } from '../audio/engine.js';
 import { prefs } from '../prefs.js';
 import { joinVoice, leaveVoice, toggleMute, toggleDeafen, toggleScreen, toggleCamera } from '../voice/voice.js';
+import { streamHealthBadge, viewerStatsEl, syncHealth, initStreamHealth } from './stream-health.js';
 
 const tiles = new Map();   // key -> { el, stream, sig }
 let focusedKey = null;
@@ -123,6 +124,16 @@ function fillTile(entry, d) {
   if (vol && (!hasSound || vol.dataset.socketId !== m.socketId)) { vol.remove(); vol = null; }
   if (hasSound && !vol) el.append(streamVolumeEl(m));
   else if (vol) vol.paint();
+  // Качество трансляции (ui/stream-health.js): стримеру — значок на своей плитке, зрителю — к/с по наведению.
+  // Как и громкость, не пересоздаются при перерисовке (иначе панель теряла бы якорь, а опрос — плитку).
+  const wantQ = kind === 'screen' && self;
+  const q = el.querySelector(':scope > .tile__q');
+  if (q && !wantQ) q.remove();
+  else if (!q && wantQ) el.append(streamHealthBadge());
+  const wantRx = kind === 'screen' && !self && watching && !!stream;
+  let rx = el.querySelector(':scope > .tile__rx');
+  if (rx && (!wantRx || rx.dataset.socketId !== m.socketId)) { rx.halt?.(); rx.remove(); rx = null; }
+  if (!rx && wantRx) el.append(viewerStatsEl(el, m.socketId));
   if (m.isBot) el.append(h('span', { class: 'badge badge--bot' }, 'БОТ'));
   el.append(h('button', {
     type: 'button', class: 'icon-btn tile__expand',
@@ -187,6 +198,7 @@ function render() {
   const grid = $('#stage-grid');
   if (!ch || ch.type !== 'voice') {
     for (const [k, t] of tiles) { t.el.querySelector('video')?.remove(); t.el.remove(); tiles.delete(k); }
+    syncHealth();
     return;
   }
   const inThis = state.myVoice?.channelId === ch.id;
@@ -256,6 +268,7 @@ function render() {
       : (n ? `Сейчас в канале ${n} ${plural(n)}` : 'В канале пока никого нет');
   }
   view.classList.toggle('is-connected', inThis);
+  syncHealth();
 }
 
 function updateSpeaking() {
@@ -268,6 +281,7 @@ export function initStage() {
   subscribe(['nav', 'voice', 'me', 'servers', 'profile'], render);
   subscribe('speaking', updateSpeaking);
   rtc.onChange(render);
+  initStreamHealth();
   prefs.subscribe('stream.selfPreview', () => render());
   $('#btn-voice-join').addEventListener('click', () => {
     const ch = getChannel();
