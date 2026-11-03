@@ -34,7 +34,7 @@ const SHELL = [
   '/js/download.js',
   '/js/ui/auth.js', '/js/ui/two-factor.js', '/js/qr.js', // 2FA
   '/js/ui/telegram-settings.js', // «Уведомления» → «Telegram»
-  '/js/ui/chat.js', '/js/ui/lightbox.js', '/js/ui/dms.js', '/js/ui/inbox.js', '/js/push.js',
+  '/js/ui/chat.js', '/js/ui/reactions.js', '/js/ui/lightbox.js', '/js/ui/dms.js', '/js/ui/inbox.js', '/js/push.js',
   '/js/ui/members.js',
   '/js/ui/modals.js',
   '/js/ui/music-player.js',

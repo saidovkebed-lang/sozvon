@@ -687,21 +687,93 @@ code { font-family: var(--font-mono); }
   padding-left: var(--sp-3);
 }
 
-.message__delete {
+.message__actions {
   position: absolute;
   top: 4px; right: var(--sp-4);
-  width: 30px; height: 30px;
+  display: flex; gap: 2px;
+  padding: 2px;
+  border-radius: var(--r-md);
   background: var(--bg-elevated);
   border: 1px solid var(--border-strong);
   box-shadow: var(--shadow-sm);
   opacity: 0;
   transform: translateY(2px);
-  transition: opacity var(--dur-fast), transform var(--dur-fast) var(--ease), background var(--dur-fast), color var(--dur-fast);
+  pointer-events: none;
+  transition: opacity var(--dur-fast), transform var(--dur-fast) var(--ease);
 }
-.message__delete .icon { width: 16px; height: 16px; }
-.message:hover .message__delete,
-.message:focus-within .message__delete { opacity: 1; transform: none; }
-.message__delete:hover:not(:disabled) { color: var(--danger); background: var(--bg-elevated); border-color: rgba(242, 85, 95, 0.4); }
+.message:hover .message__actions,
+.message:focus-within .message__actions,
+.message.is-reacting .message__actions { opacity: 1; transform: none; pointer-events: auto; }
+.message__action { width: 28px; height: 28px; transition: background var(--dur-fast), color var(--dur-fast); }
+.message__action .icon { width: 16px; height: 16px; }
+.message__react:hover:not(:disabled) { color: var(--accent-text); }
+.message__delete:hover:not(:disabled) { color: var(--danger); background: var(--danger-soft); }
+
+/* Реакции (ui/reactions.js): «пилюли» под сообщением */
+.reactions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.reaction {
+  display: inline-flex; align-items: center; gap: 5px;
+  height: 26px; min-width: 44px;
+  padding: 0 8px;
+  border-radius: var(--r-pill);
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: var(--fs-sm); font-weight: var(--fw-semibold);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  transition: background var(--dur-fast), border-color var(--dur-fast), transform var(--dur-fast) var(--ease-spring);
+}
+.reaction:hover { background: var(--bg-4); border-color: var(--border-strong); }
+.reaction:active { transform: scale(0.94); }
+.reaction__emoji { font-size: 16px; line-height: 1; }
+.reaction.is-mine { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-text); }
+.reaction.is-mine:hover { background: var(--accent-soft-strong); }
+.reaction.is-locked { cursor: default; }
+.reaction.is-locked:active { transform: none; }
+.reaction--add { min-width: 0; padding: 0 7px; color: var(--text-faint); opacity: 0; transition: opacity var(--dur-fast), background var(--dur-fast); }
+.reaction--add .icon { width: 16px; height: 16px; }
+.message:hover .reaction--add, .reaction--add:focus-visible, .message.is-reacting .reaction--add { opacity: 1; }
+.reaction--add:hover { color: var(--text); }
+@media (hover: none) { .reaction--add { opacity: 1; } }
+
+.reaction-tip {
+  position: fixed;
+  z-index: calc(var(--z-toast) + 20);
+  max-width: min(320px, calc(100vw - 16px));
+  padding: 6px 10px;
+  border-radius: var(--r-sm);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-md);
+  color: var(--text);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-tight);
+  pointer-events: none;
+  overflow-wrap: anywhere;
+}
+
+.reaction-picker {
+  position: fixed;
+  z-index: calc(var(--z-toast) + 10);
+  width: 300px;
+  max-width: calc(100vw - 16px);
+  max-height: min(380px, calc(100vh - 16px));
+  overflow-y: auto;
+  padding: 8px;
+  border-radius: var(--r-lg);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-lg);
+  animation: menu-in var(--dur) var(--ease-out) both;
+}
+.reaction-picker:focus { outline: none; }
+.reaction-picker__title { padding: 4px 4px 2px; font-size: var(--fs-xs); font-weight: var(--fw-semibold); text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-faint); }
+.reaction-picker__grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 2px; margin-bottom: 6px; }
+.reaction-picker__input { width: 100%; height: 34px; font-size: var(--fs-md); }
+.reaction-quick { display: flex; justify-content: space-between; gap: 2px; padding: 2px 2px 6px; margin-bottom: 4px; border-bottom: 1px solid var(--border); }
+.reaction-quick__btn { width: 36px; height: 36px; font-size: 20px; }
+.reaction-quick__btn.is-mine { background: var(--accent-soft); }
 
 /* Вложения */
 .message__attachments {
@@ -1703,7 +1775,9 @@ button.stage__join, .stage__join.btn { flex: none; margin: auto; }
   .message { padding-left: var(--sp-3); padding-right: var(--sp-3); column-gap: var(--sp-3); }
   .message > .avatar { --size: 36px; font-size: 15px; }
   .message { grid-template-columns: 36px minmax(0, 1fr); }
-  .message__delete { right: var(--sp-2); width: 28px; height: 28px; top: 2px; }
+  .message__actions { right: var(--sp-2); top: 2px; }
+  .reaction { height: 30px; }
+  .reaction-picker { width: calc(100vw - 16px); }
   .message { padding-right: 44px; }
   .composer { margin: 0 var(--sp-2) var(--sp-2); }
   .chat__typing { padding: 0 var(--sp-3); }

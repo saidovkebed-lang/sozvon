@@ -6,6 +6,7 @@ import {
   migrateServer, computeChannel, computeBase, has, PERMS,
 } from './permissions.js';
 import { computeBadges, publicServerTheme, cleanChoice, AVATAR_FRAMES, BANNER_PRESETS } from './cosmetics.js';
+import { publicReactions } from './reactions.js';
 
 export const BOT_USERNAME = 'DJ Бот';
 export const MAX_MESSAGES_PER_CHANNEL = 2000;
@@ -177,6 +178,8 @@ export function publicMessage(m) {
   if (m.system) out.system = true;
   if (m.mentionEveryone) out.mentionEveryone = true;
   if (m.recap) out.recap = { serverId: m.recap.serverId, period: m.recap.period }; // «Astra Итоги»
+  const reactions = publicReactions(m, (id) => !!findUser(id)); // server/reactions.js
+  if (reactions.length) out.reactions = reactions;
   return out;
 }
 

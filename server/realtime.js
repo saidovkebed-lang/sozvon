@@ -27,6 +27,8 @@ import { createAdminOps } from './admin/ops.js';
 import { itemCover } from './music-library.js';
 import { cleanListening, createListeningStore, ListeningError } from './pc-listening.js';
 import { emit as emitEvent } from './events.js';
+import { cleanEmoji, setReaction, publicReactions } from './reactions.js';
+import { Limiter } from './rate-limit.js';
 
 const serverRoom = (id) => `server:${id}`;
 const userRoom = (id) => `user:${id}`;
@@ -38,6 +40,7 @@ const NO_PERM = 'Недостаточно прав';
 const HIERARCHY = 'Нельзя действовать на участника с ролью не ниже вашей';
 const MAX_ROLES = 50;
 const MOVE_GRANT_MS = 30_000;
+const reactLimit = new Limiter({ limit: 30, windowMs: 10_000 }); // реакции: на пользователя (все вкладки вместе)
 
 class WsError extends Error {}
 const fail = (msg) => { throw new WsError(msg); };
@@ -892,6 +895,40 @@ export function attachRealtime(io, { uploadsDir, dataDir = path.dirname(uploadsD
       }
       fail('Сообщение не найдено');
     });
+
+    // ---------- реакции (server/reactions.js) ----------
+    // Поставить — нужно видеть канал/ЛС и иметь право писать; снять свою — достаточно видеть.
+    // Всем, кто видит канал (в ЛС — обоим), уходит полный список реакций сообщения: порядок событий не важен.
+    function react({ channelId, messageId, emoji }, on) {
+      const e = cleanEmoji(emoji);
+      if (!e) fail('Это не эмодзи');
+      const dm = findDm(channelId);
+      let channel = null;
+      if (dm) {
+        requireDm(channelId, user);
+        if (on && !sharesServer(user.id, dmOther(dm, user.id))) fail('Писать можно только тем, с кем у вас есть общий сервер');
+      } else {
+        const r = requireChannel(channelId, user, 'text');
+        if (on && !has(r.perms, PERMS.SEND_MESSAGES)) fail('Нет права писать в этот канал');
+        channel = r.channel;
+      }
+      const msg = typeof messageId === 'string' ? (db.data.messages[channelId] || []).find((m) => m.id === messageId) : null;
+      if (!msg) fail('Сообщение не найдено');
+      const wait = reactLimit.blockedFor(user.id);
+      if (wait) fail('Слишком много реакций подряд — подождите пару секунд');
+      reactLimit.hit(user.id);
+      const res = setReaction(msg, e, user.id, on);
+      if (res.error) fail(res.error);
+      const reactions = publicReactions(msg, (id) => !!findUser(id));
+      if (!res.changed) return { reactions };
+      save();
+      const payload = { channelId, messageId, reactions };
+      if (dm) for (const uid of dm.userIds) io.to(userRoom(uid)).emit('message:reactions', payload);
+      else emitToViewers(channel.id, 'message:reactions', payload);
+      return { reactions };
+    }
+    on('reaction:add', (p) => react(p, true));
+    on('reaction:remove', (p) => react(p, false));
 
     socket.on('typing', (payload) => {
       try {
